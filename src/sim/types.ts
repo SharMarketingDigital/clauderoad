@@ -19,6 +19,11 @@ export interface Entity {
   weaponDamage: number;
   swingTicks: number; // ticks between melee swings (0 = cannot auto-attack)
   nextSwingAt: number; // earliest tick the next swing may land
+  // resources & abilities (player). Enemies carry zeros / empty.
+  mp: number;
+  maxMp: number;
+  gcdUntil: number; // tick until which the global cooldown blocks any ability
+  abilityReadyAt: Record<number, number>; // action-bar slot -> earliest usable tick
   // enemy wander state
   targetX: number;
   targetZ: number;

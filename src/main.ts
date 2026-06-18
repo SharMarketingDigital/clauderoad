@@ -50,8 +50,8 @@ function frame(): void {
     acc -= DT;
   }
 
-  drawCombatFeedback();
   renderer.render(sim);
+  drawCombatFeedback(); // after render: project with this frame's updated camera
   hud.update(sim);
   requestAnimationFrame(frame);
 }

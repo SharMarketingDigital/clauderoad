@@ -1,15 +1,20 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
-import type { IWorld } from '../world_api';
+import type { IWorld, AbilityView } from '../world_api';
 
 export class Hud {
   private root: HTMLDivElement;
   private hpFill: HTMLDivElement;
   private hpText: HTMLSpanElement;
+  private mpFill: HTMLDivElement;
+  private mpText: HTMLSpanElement;
   // target frame (shown only while an enemy is selected)
   private targetFrame: HTMLDivElement;
   private targetName: HTMLSpanElement;
   private targetHpFill: HTMLDivElement;
   private targetHpText: HTMLSpanElement;
+  // action bar: slot number -> its DOM refs (built lazily from world.abilities())
+  private actionBar: HTMLDivElement;
+  private slots = new Map<number, { root: HTMLDivElement; cd: HTMLDivElement }>();
 
   constructor() {
     this.root = document.createElement('div');
@@ -20,6 +25,7 @@ export class Hud {
         <div class="bars">
           <span class="name">Hero</span>
           <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
+          <div class="mp"><div class="mp-fill"></div><span class="mp-text"></span></div>
         </div>
       </div>
       <div class="unit-frame target-frame" hidden>
@@ -29,15 +35,19 @@ export class Hud {
           <div class="hp"><div class="hp-fill target-hp-fill"></div><span class="hp-text target-hp-text"></span></div>
         </div>
       </div>
-      <div class="hint">WASD mover &middot; Tab/clique seleciona alvo &middot; arrastar gira a c&acirc;mera &middot; scroll d&aacute; zoom</div>
+      <div class="action-bar"></div>
+      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; arrastar gira &middot; scroll zoom</div>
     `;
     document.body.appendChild(this.root);
     this.hpFill = this.root.querySelector('.hp-fill') as HTMLDivElement;
     this.hpText = this.root.querySelector('.hp-text') as HTMLSpanElement;
+    this.mpFill = this.root.querySelector('.mp-fill') as HTMLDivElement;
+    this.mpText = this.root.querySelector('.mp-text') as HTMLSpanElement;
     this.targetFrame = this.root.querySelector('.target-frame') as HTMLDivElement;
     this.targetName = this.root.querySelector('.target-name') as HTMLSpanElement;
     this.targetHpFill = this.root.querySelector('.target-hp-fill') as HTMLDivElement;
     this.targetHpText = this.root.querySelector('.target-hp-text') as HTMLSpanElement;
+    this.actionBar = this.root.querySelector('.action-bar') as HTMLDivElement;
   }
 
   update(world: IWorld): void {
@@ -46,9 +56,13 @@ export class Hud {
     const ents = world.entities();
     const p = ents.find((e) => e.id === id);
     if (!p) return;
-    const pct = Math.max(0, Math.min(1, p.hp / p.maxHp));
-    this.hpFill.style.width = `${pct * 100}%`;
+
+    const hpPct = Math.max(0, Math.min(1, p.hp / p.maxHp));
+    this.hpFill.style.width = `${hpPct * 100}%`;
     this.hpText.textContent = `${Math.round(p.hp)} / ${p.maxHp}`;
+    const mpPct = p.maxMp > 0 ? Math.max(0, Math.min(1, p.mp / p.maxMp)) : 0;
+    this.mpFill.style.width = `${mpPct * 100}%`;
+    this.mpText.textContent = `${Math.round(p.mp)} / ${p.maxMp}`;
 
     const tid = world.localTargetId();
     const t = tid != null ? ents.find((e) => e.id === tid) : undefined;
@@ -61,5 +75,48 @@ export class Hud {
     } else {
       this.targetFrame.hidden = true;
     }
+
+    this.updateActionBar(world.abilities());
   }
+
+  private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {
+    for (const a of abilities) {
+      const slot = this.slots.get(a.slot) ?? this.createSlot(a);
+      // Sweep the dark overlay clockwise as the cooldown runs down.
+      const frac =
+        a.cooldownTotal > 0 ? Math.max(0, Math.min(1, a.cooldownRemaining / a.cooldownTotal)) : 0;
+      if (frac > 0) {
+        slot.cd.style.display = 'block';
+        slot.cd.style.background = `conic-gradient(rgba(8,10,14,0.72) ${frac * 360}deg, transparent 0deg)`;
+      } else {
+        slot.cd.style.display = 'none';
+      }
+      slot.root.classList.toggle('ready', a.ready);
+    }
+  }
+
+  private createSlot(a: AbilityView): { root: HTMLDivElement; cd: HTMLDivElement } {
+    const el = document.createElement('div');
+    el.className = 'slot';
+    el.title = a.name;
+    // Build via textContent (not innerHTML) so ability data — which may later
+    // come from server snapshots — can never inject markup.
+    const key = makeSpan('slot-key', String(a.slot));
+    const icon = makeSpan('slot-icon', a.icon);
+    const cost = makeSpan('slot-cost', String(a.mpCost));
+    const cd = document.createElement('div');
+    cd.className = 'slot-cd';
+    el.append(key, icon, cost, cd);
+    this.actionBar.appendChild(el);
+    const refs = { root: el, cd };
+    this.slots.set(a.slot, refs);
+    return refs;
+  }
+}
+
+function makeSpan(className: string, text: string): HTMLSpanElement {
+  const s = document.createElement('span');
+  s.className = className;
+  s.textContent = text;
+  return s;
 }

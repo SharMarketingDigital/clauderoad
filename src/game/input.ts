@@ -25,6 +25,11 @@ export class Input {
         if (!e.repeat) this.pending.push({ t: 'cycle-target' });
         return;
       }
+      // Action-bar slots 1..9 (top-row digits). The sim no-ops empty slots.
+      if (e.key.length === 1 && e.key >= '1' && e.key <= '9') {
+        if (!e.repeat) this.pending.push({ t: 'use-ability', slot: Number(e.key) });
+        return;
+      }
       this.keys.add(e.key.toLowerCase());
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));

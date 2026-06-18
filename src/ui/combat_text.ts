@@ -21,7 +21,12 @@ export class CombatText {
     el.textContent = String(Math.round(amount));
     el.style.left = `${screenX}px`;
     el.style.top = `${screenY}px`;
-    el.addEventListener('animationend', () => el.remove());
+    const remove = (): void => el.remove();
+    el.addEventListener('animationend', remove);
+    // Safety net: if CSS animations are suppressed (e.g. an external stylesheet
+    // forces `animation: none`), animationend never fires — drop it anyway so
+    // nodes can't pile up. (Calling remove twice is harmless.)
+    window.setTimeout(remove, 1500); // comfortably past the 0.85s animation
     this.root.appendChild(el);
   }
 }

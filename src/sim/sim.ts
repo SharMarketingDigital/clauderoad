@@ -11,9 +11,10 @@
 
 import { Rng } from './rng';
 import type { Entity } from './types';
-import type { IWorld, EntityView, Command, SimEvent } from '../world_api';
+import type { IWorld, EntityView, Command, SimEvent, AbilityView } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
+import { ABILITIES, type AbilityDef } from './content/abilities';
 
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
@@ -25,6 +26,7 @@ const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radiu
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
 export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
+export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 
 export class Sim implements IWorld {
   tick = 0;
@@ -63,6 +65,7 @@ export class Sim implements IWorld {
       targetId: null,
       str: cls.baseStr, weaponDamage: cls.weaponDamage,
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
+      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -78,6 +81,7 @@ export class Sim implements IWorld {
       hp: ENEMY_TEMPLATE.hp, maxHp: ENEMY_TEMPLATE.hp,
       targetId: null,
       str: 0, weaponDamage: 0, swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -93,7 +97,27 @@ export class Sim implements IWorld {
   }
 
   recentEvents(): ReadonlyArray<SimEvent> {
-    return this.events;
+    // Hand out a snapshot, never the live array — mirrors entities() and keeps
+    // render/ui structurally unable to mutate sim state. (Bounded, so cheap.)
+    return this.events.slice();
+  }
+
+  abilities(): ReadonlyArray<AbilityView> {
+    const p = this.ents.get(this.localId);
+    return ABILITIES.map((def) => {
+      const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
+      const gcdLeft = p ? Math.max(0, p.gcdUntil - this.tick) : 0;
+      const ready = !!p && cdLeft === 0 && gcdLeft === 0 && p.mp >= def.mpCost;
+      return {
+        slot: def.slot,
+        name: def.name,
+        icon: def.icon,
+        mpCost: def.mpCost,
+        ready,
+        cooldownRemaining: cdLeft * DT, // ticks -> seconds
+        cooldownTotal: def.cooldownSecs,
+      };
+    });
   }
 
   sendCommand(cmd: Command): void {
@@ -109,6 +133,7 @@ export class Sim implements IWorld {
       out.push({
         id: e.id, kind: e.kind, name: e.name,
         x: e.x, z: e.z, facing: e.facing, hp: e.hp, maxHp: e.maxHp,
+        mp: e.mp, maxMp: e.maxMp,
       });
     }
     return out;
@@ -208,9 +233,54 @@ export class Sim implements IWorld {
       case 'set-target':
         this.setTarget(p, cmd.id);
         break;
+      case 'use-ability':
+        this.useAbility(p, cmd.slot);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
+    }
+  }
+
+  // Cast an action-bar ability on the current target. Gated by the global
+  // cooldown, the ability's own cooldown, MP, and melee range — all checked
+  // deterministically here. A successful cast deals the (bigger) hit and emits
+  // the same damage event the auto-attack does, so the number/flash show too.
+  private useAbility(p: Entity, slot: number): void {
+    const def = ABILITIES.find((a) => a.slot === slot);
+    if (!def) return;
+    if (this.tick < p.gcdUntil) return; // global cooldown
+    if (this.tick < (p.abilityReadyAt[slot] ?? 0)) return; // own cooldown
+    if (p.mp < def.mpCost) return; // not enough MP
+    if (p.targetId == null) return;
+    const t = this.ents.get(p.targetId);
+    if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // needs a living enemy target
+    // Actions are drained before movement, so this range/facing gate sees
+    // start-of-tick positions (auto-attack checks post-move). One-tick edge on
+    // the exact range boundary; deterministic either way.
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > MELEE_RANGE) return; // melee ability: target must be in reach
+    if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
+    // Commit: spend MP, start the global + own cooldowns, deal the bigger hit.
+    p.mp -= def.mpCost;
+    p.gcdUntil = this.tick + GCD_TICKS;
+    p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
+    const dmg = abilityDamage(def, p.str, p.weaponDamage);
+    t.hp -= dmg;
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'damage',
+      targetId: t.id,
+      amount: dmg,
+      x: t.x,
+      z: t.z,
+    });
+    if (t.hp <= 0) {
+      t.hp = 0;
+      this.killEnemy(t);
     }
   }
 
@@ -298,6 +368,9 @@ export class Sim implements IWorld {
       mix(id); mix(e.x); mix(e.z); mix(e.facing); mix(e.hp);
       mix(e.targetId == null ? 0 : e.targetId);
       mix(e.nextSwingAt);
+      mix(e.mp); mix(e.gcdUntil);
+      // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
+      for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
@@ -315,6 +388,12 @@ export class Sim implements IWorld {
 export const STR_TO_DAMAGE = 0.5;
 export function meleeDamage(str: number, weaponDamage: number): number {
   return weaponDamage + Math.floor(str * STR_TO_DAMAGE);
+}
+
+// An ability's hit: the base melee swing scaled up, so it always out-damages
+// the auto-attack. Pure & deterministic (no RNG); tune the multiplier later.
+export function abilityDamage(def: AbilityDef, str: number, weaponDamage: number): number {
+  return Math.round(meleeDamage(str, weaponDamage) * def.damageMultiplier);
 }
 
 // True when the offset (dx,dz) points into the forward half-plane for `facing`

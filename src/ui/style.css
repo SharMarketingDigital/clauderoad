@@ -79,6 +79,83 @@ html, body {
   text-shadow: 0 1px 2px #000;
 }
 
+/* MP bar — same shape as HP, blue. */
+.mp {
+  position: relative;
+  height: 11px;
+  margin-top: 3px;
+  background: #0a1a2e;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mp-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(180deg, #5ab0ff, #1f6fd0);
+  transition: width 0.15s ease-out;
+}
+.mp-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* Action bar — fixed row of ability slots, centered above the hint. */
+.action-bar {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+.slot {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  color: var(--ink);
+  opacity: 0.5; /* dim until castable */
+  transition: opacity 0.1s ease-out;
+}
+.slot.ready {
+  opacity: 1;
+}
+.slot-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+.slot-key {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.slot-cost {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 10px;
+  color: #9fd0ff;
+}
+/* The sweeping cooldown overlay (a conic wedge that shrinks to nothing). */
+.slot-cd {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  pointer-events: none;
+  display: none;
+}
+
 .hint {
   position: absolute;
   bottom: 16px;

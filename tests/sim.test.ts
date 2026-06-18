@@ -2,13 +2,16 @@ import { describe, it, expect } from 'vitest';
 import {
   Sim,
   meleeDamage,
+  abilityDamage,
   STR_TO_DAMAGE,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
+  GCD_TICKS,
   inFrontOf,
 } from '../src/sim/sim';
 import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
+import { ABILITIES } from '../src/sim/content/abilities';
 import type { Command } from '../src/world_api';
 
 // Run a FIXED, scripted command sequence against a fresh Sim and return the
@@ -267,7 +270,7 @@ describe('combat events (damage feedback)', () => {
     expect(ev.z).toBe(target.z);
   });
 
-  it('damage events are pruned after the retention window', () => {
+  it('a damage event survives exactly until its retention window expires', () => {
     const sim = new Sim(7);
     sim.sendCommand({ t: 'cycle-target' });
     sim.step();
@@ -275,15 +278,180 @@ describe('combat events (damage feedback)', () => {
 
     let guard = 0;
     while (sim.recentEvents().length === 0 && guard++ < 2000) chaseTarget(sim, tid);
-    expect(sim.recentEvents().length).toBeGreaterThan(0);
+    expect(guard).toBeLessThan(2000); // reached melee and landed a hit
     const evTick = sim.recentEvents()[0].tick;
 
-    // stop fighting (clear target so no new events) and let the window elapse
+    // stop fighting so no further events are produced
     sim.sendCommand({ t: 'set-target', id: null });
-    while (sim.tick <= evTick + EVENT_TTL_TICKS) {
-      sim.sendCommand({ t: 'stop' });
+    sim.sendCommand({ t: 'stop' });
+
+    // Pin BOTH sides of the boundary: kept through evTick+TTL-1, dropped at +TTL.
+    const hasEvent = (): boolean => sim.recentEvents().some((e) => e.tick === evTick);
+    while (sim.tick < evTick + EVENT_TTL_TICKS - 1) sim.step();
+    expect(hasEvent()).toBe(true); // still retained one tick before the cutoff
+    sim.step(); // reaches evTick + EVENT_TTL_TICKS
+    expect(hasEvent()).toBe(false); // pruned exactly at the window edge
+  });
+});
+
+// Walk `sim`'s player into melee range of `tid` (within `range`), or give up
+// after the guard. Returns the tick count used.
+function chaseIntoRange(sim: Sim, tid: number, range: number): number {
+  const dist = (): number => {
+    const t = sim.entities().find((e) => e.id === tid);
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    return t ? Math.hypot(t.x - p.x, t.z - p.z) : Infinity;
+  };
+  let guard = 0;
+  while (dist() > range && guard++ < 2000) chaseTarget(sim, tid);
+  return guard;
+}
+
+describe('abilities (Golpe Forte, slot 1)', () => {
+  const STRONG = ABILITIES.find((a) => a.slot === 1)!;
+  const cls = CLASSES[0];
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('hits harder than an auto-attack', () => {
+    expect(abilityDamage(STRONG, cls.baseStr, cls.weaponDamage)).toBeGreaterThan(
+      meleeDamage(cls.baseStr, cls.weaponDamage),
+    );
+  });
+
+  it('spends MP, lands the bigger hit, and puts the slot on cooldown', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId()!;
+    expect(chaseIntoRange(sim, tid, 2.0)).toBeLessThan(2000);
+
+    const mp0 = player(sim).mp;
+    expect(sim.abilities()[0].ready).toBe(true); // castable before use
+
+    sim.sendCommand({ t: 'use-ability', slot: 1 });
+    sim.step();
+
+    // MP dropped by exactly the cost (auto-attack never touches MP)
+    expect(player(sim).mp).toBe(mp0 - STRONG.mpCost);
+    // the ability hit landed: a damage event for its (bigger) amount was emitted.
+    // Checking the event value — not the HP delta — is robust to overkill and to
+    // a same-tick auto-attack (auto only ever deals meleeDamage, never this).
+    const hit = abilityDamage(STRONG, cls.baseStr, cls.weaponDamage);
+    expect(hit).toBeGreaterThan(meleeDamage(cls.baseStr, cls.weaponDamage));
+    expect(sim.recentEvents().some((e) => e.amount === hit)).toBe(true);
+    // slot is now on cooldown
+    expect(sim.abilities()[0].ready).toBe(false);
+    expect(sim.abilities()[0].cooldownRemaining).toBeGreaterThan(0);
+  });
+
+  it('re-use is blocked during the cooldown (spam prevention), then frees up when it elapses', () => {
+    // NOTE: with a single ability whose own cooldown (6s) exceeds the 1.5s GCD,
+    // re-use is gated by BOTH at once and the own cooldown dominates — so this
+    // test cannot isolate the GCD from the own cooldown. The GCD's distinct
+    // (cross-ability) role needs a second action-bar slot to test directly;
+    // for now we verify the user-visible effect: you can't spam the button.
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId()!;
+    expect(chaseIntoRange(sim, tid, 2.0)).toBeLessThan(2000);
+
+    const mp0 = player(sim).mp;
+    const before = sim.tick;
+    sim.sendCommand({ t: 'use-ability', slot: 1 });
+    sim.step();
+    const useTick = before + 1;
+    expect(player(sim).mp).toBe(mp0 - STRONG.mpCost);
+
+    // immediate re-press is rejected (within the 1.5s GCD window): no extra MP
+    sim.sendCommand({ t: 'use-ability', slot: 1 });
+    sim.step();
+    expect(player(sim).mp).toBe(mp0 - STRONG.mpCost);
+    expect(GCD_TICKS).toBeGreaterThan(0); // sanity: a global cooldown is configured
+
+    // still on its own (longer) cooldown even after the 1.5s GCD would elapse
+    while (sim.tick < useTick + GCD_TICKS) sim.step();
+    expect(sim.abilities()[0].ready).toBe(false);
+
+    // ...and becomes ready again exactly when the own cooldown fully elapses
+    const cdTicks = Math.round(STRONG.cooldownSecs * 20);
+    while (sim.tick < useTick + cdTicks) sim.step();
+    expect(sim.abilities()[0].ready).toBe(true);
+  });
+
+  it('a cast command stream is deterministic (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      sim.sendCommand({ t: 'cycle-target' });
       sim.step();
+      const tid = sim.localTargetId();
+      // press the ability every tick (the sim no-ops it when not castable) while
+      // chasing the target, then idle — exercises useAbility under determinism.
+      for (let i = 0; i < 400; i++) {
+        sim.sendCommand({ t: 'use-ability', slot: 1 });
+        chaseTarget(sim, tid);
+      }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+
+  it('pressing the ability with no target spends nothing and emits no hit', () => {
+    const sim = new Sim(7);
+    const mp0 = player(sim).mp;
+    expect(sim.localTargetId()).toBeNull();
+
+    sim.sendCommand({ t: 'use-ability', slot: 1 });
+    sim.step();
+
+    expect(player(sim).mp).toBe(mp0); // no MP spent
+    expect(sim.recentEvents().length).toBe(0); // no damage dealt
+    expect(sim.abilities()[0].ready).toBe(true); // not on cooldown
+  });
+
+  it('pressing the ability out of melee range spends nothing', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId()!;
+    const p = player(sim);
+    const t = sim.entities().find((e) => e.id === tid)!;
+    expect(Math.hypot(t.x - p.x, t.z - p.z)).toBeGreaterThan(2.5); // target is far (> MELEE_RANGE)
+
+    const mp0 = p.mp;
+    sim.sendCommand({ t: 'use-ability', slot: 1 });
+    sim.step();
+    expect(player(sim).mp).toBe(mp0); // blocked: out of range, no MP spent
+  });
+});
+
+// Guard the load-bearing sim invariants that tsc alone won't catch: no
+// non-deterministic clocks/RNG and no presentation-layer imports leaking into
+// the deterministic core. Scans the source (comments stripped to avoid the
+// invariant docs themselves tripping it).
+describe('sim invariants (static guard)', () => {
+  // Vite/Vitest inlines these raw sources at transform time — no node:fs needed.
+  const sources = import.meta.glob('../src/sim/**/*.ts', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>;
+
+  const stripComments = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+  it('src/sim has no Math.random/Date.now/performance.now and no render/ui/game/net/three imports', () => {
+    const files = Object.keys(sources);
+    expect(files.length).toBeGreaterThan(0);
+    const forbidden = [/\bMath\.random\b/, /\bDate\.now\b/, /\bperformance\.now\b/];
+    const forbiddenImport = /from\s+['"](three|\.\.\/(?:render|ui|game|net))/;
+    for (const f of files) {
+      const code = stripComments(sources[f]);
+      for (const pat of forbidden) {
+        expect(pat.test(code), `${f} must not use ${pat.source}`).toBe(false);
+      }
+      expect(forbiddenImport.test(code), `${f} must not import render/ui/game/net/three`).toBe(false);
     }
-    expect(sim.recentEvents().length).toBe(0);
   });
 });

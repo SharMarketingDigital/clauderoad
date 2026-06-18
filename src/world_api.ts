@@ -18,6 +18,8 @@ export interface EntityView {
   readonly facing: number; // radians
   readonly hp: number;
   readonly maxHp: number;
+  readonly mp: number; // ability resource (0 for entities that don't cast)
+  readonly maxMp: number;
 }
 
 // Player intent / commands. The client streams these into the world.
@@ -29,7 +31,20 @@ export type Command =
   | { t: 'move'; dx: number; dz: number } // desired direction in world space
   | { t: 'stop' }
   | { t: 'cycle-target' } // Tab: select the nearest enemy in front, then cycle
-  | { t: 'set-target'; id: number | null }; // click a specific entity (null clears)
+  | { t: 'set-target'; id: number | null } // click a specific entity (null clears)
+  | { t: 'use-ability'; slot: number }; // press an action-bar slot (1-based)
+
+// One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
+// bar just draws icon + the sweeping cooldown and dims when not castable.
+export interface AbilityView {
+  readonly slot: number;
+  readonly name: string;
+  readonly icon: string;
+  readonly mpCost: number;
+  readonly ready: boolean; // off cooldown, off the global cooldown, and enough MP
+  readonly cooldownRemaining: number; // seconds left on the ability's own cooldown
+  readonly cooldownTotal: number; // seconds, for drawing the sweep fraction
+}
 
 // Transient things that happened inside a tick, for presentation only (floating
 // damage numbers, hit flashes, later: sounds). The sim generates these
@@ -58,5 +73,7 @@ export interface IWorld {
   // de-dup by `seq`. The window is short, so a backgrounded tab just drops
   // stale cosmetic events — they never affect the simulation.
   recentEvents(): ReadonlyArray<SimEvent>;
+  // The local player's action bar (icons + live cooldown/readiness) for the HUD.
+  abilities(): ReadonlyArray<AbilityView>;
   sendCommand(cmd: Command): void;
 }
