@@ -3,6 +3,8 @@ import {
   Sim,
   meleeDamage,
   abilityDamage,
+  rollRarity,
+  rarityStat,
   STR_TO_DAMAGE,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
@@ -13,6 +15,7 @@ import {
   ATTR_POINTS_PER_LEVEL,
   inFrontOf,
 } from '../src/sim/sim';
+import { Rng } from '../src/sim/rng';
 import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES } from '../src/sim/content/abilities';
@@ -502,17 +505,23 @@ describe('progression (XP & levels)', () => {
 });
 
 describe('loot & inventory', () => {
-  it('addToBag stacks onto existing items, fills slots, and rejects new stacks when full', () => {
+  it('addToBag stacks by item+rarity, fills slots, and rejects new stacks when full', () => {
     const bag: ItemStack[] = [];
     // fill every slot with a distinct stack
-    for (let i = 0; i < BAG_SLOTS; i++) expect(addToBag(bag, `item_${i}`, 1)).toBe(true);
+    for (let i = 0; i < BAG_SLOTS; i++) expect(addToBag(bag, `item_${i}`, 'normal', 1)).toBe(true);
     expect(bag.length).toBe(BAG_SLOTS);
     // full: a NEW item type has no slot
-    expect(addToBag(bag, 'overflow', 1)).toBe(false);
+    expect(addToBag(bag, 'overflow', 'normal', 1)).toBe(false);
     expect(bag.length).toBe(BAG_SLOTS);
     // ...but more of an EXISTING stack still fits (stacks in place, no new slot)
-    expect(addToBag(bag, 'item_0', 4)).toBe(true);
-    expect(bag.find((s) => s.itemId === 'item_0')!.qty).toBe(5);
+    expect(addToBag(bag, 'item_0', 'normal', 4)).toBe(true);
+    expect(bag.find((s) => s.itemId === 'item_0' && s.rarity === 'normal')!.qty).toBe(5);
+
+    // same item, different rarity = a SEPARATE stack
+    const bag2: ItemStack[] = [];
+    expect(addToBag(bag2, 'sword', 'normal', 1)).toBe(true);
+    expect(addToBag(bag2, 'sword', 'sun', 1)).toBe(true);
+    expect(bag2.length).toBe(2);
   });
 
   it('a kill always drops gold, items come from the drop table with resolved names, reproducibly', () => {
@@ -538,6 +547,8 @@ describe('loot & inventory', () => {
       expect(dropIds).toContain(s.itemId);
       expect(s.qty).toBeGreaterThan(0);
       expect(s.name).toBe(ITEMS[s.itemId].name);
+      expect(['normal', 'sos', 'som', 'sun']).toContain(s.rarity); // a valid rarity
+      expect(s.rarityName.length).toBeGreaterThan(0);
     }
 
     // reproducible: same seed + same kills => identical gold AND bag contents
@@ -574,10 +585,11 @@ describe('equipment', () => {
     const dmg = () => meleeDamage(player(sim).str, player(sim).weaponDamage); // per-swing damage
     // Grind for the sword (5% per kill; fixed seed -> deterministic, lands fast).
     expect(killUntilBagHas(sim, 'old_sword', 400)).toBe(true);
+    const sword = sim.inventory().stacks.find((s) => s.itemId === 'old_sword')!;
     const before = dmg();
 
-    // Equip from the bag: into the weapon slot, out of the bag, damage goes up.
-    sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
+    // Equip that exact (item, rarity): into the weapon slot, out of the bag, damage up.
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: sword.rarity });
     sim.step();
     expect(weaponItem(sim)).toBe('old_sword');
     expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
@@ -591,17 +603,19 @@ describe('equipment', () => {
     expect(dmg()).toBe(before);
   });
 
-  it('equipping armor raises max HP; unequipping returns it and keeps hp within max', () => {
+  it('equipping armor raises max HP by the rarity-scaled bonus; unequipping returns it', () => {
     const sim = new Sim(7);
     expect(killUntilBagHas(sim, 'wolf_leather', 400)).toBe(true);
-    const armorBonus = ITEMS.wolf_leather.stats?.maxHp ?? 0;
-    expect(armorBonus).toBeGreaterThan(0);
+    const leather = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
+    const baseBonus = ITEMS.wolf_leather.stats?.maxHp ?? 0;
+    expect(baseBonus).toBeGreaterThan(0);
+    const expectedBonus = rarityStat(baseBonus, leather.rarity); // scaled by its rarity
     const maxBefore = player(sim).maxHp;
 
-    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather' });
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: leather.rarity });
     sim.step();
     expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
-    expect(player(sim).maxHp).toBe(maxBefore + armorBonus);
+    expect(player(sim).maxHp).toBe(maxBefore + expectedBonus);
     expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp);
 
     sim.sendCommand({ t: 'unequip', slot: 'armor' });
@@ -614,11 +628,11 @@ describe('equipment', () => {
   it('equip/unequip no-op safely: non-equippable, not held, and empty slot', () => {
     const sim = new Sim(7);
     // a non-equippable item (no slot) is ignored
-    sim.sendCommand({ t: 'equip', itemId: 'health_potion' });
+    sim.sendCommand({ t: 'equip', itemId: 'health_potion', rarity: 'normal' });
     sim.step();
     expect(weaponItem(sim)).toBeNull();
     // an equippable item the player does NOT hold is ignored (no phantom equip)
-    sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: 'normal' });
     sim.step();
     expect(weaponItem(sim)).toBeNull();
     expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
@@ -632,13 +646,75 @@ describe('equipment', () => {
     const run = (seed: number): string => {
       const sim = new Sim(seed);
       if (killUntilBagHas(sim, 'old_sword', 400)) {
-        sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
+        const s = sim.inventory().stacks.find((x) => x.itemId === 'old_sword')!;
+        sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: s.rarity });
         sim.step();
       }
       return sim.hash();
     };
     expect(run(7)).toBe(run(7));
     expect(run(7)).not.toBe(run(123));
+  });
+});
+
+describe('item rarity (lucky drops)', () => {
+  it('rares are much rarer than commons, and the roll is deterministic', () => {
+    const tally = (seed: number, n: number): Record<string, number> => {
+      const rng = new Rng(seed);
+      const counts: Record<string, number> = { normal: 0, sos: 0, som: 0, sun: 0 };
+      for (let i = 0; i < n; i++) counts[rollRarity(rng)]++;
+      return counts;
+    };
+    const N = 5000;
+    const a = tally(7, N);
+    // most drops are Normal, and each tier is rarer than the previous
+    expect(a.normal).toBeGreaterThan(N / 2);
+    expect(a.normal).toBeGreaterThan(a.sos);
+    expect(a.sos).toBeGreaterThan(a.som);
+    expect(a.som).toBeGreaterThan(a.sun);
+    // deterministic: same seed => identical tallies; different seed => different
+    expect(tally(7, N)).toEqual(a);
+    expect(tally(123, N)).not.toEqual(a);
+  });
+
+  it('higher rarity scales an equipment bonus up (normal = base), with half-up rounding', () => {
+    expect(rarityStat(10, 'normal')).toBe(10);
+    expect(rarityStat(10, 'sos')).toBeGreaterThan(rarityStat(10, 'normal'));
+    expect(rarityStat(10, 'som')).toBeGreaterThan(rarityStat(10, 'sos'));
+    expect(rarityStat(10, 'sun')).toBeGreaterThan(rarityStat(10, 'som'));
+    // fractional multiplier (SOS = 1.5) on odd values rounds half-up
+    expect(rarityStat(5, 'sos')).toBe(8); // round(7.5)
+    expect(rarityStat(15, 'sos')).toBe(23); // round(22.5)
+  });
+
+  it('rollRarity partitions [0,1): boundaries map correctly and the rarest tier absorbs the tail', () => {
+    const at = (v: number) => rollRarity({ next: () => v } as unknown as Rng);
+    expect(at(0)).toBe('normal');
+    expect(at(0.5)).toBe('normal');
+    expect(at(0.95)).toBe('sos'); // 0.90..0.98
+    expect(at(0.99)).toBe('som'); // 0.98..0.998
+    expect(at(0.999)).toBe('sun'); // >= 0.998
+    expect(at(0.9999999)).toBe('sun'); // near 1.0 still lands on the rarest tier
+  });
+
+  it('equipping a RARER copy grants strictly more than a Normal one (rarer = stronger, end-to-end)', () => {
+    const sim = new Sim(7);
+    const player = () => sim.entities().find((e) => e.kind === 'player')!;
+    const rareLeather = () =>
+      sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather' && s.rarity !== 'normal');
+    // Farm until a NON-Normal Couro de Lobo drops (deterministic; cap is a safety net).
+    let guard = 0;
+    while (!rareLeather() && guard++ < 600) killNearestEnemy(sim);
+    const stack = rareLeather();
+    expect(stack).toBeDefined();
+
+    const baseBonus = ITEMS.wolf_leather.stats?.maxHp ?? 0; // what a Normal copy gives
+    const maxBefore = player().maxHp;
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: stack!.rarity });
+    sim.step();
+    // the effective max-HP gain exceeds the base bonus -> rarity scaling is wired
+    // through equip -> recomputeStats (not self-referential to rarityStat).
+    expect(player().maxHp - maxBefore).toBeGreaterThan(baseBonus);
   });
 });
 

@@ -187,6 +187,17 @@ html, body {
 .bag-slot.equippable { cursor: pointer; }
 .bag-slot.equippable:hover { border-color: #fff; }
 
+/* Rarity colors (placed AFTER .filled so they win the equal-specificity tie).
+   Normal gray · SOS blue · SOM purple · SUN gold (with a glow). */
+.bag-slot[data-rarity='normal'], .equip-slot[data-rarity='normal'] { border-color: #8a93a3; color: #cdd5e0; }
+.bag-slot[data-rarity='sos'], .equip-slot[data-rarity='sos'] { border-color: #4aa3ff; color: #bfe0ff; }
+.bag-slot[data-rarity='som'], .equip-slot[data-rarity='som'] { border-color: #b06cff; color: #e6ccff; }
+.bag-slot[data-rarity='sun'], .equip-slot[data-rarity='sun'] {
+  border-color: #f2c44a;
+  color: #ffe9a8;
+  box-shadow: 0 0 7px rgba(242, 196, 74, 0.7);
+}
+
 /* Equipped-slots row inside the bag window. */
 .equip-row {
   display: flex;

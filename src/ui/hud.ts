@@ -152,8 +152,15 @@ export class Hud {
       const cell = this.equipCells[j];
       const label = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
       cell.classList.toggle('filled', eq.itemId != null);
-      cell.title = eq.name ? `${label}: ${eq.name}` : label;
-      cell.textContent = eq.name ? `${label}: ${eq.name}` : `${label}: —`;
+      if (eq.itemId) {
+        cell.dataset.rarity = eq.rarity ?? '';
+        cell.title = `${label}: ${eq.name} (${eq.rarityName})`;
+        cell.textContent = `${label}: ${eq.name} (${eq.rarityName})`;
+      } else {
+        delete cell.dataset.rarity;
+        cell.title = label;
+        cell.textContent = `${label}: —`;
+      }
     }
 
     // Tiny "ficha": the effective stats the equipment drives.
@@ -175,20 +182,25 @@ export class Hud {
       if (stack) {
         slot.classList.add('filled');
         slot.classList.toggle('equippable', stack.equipSlot != null);
-        slot.title = stack.equipSlot ? `${stack.name} (clique p/ equipar)` : stack.name;
-        slot.textContent = stack.qty > 1 ? `${stack.name} ×${stack.qty}` : stack.name;
+        slot.dataset.rarity = stack.rarity; // UI colors the border/text by this
+        const label = `${stack.name} (${stack.rarityName})`;
+        slot.title = stack.equipSlot ? `${label} — clique p/ equipar` : label;
+        slot.textContent = stack.qty > 1 ? `${label} ×${stack.qty}` : label;
       } else {
         slot.classList.remove('filled', 'equippable');
+        delete slot.dataset.rarity;
         slot.title = '';
         slot.textContent = '';
       }
     }
   }
 
-  // Click a bag stack -> equip it (no-op for non-equippable items).
+  // Click a bag stack -> equip that exact item+rarity (no-op for non-equippable).
   private onBagClick(i: number): void {
     const stack = this.lastInv?.stacks[i];
-    if (stack?.equipSlot && this.world) this.world.sendCommand({ t: 'equip', itemId: stack.itemId });
+    if (stack?.equipSlot && this.world) {
+      this.world.sendCommand({ t: 'equip', itemId: stack.itemId, rarity: stack.rarity });
+    }
   }
 
   // Click an equipped slot -> unequip it back to the bag.

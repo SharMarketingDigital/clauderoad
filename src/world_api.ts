@@ -13,6 +13,10 @@ export type EntityKind = 'player' | 'enemy';
 // sim's item content and the UI agree on the set.
 export type EquipSlot = 'weapon' | 'armor';
 
+// Item rarity, common -> rarest (Silkroad-style lucky drops). Defined at the
+// seam so content, sim, and UI agree; the UI maps these to colors.
+export type Rarity = 'normal' | 'sos' | 'som' | 'sun';
+
 export interface EntityView {
   readonly id: number;
   readonly kind: EntityKind;
@@ -38,19 +42,24 @@ export interface EntityView {
 
 // One stack in the player's bag, with the item's display name resolved.
 // `equipSlot` is set when the item is equippable (so the UI knows a click on it
-// should equip it, and into which slot).
+// should equip it, and into which slot). `rarity` drives the UI color/border;
+// `rarityName` is its display label.
 export interface ItemStackView {
   readonly itemId: string;
   readonly name: string;
   readonly qty: number;
+  readonly rarity: Rarity;
+  readonly rarityName: string;
   readonly equipSlot?: EquipSlot;
 }
 
-// One equipment slot's current contents (null when empty).
+// One equipment slot's current contents (null fields when empty).
 export interface EquipView {
   readonly slot: EquipSlot;
   readonly itemId: string | null;
   readonly name: string | null;
+  readonly rarity: Rarity | null;
+  readonly rarityName: string | null;
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -71,7 +80,7 @@ export type Command =
   | { t: 'cycle-target' } // Tab: select the nearest enemy in front, then cycle
   | { t: 'set-target'; id: number | null } // click a specific entity (null clears)
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
-  | { t: 'equip'; itemId: string } // equip an item from the bag into its slot
+  | { t: 'equip'; itemId: string; rarity: Rarity } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot }; // move an equipped item back to the bag
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the

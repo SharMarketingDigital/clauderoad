@@ -12,12 +12,13 @@
 import { Rng } from './rng';
 import type { Entity } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, EquipSlot,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, EquipSlot, Rarity,
 } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
 import { ABILITIES, type AbilityDef } from './content/abilities';
 import { ITEMS } from './content/items';
+import { RARITIES, type RarityDef } from './content/rarity';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
 
 const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
@@ -153,12 +154,20 @@ export class Sim implements IWorld {
           itemId: s.itemId,
           name: ITEMS[s.itemId]?.name ?? s.itemId,
           qty: s.qty,
+          rarity: s.rarity,
+          rarityName: rarityDef(s.rarity).name,
           equipSlot: ITEMS[s.itemId]?.slot,
         }))
       : [];
     const equipment = EQUIP_SLOTS.map((slot) => {
-      const id = p ? p.equipment[slot] : null;
-      return { slot, itemId: id ?? null, name: id ? (ITEMS[id]?.name ?? id) : null };
+      const eq = p ? p.equipment[slot] : null;
+      return {
+        slot,
+        itemId: eq?.itemId ?? null,
+        name: eq ? (ITEMS[eq.itemId]?.name ?? eq.itemId) : null,
+        rarity: eq?.rarity ?? null,
+        rarityName: eq ? rarityDef(eq.rarity).name : null,
+      };
     });
     return { capacity: BAG_SLOTS, stacks, equipment };
   }
@@ -272,7 +281,10 @@ export class Sim implements IWorld {
     const t = ENEMY_TEMPLATE;
     p.gold += this.rng.int(t.goldMin, t.goldMax + 1); // always a little gold
     for (const drop of t.drops) {
-      if (this.rng.next() < drop.chance) addToBag(p.bag, drop.itemId, 1);
+      // First decide if the item drops at all, then roll HOW rare it is.
+      if (this.rng.next() < drop.chance) {
+        addToBag(p.bag, drop.itemId, rollRarity(this.rng), 1);
+      }
     }
   }
 
@@ -329,7 +341,7 @@ export class Sim implements IWorld {
         this.useAbility(p, cmd.slot);
         break;
       case 'equip':
-        this.equip(p, cmd.itemId);
+        this.equip(p, cmd.itemId, cmd.rarity);
         break;
       case 'unequip':
         this.unequip(p, cmd.slot);
@@ -343,23 +355,23 @@ export class Sim implements IWorld {
   // ---------- equipment ----------
   // Equip an item the player holds in the bag. Swaps out whatever occupies the
   // target slot (back to the bag) and folds the new gear's stats into combat.
-  private equip(p: Entity, itemId: string): void {
+  private equip(p: Entity, itemId: string, rarity: Rarity): void {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
-    if (!removeFromBag(p.bag, itemId, 1)) return; // must actually hold it
+    if (!removeFromBag(p.bag, itemId, rarity, 1)) return; // must hold that exact stack
     const prev = p.equipment[def.slot];
-    p.equipment[def.slot] = itemId;
+    p.equipment[def.slot] = { itemId, rarity };
     // Return the displaced item to the bag. (Removing the equipped item above
     // frees room in the common qty-1 case; only a full bag of other stacks
     // could lose it — acceptable for now, like the loot-on-full behavior.)
-    if (prev) addToBag(p.bag, prev, 1);
+    if (prev) addToBag(p.bag, prev.itemId, prev.rarity, 1);
     this.recomputeStats(p);
   }
 
   private unequip(p: Entity, slot: EquipSlot): void {
-    const itemId = p.equipment[slot];
-    if (!itemId) return;
-    if (!addToBag(p.bag, itemId, 1)) return; // bag full: keep it equipped
+    const eq = p.equipment[slot];
+    if (!eq) return;
+    if (!addToBag(p.bag, eq.itemId, eq.rarity, 1)) return; // bag full: keep it equipped
     p.equipment[slot] = null;
     this.recomputeStats(p);
   }
@@ -374,13 +386,14 @@ export class Sim implements IWorld {
     let bonusMaxHp = 0;
     let bonusMaxMp = 0;
     for (const slot of EQUIP_SLOTS) {
-      const id = p.equipment[slot];
-      const stats = id ? ITEMS[id]?.stats : undefined;
-      if (!stats) continue;
-      bonusStr += stats.str ?? 0;
-      bonusWeapon += stats.weaponDamage ?? 0;
-      bonusMaxHp += stats.maxHp ?? 0;
-      bonusMaxMp += stats.maxMp ?? 0;
+      const eq = p.equipment[slot];
+      const stats = eq ? ITEMS[eq.itemId]?.stats : undefined;
+      if (!eq || !stats) continue;
+      // Higher rarity => bigger bonus from the same item.
+      bonusStr += rarityStat(stats.str ?? 0, eq.rarity);
+      bonusWeapon += rarityStat(stats.weaponDamage ?? 0, eq.rarity);
+      bonusMaxHp += rarityStat(stats.maxHp ?? 0, eq.rarity);
+      bonusMaxMp += rarityStat(stats.maxMp ?? 0, eq.rarity);
     }
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
@@ -523,9 +536,12 @@ export class Sim implements IWorld {
       mix(e.level); mix(e.xp); mix(e.attrPoints);
       // Economy & bag (stacks are in deterministic insertion order).
       mix(e.gold);
-      for (const s of e.bag) { mix(strHash(s.itemId)); mix(s.qty); }
+      for (const s of e.bag) { mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.qty); }
       // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).
-      for (const slot of EQUIP_SLOTS) mix(strHash(e.equipment[slot] ?? ''));
+      for (const slot of EQUIP_SLOTS) {
+        const eq = e.equipment[slot];
+        mix(strHash(eq ? `${eq.itemId}:${eq.rarity}` : ''));
+      }
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
@@ -549,6 +565,29 @@ export function meleeDamage(str: number, weaponDamage: number): number {
 // the auto-attack. Pure & deterministic (no RNG); tune the multiplier later.
 export function abilityDamage(def: AbilityDef, str: number, weaponDamage: number): number {
   return Math.round(meleeDamage(str, weaponDamage) * def.damageMultiplier);
+}
+
+function rarityDef(id: Rarity): RarityDef {
+  return RARITIES.find((r) => r.id === id) ?? RARITIES[0];
+}
+
+// Lucky drop roll: most results are the common tier; rarer tiers have very low
+// probability. Draws ONE value from the sim Rng (never Math.random). The last
+// tier absorbs the remaining probability mass so rounding can't bias the roll.
+export function rollRarity(rng: Rng): Rarity {
+  const r = rng.next();
+  let acc = 0;
+  for (let i = 0; i < RARITIES.length - 1; i++) {
+    acc += RARITIES[i].dropWeight;
+    if (r < acc) return RARITIES[i].id;
+  }
+  return RARITIES[RARITIES.length - 1].id;
+}
+
+// Scale an equipped item's flat bonus by its rarity, so a rarer copy is
+// stronger. Pure & deterministic. Provisional multipliers live in content.
+export function rarityStat(value: number, rarity: Rarity): number {
+  return Math.round(value * rarityDef(rarity).statMultiplier);
 }
 
 // True when the offset (dx,dz) points into the forward half-plane for `facing`
