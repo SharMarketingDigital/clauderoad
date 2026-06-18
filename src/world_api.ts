@@ -20,6 +20,11 @@ export interface EntityView {
   readonly maxHp: number;
   readonly mp: number; // ability resource (0 for entities that don't cast)
   readonly maxMp: number;
+  // progression (the player levels up; enemies just carry a level for display)
+  readonly level: number;
+  readonly xp: number; // XP into the CURRENT level
+  readonly xpToNext: number; // XP needed to reach the next level
+  readonly attrPoints: number; // unspent attribute points ("pontos disponíveis")
 }
 
 // Player intent / commands. The client streams these into the world.
@@ -55,7 +60,9 @@ export interface AbilityView {
 export type SimEvent = {
   readonly seq: number;
   readonly tick: number;
-  readonly kind: 'damage';
+  // 'damage': amount = hit dealt to targetId. 'levelup': targetId = the player,
+  // amount = the new level. x/z is where to anchor the on-screen effect.
+  readonly kind: 'damage' | 'levelup';
   readonly targetId: number;
   readonly amount: number;
   readonly x: number;

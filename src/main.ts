@@ -23,7 +23,8 @@ let last = performance.now() / 1000;
 let acc = 0;
 let lastEventSeq = 0; // cursor: highest sim event seq already turned into visuals
 
-// Turn new sim events into presentation: flash the hit model + pop a number.
+// Turn new sim events into presentation: hit flash + damage number, or a
+// level-up flash + banner.
 function drawCombatFeedback(): void {
   for (const ev of sim.recentEvents()) {
     if (ev.seq <= lastEventSeq) continue;
@@ -31,7 +32,11 @@ function drawCombatFeedback(): void {
     if (ev.kind === 'damage') {
       renderer.flash(ev.targetId);
       const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
-      if (p.visible) combatText.spawn(p.x, p.y, ev.amount);
+      if (p.visible) combatText.spawn(p.x, p.y, String(ev.amount));
+    } else if (ev.kind === 'levelup') {
+      renderer.flash(ev.targetId); // flash the player
+      const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
+      if (p.visible) combatText.spawn(p.x, p.y, `NÍVEL ${ev.amount}!`, 'levelup');
     }
   }
 }

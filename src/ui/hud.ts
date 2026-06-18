@@ -7,6 +7,9 @@ export class Hud {
   private hpText: HTMLSpanElement;
   private mpFill: HTMLDivElement;
   private mpText: HTMLSpanElement;
+  private levelBadge: HTMLSpanElement;
+  private xpFill: HTMLDivElement;
+  private xpText: HTMLSpanElement;
   // target frame (shown only while an enemy is selected)
   private targetFrame: HTMLDivElement;
   private targetName: HTMLSpanElement;
@@ -23,9 +26,10 @@ export class Hud {
       <div class="unit-frame">
         <div class="portrait">&#9733;</div>
         <div class="bars">
-          <span class="name">Hero</span>
+          <span class="name">Hero</span><span class="level"></span>
           <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
           <div class="mp"><div class="mp-fill"></div><span class="mp-text"></span></div>
+          <div class="xp"><div class="xp-fill"></div><span class="xp-text"></span></div>
         </div>
       </div>
       <div class="unit-frame target-frame" hidden>
@@ -43,6 +47,9 @@ export class Hud {
     this.hpText = this.root.querySelector('.hp-text') as HTMLSpanElement;
     this.mpFill = this.root.querySelector('.mp-fill') as HTMLDivElement;
     this.mpText = this.root.querySelector('.mp-text') as HTMLSpanElement;
+    this.levelBadge = this.root.querySelector('.level') as HTMLSpanElement;
+    this.xpFill = this.root.querySelector('.xp-fill') as HTMLDivElement;
+    this.xpText = this.root.querySelector('.xp-text') as HTMLSpanElement;
     this.targetFrame = this.root.querySelector('.target-frame') as HTMLDivElement;
     this.targetName = this.root.querySelector('.target-name') as HTMLSpanElement;
     this.targetHpFill = this.root.querySelector('.target-hp-fill') as HTMLDivElement;
@@ -63,6 +70,12 @@ export class Hud {
     const mpPct = p.maxMp > 0 ? Math.max(0, Math.min(1, p.mp / p.maxMp)) : 0;
     this.mpFill.style.width = `${mpPct * 100}%`;
     this.mpText.textContent = `${Math.round(p.mp)} / ${p.maxMp}`;
+
+    this.levelBadge.textContent = `Nv ${p.level}`;
+    const xpPct = p.xpToNext > 0 ? Math.max(0, Math.min(1, p.xp / p.xpToNext)) : 0;
+    this.xpFill.style.width = `${xpPct * 100}%`;
+    this.xpText.textContent =
+      `XP ${Math.round(p.xp)} / ${p.xpToNext}` + (p.attrPoints > 0 ? ` · ${p.attrPoints} pts` : '');
 
     const tid = world.localTargetId();
     const t = tid != null ? ents.find((e) => e.id === tid) : undefined;

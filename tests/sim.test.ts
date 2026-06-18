@@ -7,6 +7,10 @@ import {
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
   GCD_TICKS,
+  xpForLevel,
+  HP_PER_LEVEL,
+  MP_PER_LEVEL,
+  ATTR_POINTS_PER_LEVEL,
   inFrontOf,
 } from '../src/sim/sim';
 import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
@@ -423,6 +427,50 @@ describe('abilities (Golpe Forte, slot 1)', () => {
     sim.sendCommand({ t: 'use-ability', slot: 1 });
     sim.step();
     expect(player(sim).mp).toBe(mp0); // blocked: out of range, no MP spent
+  });
+});
+
+// Select the nearest enemy and beat it to death by chasing + auto-attacking.
+// Returns true if the target actually died within the tick budget.
+function killNearestEnemy(sim: Sim): boolean {
+  sim.sendCommand({ t: 'cycle-target' });
+  sim.step();
+  const tid = sim.localTargetId();
+  if (tid == null) return false;
+  let guard = 0;
+  while (sim.entities().some((e) => e.id === tid) && guard++ < 3000) chaseTarget(sim, tid);
+  return guard < 3000;
+}
+
+describe('progression (XP & levels)', () => {
+  it('the XP curve is gentle early and ramps up', () => {
+    expect(xpForLevel(1)).toBe(50);
+    expect(xpForLevel(2)).toBe(150);
+    expect(xpForLevel(3)).toBeGreaterThan(xpForLevel(2)); // ramps with level
+    // gentle start: level 2 costs no more than ~3 kills of a basic mob
+    expect(xpForLevel(1)).toBeLessThanOrEqual(3 * ENEMY_TEMPLATE.xp);
+  });
+
+  it('killing mobs grants XP, crosses the threshold, and boosts max HP/MP + attr points', () => {
+    const sim = new Sim(7);
+    const p = (): { level: number; xp: number; maxHp: number; maxMp: number; hp: number; attrPoints: number } =>
+      sim.entities().find((e) => e.kind === 'player')!;
+    expect(p().level).toBe(1);
+    const hp0 = p().maxHp;
+    const mp0 = p().maxMp;
+
+    // exactly enough kills to cross the level-1 threshold (50 XP / 25 = 2 wolves)
+    const kills = Math.ceil(xpForLevel(1) / ENEMY_TEMPLATE.xp);
+    for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim)).toBe(true);
+
+    const pp = p();
+    expect(pp.level).toBe(2);
+    expect(pp.maxHp).toBe(hp0 + HP_PER_LEVEL);
+    expect(pp.maxMp).toBe(mp0 + MP_PER_LEVEL);
+    expect(pp.attrPoints).toBe(ATTR_POINTS_PER_LEVEL);
+    expect(pp.hp).toBe(pp.maxHp); // full restore on ding
+    // and a level-up event was emitted for the visual feedback
+    expect(sim.recentEvents().some((e) => e.kind === 'levelup' && e.amount === 2)).toBe(true);
   });
 });
 

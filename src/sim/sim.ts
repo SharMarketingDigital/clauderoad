@@ -28,6 +28,18 @@ export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type ene
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 
+// Progression (provisional — GDD §B4b: GENTLE, rewarding pacing; NOT Silkroad's
+// brutal grind). Per level-up: +HP/+MP max and +5 attribute points.
+export const HP_PER_LEVEL = 20;
+export const MP_PER_LEVEL = 15;
+export const ATTR_POINTS_PER_LEVEL = 5;
+// XP needed to go from `level` to level+1. Integer curve (no Math.pow, so it's
+// bit-exact across engines): 25·L·(L+1) => L1:50, L2:150, L3:300, L4:500...
+// With a 25-XP wolf that's ~2 kills for level 2, ramping gently after.
+export function xpForLevel(level: number): number {
+  return 25 * level * (level + 1);
+}
+
 export class Sim implements IWorld {
   tick = 0;
 
@@ -66,6 +78,7 @@ export class Sim implements IWorld {
       str: cls.baseStr, weaponDamage: cls.weaponDamage,
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
+      level: 1, xp: 0, attrPoints: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -82,6 +95,7 @@ export class Sim implements IWorld {
       targetId: null,
       str: 0, weaponDamage: 0, swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
+      level: 1, xp: 0, attrPoints: 0,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -134,6 +148,7 @@ export class Sim implements IWorld {
         id: e.id, kind: e.kind, name: e.name,
         x: e.x, z: e.z, facing: e.facing, hp: e.hp, maxHp: e.maxHp,
         mp: e.mp, maxMp: e.maxMp,
+        level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
       });
     }
     return out;
@@ -194,7 +209,7 @@ export class Sim implements IWorld {
     });
     if (t.hp <= 0) {
       t.hp = 0;
-      this.killEnemy(t);
+      this.killEnemy(t, p);
     }
   }
 
@@ -207,11 +222,41 @@ export class Sim implements IWorld {
     this.events = this.events.filter((e) => e.tick > cutoff);
   }
 
-  private killEnemy(e: Entity): void {
-    this.ents.delete(e.id);
+  private killEnemy(dead: Entity, killer: Entity): void {
+    this.ents.delete(dead.id);
     // Respawn a same-type enemy after a delay. (One template today; pass the
-    // template id here once there are several.)
+    // template id / xp reward per-entity once there are several.)
     this.respawnQueue.push(this.tick + RESPAWN_TICKS);
+    if (killer.kind === 'player') this.gainXp(killer, ENEMY_TEMPLATE.xp);
+  }
+
+  // Award XP and level up across as many thresholds as it crosses (carrying the
+  // remainder), so a big XP gain can grant multiple levels at once.
+  private gainXp(p: Entity, amount: number): void {
+    p.xp += amount;
+    while (p.xp >= xpForLevel(p.level)) {
+      p.xp -= xpForLevel(p.level);
+      this.levelUp(p);
+    }
+  }
+
+  private levelUp(p: Entity): void {
+    p.level += 1;
+    p.maxHp += HP_PER_LEVEL;
+    p.maxMp += MP_PER_LEVEL;
+    p.hp = p.maxHp; // ding! restore to full — rewarding, gentle pacing
+    p.mp = p.maxMp;
+    p.attrPoints += ATTR_POINTS_PER_LEVEL;
+    // Presentation event for the level-up effect (amount = the new level).
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'levelup',
+      targetId: p.id,
+      amount: p.level,
+      x: p.x,
+      z: p.z,
+    });
   }
 
   private processRespawns(): void {
@@ -280,7 +325,7 @@ export class Sim implements IWorld {
     });
     if (t.hp <= 0) {
       t.hp = 0;
-      this.killEnemy(t);
+      this.killEnemy(t, p);
     }
   }
 
@@ -371,6 +416,8 @@ export class Sim implements IWorld {
       mix(e.mp); mix(e.gcdUntil);
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
+      // Progression (level implies maxHp/maxMp, so they need not be mixed too).
+      mix(e.level); mix(e.xp); mix(e.attrPoints);
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);

@@ -14,11 +14,12 @@ export class CombatText {
     document.body.appendChild(this.root);
   }
 
-  // Pop a number at the given screen position (pixels from the top-left).
-  spawn(screenX: number, screenY: number, amount: number): void {
+  // Pop a bit of text at the given screen position (pixels from the top-left).
+  // `variant` picks the style (damage number vs. a level-up banner).
+  spawn(screenX: number, screenY: number, text: string, variant: 'damage' | 'levelup' = 'damage'): void {
     const el = document.createElement('div');
-    el.className = 'fct';
-    el.textContent = String(Math.round(amount));
+    el.className = `fct fct-${variant}`;
+    el.textContent = text;
     el.style.left = `${screenX}px`;
     el.style.top = `${screenY}px`;
     const remove = (): void => el.remove();

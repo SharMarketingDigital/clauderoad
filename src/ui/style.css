@@ -53,6 +53,7 @@ html, body {
 
 .bars { flex: 1; }
 .name { font-weight: 600; font-size: 14px; letter-spacing: 0.02em; }
+.level { margin-left: 6px; font-size: 12px; font-weight: 700; color: var(--gold); }
 
 .hp {
   position: relative;
@@ -100,6 +101,30 @@ html, body {
   display: grid;
   place-items: center;
   font-size: 10px;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* XP bar — thin gold bar under HP/MP. */
+.xp {
+  position: relative;
+  height: 9px;
+  margin-top: 3px;
+  background: #1a1206;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.xp-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(180deg, #e6c552, #a07d1f);
+  transition: width 0.2s ease-out;
+}
+.xp-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
   text-shadow: 0 1px 2px #000;
 }
 
@@ -184,6 +209,13 @@ html, body {
   white-space: nowrap;
   will-change: transform, opacity;
   animation: fct-pop 0.85s ease-out forwards;
+}
+
+/* Level-up banner: bigger and gold. */
+.fct-levelup {
+  font-size: 30px;
+  color: #ffd86b;
+  text-shadow: 0 0 10px #b9821f, 0 1px 3px #000;
 }
 
 @keyframes fct-pop {

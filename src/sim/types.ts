@@ -24,6 +24,10 @@ export interface Entity {
   maxMp: number;
   gcdUntil: number; // tick until which the global cooldown blocks any ability
   abilityReadyAt: Record<number, number>; // action-bar slot -> earliest usable tick
+  // progression. The player gains xp/levels; enemies just carry a level.
+  level: number;
+  xp: number; // XP accumulated into the current level
+  attrPoints: number; // unspent attribute points
   // enemy wander state
   targetX: number;
   targetZ: number;
