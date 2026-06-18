@@ -38,6 +38,7 @@ export interface EntityView {
   // these and they drive damage, so equipping a weapon visibly raises them.
   readonly str: number;
   readonly weaponDamage: number;
+  readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
 }
 
 // One stack in the player's bag, with the item's display name resolved.
@@ -50,16 +51,22 @@ export interface ItemStackView {
   readonly qty: number;
   readonly rarity: Rarity;
   readonly rarityName: string;
+  readonly plus: number; // enhancement level (+N); shown in the name
   readonly equipSlot?: EquipSlot;
 }
 
-// One equipment slot's current contents (null fields when empty).
+// One equipment slot's current contents (null fields when empty). `plus` is the
+// enhancement level; the two chances are the next attempt's success odds without
+// and with a Lucky Powder, so the UI can show whichever matches the toggle.
 export interface EquipView {
   readonly slot: EquipSlot;
   readonly itemId: string | null;
   readonly name: string | null;
   readonly rarity: Rarity | null;
   readonly rarityName: string | null;
+  readonly plus: number;
+  readonly enhanceChance: number; // 0..1, no powder (0 when empty or at the cap)
+  readonly enhanceChanceLucky: number; // 0..1, with a Lucky Powder
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -80,8 +87,9 @@ export type Command =
   | { t: 'cycle-target' } // Tab: select the nearest enemy in front, then cycle
   | { t: 'set-target'; id: number | null } // click a specific entity (null clears)
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
-  | { t: 'equip'; itemId: string; rarity: Rarity } // equip a specific bag stack
-  | { t: 'unequip'; slot: EquipSlot }; // move an equipped item back to the bag
+  | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
+  | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
+  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean }; // alchemy "+N" attempt
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -104,9 +112,10 @@ export interface AbilityView {
 export type SimEvent = {
   readonly seq: number;
   readonly tick: number;
-  // 'damage': amount = hit dealt to targetId. 'levelup': targetId = the player,
-  // amount = the new level. x/z is where to anchor the on-screen effect.
-  readonly kind: 'damage' | 'levelup';
+  // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
+  // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
+  // targetId is the affected entity; x/z anchors the on-screen effect.
+  readonly kind: 'damage' | 'levelup' | 'enhance-success' | 'enhance-fail';
   readonly targetId: number;
   readonly amount: number;
   readonly x: number;

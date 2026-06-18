@@ -233,6 +233,42 @@ html, body {
   text-align: center;
 }
 
+/* Alchemy ("+N") controls inside the bag window. */
+.alchemy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px;
+  background: #12161e;
+  border: 1px solid #2c3645;
+  border-radius: 6px;
+}
+.refine-row { display: flex; gap: 6px; }
+.lucky-toggle,
+.refine-btn {
+  flex: 1;
+  padding: 5px 6px;
+  font-size: 11px;
+  color: var(--ink);
+  background: #1c2533;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.lucky-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
+.refine-btn:hover:not(:disabled) { background: #26344a; }
+.refine-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+.mat-line { font-size: 10px; color: #9fd0ff; text-align: center; }
+
+/* Failed-refine banner (floating text). */
+.fct-fail {
+  font-size: 22px;
+  color: #ff8a7a;
+  text-shadow: 0 0 8px #5a1410, 0 1px 3px #000;
+}
+
 /* Action bar — fixed row of ability slots, centered above the hint. */
 .action-bar {
   position: absolute;

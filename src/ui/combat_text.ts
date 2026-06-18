@@ -16,7 +16,12 @@ export class CombatText {
 
   // Pop a bit of text at the given screen position (pixels from the top-left).
   // `variant` picks the style (damage number vs. a level-up banner).
-  spawn(screenX: number, screenY: number, text: string, variant: 'damage' | 'levelup' = 'damage'): void {
+  spawn(
+    screenX: number,
+    screenY: number,
+    text: string,
+    variant: 'damage' | 'levelup' | 'fail' = 'damage',
+  ): void {
     const el = document.createElement('div');
     el.className = `fct fct-${variant}`;
     el.textContent = text;

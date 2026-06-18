@@ -27,6 +27,12 @@ export class Hud {
   private bagStats: HTMLDivElement;
   private equipRow: HTMLDivElement;
   private equipCells: HTMLDivElement[] = [];
+  // alchemy ("+N") controls inside the bag window
+  private refineRow: HTMLDivElement;
+  private refineBtns: HTMLButtonElement[] = [];
+  private luckyToggle: HTMLButtonElement;
+  private matLine: HTMLDivElement;
+  private luckyOn = false; // UI state: whether to spend a Lucky Powder
   private bagOpen = false;
   // latest world + inventory, captured each frame so click handlers (equip /
   // unequip) can send commands against the current state.
@@ -59,6 +65,11 @@ export class Hud {
         <div class="bag-title">Bolsa</div>
         <div class="equip-row"></div>
         <div class="bag-stats"></div>
+        <div class="alchemy">
+          <button class="lucky-toggle">Pó da Sorte: OFF</button>
+          <div class="refine-row"></div>
+          <div class="mat-line"></div>
+        </div>
         <div class="bag-grid"></div>
       </div>
       <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; arrastar gira</div>
@@ -82,6 +93,14 @@ export class Hud {
     this.bagGrid = this.root.querySelector('.bag-grid') as HTMLDivElement;
     this.bagStats = this.root.querySelector('.bag-stats') as HTMLDivElement;
     this.equipRow = this.root.querySelector('.equip-row') as HTMLDivElement;
+    this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
+    this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
+    this.matLine = this.root.querySelector('.mat-line') as HTMLDivElement;
+    this.luckyToggle.addEventListener('click', () => {
+      this.luckyOn = !this.luckyOn;
+      this.luckyToggle.textContent = `Pó da Sorte: ${this.luckyOn ? 'ON' : 'OFF'}`;
+      this.luckyToggle.classList.toggle('on', this.luckyOn);
+    });
 
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
@@ -154,8 +173,10 @@ export class Hud {
       cell.classList.toggle('filled', eq.itemId != null);
       if (eq.itemId) {
         cell.dataset.rarity = eq.rarity ?? '';
-        cell.title = `${label}: ${eq.name} (${eq.rarityName})`;
-        cell.textContent = `${label}: ${eq.name} (${eq.rarityName})`;
+        const plusTag = eq.plus > 0 ? ` +${eq.plus}` : '';
+        const text = `${label}: ${eq.name}${plusTag} (${eq.rarityName})`;
+        cell.title = text;
+        cell.textContent = text;
       } else {
         delete cell.dataset.rarity;
         cell.title = label;
@@ -165,6 +186,8 @@ export class Hud {
 
     // Tiny "ficha": the effective stats the equipment drives.
     this.bagStats.textContent = `Força ${p.str} · Dano de arma ${p.weaponDamage}`;
+
+    this.updateAlchemy(inv);
 
     // Bag grid (click an equippable stack to equip it). Slots built once.
     while (this.bagSlots.length < inv.capacity) {
@@ -183,7 +206,8 @@ export class Hud {
         slot.classList.add('filled');
         slot.classList.toggle('equippable', stack.equipSlot != null);
         slot.dataset.rarity = stack.rarity; // UI colors the border/text by this
-        const label = `${stack.name} (${stack.rarityName})`;
+        const plusTag = stack.plus > 0 ? ` +${stack.plus}` : '';
+        const label = `${stack.name}${plusTag} (${stack.rarityName})`;
         slot.title = stack.equipSlot ? `${label} — clique p/ equipar` : label;
         slot.textContent = stack.qty > 1 ? `${label} ×${stack.qty}` : label;
       } else {
@@ -199,7 +223,12 @@ export class Hud {
   private onBagClick(i: number): void {
     const stack = this.lastInv?.stacks[i];
     if (stack?.equipSlot && this.world) {
-      this.world.sendCommand({ t: 'equip', itemId: stack.itemId, rarity: stack.rarity });
+      this.world.sendCommand({
+        t: 'equip',
+        itemId: stack.itemId,
+        rarity: stack.rarity,
+        plus: stack.plus,
+      });
     }
   }
 
@@ -207,6 +236,52 @@ export class Hud {
   private onEquipClick(j: number): void {
     const eq = this.lastInv?.equipment[j];
     if (eq?.itemId && this.world) this.world.sendCommand({ t: 'unequip', slot: eq.slot });
+  }
+
+  private updateAlchemy(inv: InventoryView): void {
+    // One "Refinar" button per equip slot, built once.
+    while (this.refineBtns.length < inv.equipment.length) {
+      const j = this.refineBtns.length;
+      const btn = document.createElement('button');
+      btn.className = 'refine-btn';
+      btn.addEventListener('click', () => this.onRefineClick(j));
+      this.refineRow.appendChild(btn);
+      this.refineBtns.push(btn);
+    }
+    const count = (id: string): number =>
+      inv.stacks.filter((s) => s.itemId === id).reduce((n, s) => n + s.qty, 0);
+    const powder = count('lucky_powder');
+    for (let j = 0; j < this.refineBtns.length; j++) {
+      const eq = inv.equipment[j];
+      const btn = this.refineBtns[j];
+      const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      const elixirId = eq.slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
+      if (eq.itemId == null) {
+        btn.textContent = `${slotName}: vazio`;
+        btn.disabled = true;
+      } else if (eq.enhanceChance <= 0) {
+        btn.textContent = `${slotName} +${eq.plus} (máx)`;
+        btn.disabled = true;
+      } else if (count(elixirId) <= 0) {
+        btn.textContent = `${slotName} +${eq.plus} (sem Elixir)`;
+        btn.disabled = true;
+      } else {
+        // Show the chance that matches the toggle AND whether a powder is held.
+        const ch = this.luckyOn && powder > 0 ? eq.enhanceChanceLucky : eq.enhanceChance;
+        btn.textContent = `Refinar ${slotName} +${eq.plus} (${Math.round(ch * 100)}%)`;
+        btn.disabled = false;
+      }
+    }
+    this.matLine.textContent =
+      `Elixir Arma ${count('elixir_weapon')} · Elixir Armadura ${count('elixir_armor')} · Pó ${powder}`;
+  }
+
+  // Click "Refinar" -> attempt the "+N" upgrade on that slot (sim rolls it).
+  private onRefineClick(j: number): void {
+    const eq = this.lastInv?.equipment[j];
+    if (eq?.itemId && eq.enhanceChance > 0 && this.world) {
+      this.world.sendCommand({ t: 'enhance', slot: eq.slot, useLuckyPowder: this.luckyOn });
+    }
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {

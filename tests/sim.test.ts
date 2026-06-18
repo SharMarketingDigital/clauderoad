@@ -5,6 +5,8 @@ import {
   abilityDamage,
   rollRarity,
   rarityStat,
+  enhanceChance,
+  enhanceStat,
   STR_TO_DAMAGE,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
@@ -21,6 +23,7 @@ import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
 import { ITEMS } from '../src/sim/content/items';
+import { MAX_PLUS } from '../src/sim/content/enhance';
 import type { Command } from '../src/world_api';
 import type { ItemStack } from '../src/sim/types';
 
@@ -505,23 +508,24 @@ describe('progression (XP & levels)', () => {
 });
 
 describe('loot & inventory', () => {
-  it('addToBag stacks by item+rarity, fills slots, and rejects new stacks when full', () => {
+  it('addToBag stacks by item+rarity+plus, fills slots, and rejects new stacks when full', () => {
     const bag: ItemStack[] = [];
     // fill every slot with a distinct stack
-    for (let i = 0; i < BAG_SLOTS; i++) expect(addToBag(bag, `item_${i}`, 'normal', 1)).toBe(true);
+    for (let i = 0; i < BAG_SLOTS; i++) expect(addToBag(bag, `item_${i}`, 'normal', 0, 1)).toBe(true);
     expect(bag.length).toBe(BAG_SLOTS);
     // full: a NEW item type has no slot
-    expect(addToBag(bag, 'overflow', 'normal', 1)).toBe(false);
+    expect(addToBag(bag, 'overflow', 'normal', 0, 1)).toBe(false);
     expect(bag.length).toBe(BAG_SLOTS);
     // ...but more of an EXISTING stack still fits (stacks in place, no new slot)
-    expect(addToBag(bag, 'item_0', 'normal', 4)).toBe(true);
+    expect(addToBag(bag, 'item_0', 'normal', 0, 4)).toBe(true);
     expect(bag.find((s) => s.itemId === 'item_0' && s.rarity === 'normal')!.qty).toBe(5);
 
-    // same item, different rarity = a SEPARATE stack
+    // same item but a different rarity OR a different "+N" = a SEPARATE stack
     const bag2: ItemStack[] = [];
-    expect(addToBag(bag2, 'sword', 'normal', 1)).toBe(true);
-    expect(addToBag(bag2, 'sword', 'sun', 1)).toBe(true);
-    expect(bag2.length).toBe(2);
+    expect(addToBag(bag2, 'sword', 'normal', 0, 1)).toBe(true);
+    expect(addToBag(bag2, 'sword', 'sun', 0, 1)).toBe(true); // different rarity
+    expect(addToBag(bag2, 'sword', 'normal', 3, 1)).toBe(true); // different "+N"
+    expect(bag2.length).toBe(3);
   });
 
   it('a kill always drops gold, items come from the drop table with resolved names, reproducibly', () => {
@@ -549,6 +553,7 @@ describe('loot & inventory', () => {
       expect(s.name).toBe(ITEMS[s.itemId].name);
       expect(['normal', 'sos', 'som', 'sun']).toContain(s.rarity); // a valid rarity
       expect(s.rarityName.length).toBeGreaterThan(0);
+      expect(s.plus).toBe(0); // loot drops un-enhanced
     }
 
     // reproducible: same seed + same kills => identical gold AND bag contents
@@ -588,8 +593,8 @@ describe('equipment', () => {
     const sword = sim.inventory().stacks.find((s) => s.itemId === 'old_sword')!;
     const before = dmg();
 
-    // Equip that exact (item, rarity): into the weapon slot, out of the bag, damage up.
-    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: sword.rarity });
+    // Equip that exact (item, rarity, +N): into the weapon slot, out of the bag, damage up.
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: sword.rarity, plus: sword.plus });
     sim.step();
     expect(weaponItem(sim)).toBe('old_sword');
     expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
@@ -612,7 +617,7 @@ describe('equipment', () => {
     const expectedBonus = rarityStat(baseBonus, leather.rarity); // scaled by its rarity
     const maxBefore = player(sim).maxHp;
 
-    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: leather.rarity });
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: leather.rarity, plus: leather.plus });
     sim.step();
     expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
     expect(player(sim).maxHp).toBe(maxBefore + expectedBonus);
@@ -628,11 +633,11 @@ describe('equipment', () => {
   it('equip/unequip no-op safely: non-equippable, not held, and empty slot', () => {
     const sim = new Sim(7);
     // a non-equippable item (no slot) is ignored
-    sim.sendCommand({ t: 'equip', itemId: 'health_potion', rarity: 'normal' });
+    sim.sendCommand({ t: 'equip', itemId: 'health_potion', rarity: 'normal', plus: 0 });
     sim.step();
     expect(weaponItem(sim)).toBeNull();
     // an equippable item the player does NOT hold is ignored (no phantom equip)
-    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: 'normal' });
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: 'normal', plus: 0 });
     sim.step();
     expect(weaponItem(sim)).toBeNull();
     expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
@@ -647,7 +652,7 @@ describe('equipment', () => {
       const sim = new Sim(seed);
       if (killUntilBagHas(sim, 'old_sword', 400)) {
         const s = sim.inventory().stacks.find((x) => x.itemId === 'old_sword')!;
-        sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: s.rarity });
+        sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: s.rarity, plus: s.plus });
         sim.step();
       }
       return sim.hash();
@@ -710,11 +715,145 @@ describe('item rarity (lucky drops)', () => {
 
     const baseBonus = ITEMS.wolf_leather.stats?.maxHp ?? 0; // what a Normal copy gives
     const maxBefore = player().maxHp;
-    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: stack!.rarity });
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: stack!.rarity, plus: stack!.plus });
     sim.step();
     // the effective max-HP gain exceeds the base bonus -> rarity scaling is wired
     // through equip -> recomputeStats (not self-referential to rarityStat).
     expect(player().maxHp - maxBefore).toBeGreaterThan(baseBonus);
+  });
+});
+
+describe('alchemy ("+N")', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const count = (sim: Sim, id: string): number =>
+    sim.inventory().stacks.filter((s) => s.itemId === id).reduce((n, s) => n + s.qty, 0);
+  const weaponPlus = (sim: Sim): number =>
+    sim.inventory().equipment.find((e) => e.slot === 'weapon')!.plus;
+  const weaponDamage = (sim: Sim): number => meleeDamage(player(sim).str, player(sim).weaponDamage);
+
+  // Equip a freshly-looted (un-enhanced) sword, then stop fighting so refining
+  // happens in isolation (no auto-attack kills dropping more materials mid-test).
+  const equipSwordAndRest = (sim: Sim): void => {
+    expect(killUntilBagHas(sim, 'old_sword', 400)).toBe(true);
+    const s = sim.inventory().stacks.find((x) => x.itemId === 'old_sword')!;
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: s.rarity, plus: s.plus });
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+  };
+  const farm = (sim: Sim, id: string, n: number, cap: number): boolean => {
+    let g = 0;
+    while (count(sim, id) < n && g++ < cap) killNearestEnemy(sim);
+    return count(sim, id) >= n;
+  };
+
+  it('enhanceChance falls as "+" rises, a Lucky Powder helps, and the cap has 0 chance', () => {
+    expect(enhanceChance(0, false)).toBeGreaterThan(enhanceChance(5, false));
+    expect(enhanceChance(5, false)).toBeGreaterThan(enhanceChance(9, false));
+    expect(enhanceChance(5, true)).toBeGreaterThan(enhanceChance(5, false)); // lucky helps
+    expect(enhanceChance(MAX_PLUS, true)).toBe(0); // no attempts past the cap
+    // a "+N" item's bonus grows with the level (and +0 = base)
+    expect(enhanceStat(10, 5)).toBeGreaterThan(enhanceStat(10, 0));
+    expect(enhanceStat(10, 0)).toBe(10);
+  });
+
+  it('refining consumes an Elixir (and a Lucky Powder when used)', () => {
+    const sim = new Sim(7);
+    equipSwordAndRest(sim);
+    expect(farm(sim, 'elixir_weapon', 1, 600)).toBe(true);
+    expect(farm(sim, 'lucky_powder', 1, 600)).toBe(true);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    const elixir0 = count(sim, 'elixir_weapon');
+    const powder0 = count(sim, 'lucky_powder');
+
+    sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: true });
+    sim.step();
+
+    expect(count(sim, 'elixir_weapon')).toBe(elixir0 - 1); // elixir spent on the attempt
+    expect(count(sim, 'lucky_powder')).toBe(powder0 - 1); // powder spent (it was used)
+  });
+
+  it('refining succeeds (+1, stat rises) or fails (-1), staying within [0, MAX_PLUS]', () => {
+    const sim = new Sim(7);
+    equipSwordAndRest(sim);
+    const baseDmg = weaponDamage(sim); // damage at +0
+    const ELIXIRS = 20;
+    expect(farm(sim, 'elixir_weapon', ELIXIRS, 1500)).toBe(true);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+
+    let sawSuccess = false;
+    let sawFail = false;
+    for (let i = 0; i < ELIXIRS; i++) {
+      const before = weaponPlus(sim);
+      sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
+      sim.step();
+      const after = weaponPlus(sim);
+      expect(after).toBeGreaterThanOrEqual(0); // never breaks below +0
+      expect(after).toBeLessThanOrEqual(MAX_PLUS); // never exceeds the cap
+      // whenever the weapon is enhanced, the EFFECTIVE damage reflects it (the
+      // "+N" really flows through equip -> recomputeStats into combat).
+      if (after > 0) expect(weaponDamage(sim)).toBeGreaterThan(baseDmg);
+      if (after === before + 1) sawSuccess = true;
+      else if (after === before - 1) sawFail = true;
+      else if (before === 0 && after === 0) sawFail = true; // failed at +0 (floored)
+      else if (before === after && before === MAX_PLUS) continue; // refused at cap (no-op)
+      else throw new Error(`unexpected "+" change ${before} -> ${after}`);
+    }
+    expect(sawSuccess).toBe(true); // success raised the "+"
+    expect(sawFail).toBe(true); // failure dropped it (or held at +0)
+  });
+
+  it('an enhanced "+N" survives unequip and re-equip (carried on the bag stack)', () => {
+    const sim = new Sim(7);
+    equipSwordAndRest(sim);
+    const sword = sim.inventory().equipment.find((e) => e.slot === 'weapon')!;
+    expect(farm(sim, 'elixir_weapon', 12, 1000)).toBe(true);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+
+    // refine until the weapon reaches at least +1
+    let guard = 0;
+    while (weaponPlus(sim) < 1 && count(sim, 'elixir_weapon') > 0 && guard++ < 12) {
+      sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
+      sim.step();
+    }
+    const enhanced = weaponPlus(sim);
+    expect(enhanced).toBeGreaterThanOrEqual(1);
+    const enhancedDmg = weaponDamage(sim);
+
+    // unequip -> a stack at the enhanced "+N" appears, distinct from any +0
+    sim.sendCommand({ t: 'unequip', slot: 'weapon' });
+    sim.step();
+    const back = sim.inventory().stacks.find((s) => s.itemId === 'old_sword' && s.plus === enhanced);
+    expect(back).toBeDefined();
+
+    // re-equip THAT stack -> the "+N" and its damage are preserved
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: sword.rarity!, plus: enhanced });
+    sim.step();
+    expect(weaponPlus(sim)).toBe(enhanced);
+    expect(weaponDamage(sim)).toBe(enhancedDmg);
+  });
+
+  it('the enhance command stream is deterministic (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      equipSwordAndRest(sim);
+      farm(sim, 'elixir_weapon', 10, 1000);
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      for (let i = 0; i < 10; i++) {
+        sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
+        sim.step();
+      }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
   });
 });
 

@@ -37,6 +37,13 @@ function drawCombatFeedback(): void {
       renderer.flash(ev.targetId); // flash the player
       const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
       if (p.visible) combatText.spawn(p.x, p.y, `NÍVEL ${ev.amount}!`, 'levelup');
+    } else if (ev.kind === 'enhance-success') {
+      renderer.flash(ev.targetId);
+      const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
+      if (p.visible) combatText.spawn(p.x, p.y, `Refino +${ev.amount}!`, 'levelup');
+    } else if (ev.kind === 'enhance-fail') {
+      const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
+      if (p.visible) combatText.spawn(p.x, p.y, `Falhou (+${ev.amount})`, 'fail');
     }
   }
 }

@@ -167,6 +167,7 @@ export class Renderer {
       }
       m.position.set(e.x, 0, e.z);
       m.rotation.y = e.facing;
+      updateGlow(m, e.weaponPlus);
       if (e.id === targetId) targetView = e;
     }
     for (const [id, m] of this.meshes) {
@@ -234,7 +235,40 @@ function makeActor(kind: EntityKind): THREE.Object3D {
   );
   nose.position.set(0, 1.0, 0.55); // +Z is "forward" (matches facing math)
   g.add(body, head, nose);
+  if (kind === 'player') {
+    // Enhancement glow aura — hidden until the equipped weapon hits +3. A
+    // MeshBasicMaterial (no emissive) so the hit-flash never touches it.
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(1.15, 16, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd86b,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    glow.position.y = 1.0;
+    glow.visible = false;
+    g.userData.glow = glow;
+    g.add(glow);
+  }
   return g;
+}
+
+// Show/scale the enhancement glow by the equipped weapon's "+N": nothing below
+// +3, then ramping in brightness/size up to +10. Presentation only.
+function updateGlow(actor: THREE.Object3D, weaponPlus: number): void {
+  const glow = actor.userData.glow as THREE.Mesh | undefined;
+  if (!glow) return;
+  if (weaponPlus < 3) {
+    glow.visible = false;
+    return;
+  }
+  const t = Math.min(1, (weaponPlus - 3) / 7); // 0 at +3 -> 1 at +10
+  glow.visible = true;
+  (glow.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.4 * t;
+  glow.scale.setScalar(1 + 0.25 * t);
 }
 
 // Flat ground ring used as the "selected target" marker (classic WoW/Silkroad

@@ -26,6 +26,10 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
     { itemId: 'wolf_leather', chance: 0.4 },
     { itemId: 'health_potion', chance: 0.25 },
     { itemId: 'old_sword', chance: 0.05 }, // rare-ish placeholder
+    // alchemy materials (rare-ish, so upgrading is a real choice)
+    { itemId: 'lucky_powder', chance: 0.18 },
+    { itemId: 'elixir_weapon', chance: 0.12 },
+    { itemId: 'elixir_armor', chance: 0.12 },
   ],
 };
 export const ENEMY_COUNT = 12;

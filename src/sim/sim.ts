@@ -19,6 +19,9 @@ import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
 import { ABILITIES, type AbilityDef } from './content/abilities';
 import { ITEMS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
+import {
+  MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
+} from './content/enhance';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
 
 const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
@@ -156,6 +159,7 @@ export class Sim implements IWorld {
           qty: s.qty,
           rarity: s.rarity,
           rarityName: rarityDef(s.rarity).name,
+          plus: s.plus,
           equipSlot: ITEMS[s.itemId]?.slot,
         }))
       : [];
@@ -167,6 +171,10 @@ export class Sim implements IWorld {
         name: eq ? (ITEMS[eq.itemId]?.name ?? eq.itemId) : null,
         rarity: eq?.rarity ?? null,
         rarityName: eq ? rarityDef(eq.rarity).name : null,
+        plus: eq?.plus ?? 0,
+        // both chances, so the UI shows the one matching the Lucky Powder toggle.
+        enhanceChance: eq ? enhanceChance(eq.plus, false) : 0,
+        enhanceChanceLucky: eq ? enhanceChance(eq.plus, true) : 0,
       };
     });
     return { capacity: BAG_SLOTS, stacks, equipment };
@@ -189,6 +197,7 @@ export class Sim implements IWorld {
         level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
         gold: e.gold,
         str: e.str, weaponDamage: e.weaponDamage,
+        weaponPlus: e.equipment.weapon?.plus ?? 0,
       });
     }
     return out;
@@ -282,8 +291,12 @@ export class Sim implements IWorld {
     p.gold += this.rng.int(t.goldMin, t.goldMax + 1); // always a little gold
     for (const drop of t.drops) {
       // First decide if the item drops at all, then roll HOW rare it is.
+      // Only equippable gear has a meaningful rarity; materials/consumables drop
+      // as plain Normal. Everything drops un-enhanced (+0).
       if (this.rng.next() < drop.chance) {
-        addToBag(p.bag, drop.itemId, rollRarity(this.rng), 1);
+        const equippable = ITEMS[drop.itemId]?.slot != null;
+        const rarity = equippable ? rollRarity(this.rng) : 'normal';
+        addToBag(p.bag, drop.itemId, rarity, 0, 1);
       }
     }
   }
@@ -341,10 +354,13 @@ export class Sim implements IWorld {
         this.useAbility(p, cmd.slot);
         break;
       case 'equip':
-        this.equip(p, cmd.itemId, cmd.rarity);
+        this.equip(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
       case 'unequip':
         this.unequip(p, cmd.slot);
+        break;
+      case 'enhance':
+        this.enhance(p, cmd.slot, cmd.useLuckyPowder);
         break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
@@ -355,25 +371,52 @@ export class Sim implements IWorld {
   // ---------- equipment ----------
   // Equip an item the player holds in the bag. Swaps out whatever occupies the
   // target slot (back to the bag) and folds the new gear's stats into combat.
-  private equip(p: Entity, itemId: string, rarity: Rarity): void {
+  private equip(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
-    if (!removeFromBag(p.bag, itemId, rarity, 1)) return; // must hold that exact stack
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
     const prev = p.equipment[def.slot];
-    p.equipment[def.slot] = { itemId, rarity };
-    // Return the displaced item to the bag. (Removing the equipped item above
-    // frees room in the common qty-1 case; only a full bag of other stacks
-    // could lose it — acceptable for now, like the loot-on-full behavior.)
-    if (prev) addToBag(p.bag, prev.itemId, prev.rarity, 1);
+    p.equipment[def.slot] = { itemId, rarity, plus };
+    // Return the displaced item to the bag, keeping its "+N". (Removing the new
+    // item above frees room in the common qty-1 case; only a full bag of other
+    // stacks could lose it — acceptable for now, like the loot-on-full case.)
+    if (prev) addToBag(p.bag, prev.itemId, prev.rarity, prev.plus, 1);
     this.recomputeStats(p);
   }
 
   private unequip(p: Entity, slot: EquipSlot): void {
     const eq = p.equipment[slot];
     if (!eq) return;
-    if (!addToBag(p.bag, eq.itemId, eq.rarity, 1)) return; // bag full: keep it equipped
+    if (!addToBag(p.bag, eq.itemId, eq.rarity, eq.plus, 1)) return; // bag full: keep it
     p.equipment[slot] = null;
     this.recomputeStats(p);
+  }
+
+  // ---------- alchemy ("+N") ----------
+  // Attempt to raise the equipped item's "+". Consumes the matching Elixir (and,
+  // if asked and available, a Lucky Powder for a better chance). Success: +1
+  // (cap MAX_PLUS). Failure: -1 (floored at 0 — never breaks, never resets).
+  // All randomness via the sim Rng. Refuses (no material cost) at the cap.
+  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean): void {
+    const eq = p.equipment[slot];
+    if (!eq || eq.plus >= MAX_PLUS) return; // nothing equipped, or already maxed
+    const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
+    if (!removeFromBag(p.bag, elixirId, 'normal', 0, 1)) return; // need the right Elixir
+    let lucky = false;
+    if (useLuckyPowder && removeFromBag(p.bag, 'lucky_powder', 'normal', 0, 1)) lucky = true;
+
+    const success = this.rng.next() < enhanceChance(eq.plus, lucky);
+    eq.plus = success ? Math.min(MAX_PLUS, eq.plus + 1) : Math.max(0, eq.plus - 1);
+    this.recomputeStats(p);
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: success ? 'enhance-success' : 'enhance-fail',
+      targetId: p.id,
+      amount: eq.plus,
+      x: p.x,
+      z: p.z,
+    });
   }
 
   // Recompute EFFECTIVE stats = base (class + level) + sum of equipped gear.
@@ -389,11 +432,13 @@ export class Sim implements IWorld {
       const eq = p.equipment[slot];
       const stats = eq ? ITEMS[eq.itemId]?.stats : undefined;
       if (!eq || !stats) continue;
-      // Higher rarity => bigger bonus from the same item.
-      bonusStr += rarityStat(stats.str ?? 0, eq.rarity);
-      bonusWeapon += rarityStat(stats.weaponDamage ?? 0, eq.rarity);
-      bonusMaxHp += rarityStat(stats.maxHp ?? 0, eq.rarity);
-      bonusMaxMp += rarityStat(stats.maxMp ?? 0, eq.rarity);
+      // base -> rarity-scaled -> "+N"-scaled. Higher rarity AND higher "+" both
+      // grow the bonus.
+      const scale = (v: number): number => enhanceStat(rarityStat(v, eq.rarity), eq.plus);
+      bonusStr += scale(stats.str ?? 0);
+      bonusWeapon += scale(stats.weaponDamage ?? 0);
+      bonusMaxHp += scale(stats.maxHp ?? 0);
+      bonusMaxMp += scale(stats.maxMp ?? 0);
     }
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
@@ -536,11 +581,14 @@ export class Sim implements IWorld {
       mix(e.level); mix(e.xp); mix(e.attrPoints);
       // Economy & bag (stacks are in deterministic insertion order).
       mix(e.gold);
-      for (const s of e.bag) { mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.qty); }
+      for (const s of e.bag) {
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+      }
       // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).
       for (const slot of EQUIP_SLOTS) {
         const eq = e.equipment[slot];
         mix(strHash(eq ? `${eq.itemId}:${eq.rarity}` : ''));
+        mix(eq ? eq.plus : -1);
       }
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
@@ -588,6 +636,20 @@ export function rollRarity(rng: Rng): Rarity {
 // stronger. Pure & deterministic. Provisional multipliers live in content.
 export function rarityStat(value: number, rarity: Rarity): number {
   return Math.round(value * rarityDef(rarity).statMultiplier);
+}
+
+// Success chance of an enhance attempt from `plus` -> plus+1, optionally boosted
+// by a Lucky Powder. 0 at the cap. Pure & deterministic.
+export function enhanceChance(plus: number, lucky: boolean): number {
+  if (plus < 0 || plus >= MAX_PLUS) return 0;
+  const base = ENHANCE_SUCCESS[plus] ?? 0;
+  return Math.min(ENHANCE_CHANCE_CAP, base + (lucky ? LUCKY_POWDER_BONUS : 0));
+}
+
+// A "+N" item's bonus: the rarity-scaled stat, then +ENHANCE_STAT_PER_PLUS per
+// level. Pure & deterministic. So a higher "+" means a bigger stat.
+export function enhanceStat(rarityScaled: number, plus: number): number {
+  return Math.round(rarityScaled * (1 + ENHANCE_STAT_PER_PLUS * plus));
 }
 
 // True when the offset (dx,dz) points into the forward half-plane for `facing`

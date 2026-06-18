@@ -1,18 +1,20 @@
 import type { EntityKind, EquipSlot, Rarity } from '../world_api';
 
 // One stack of items in a bag (the sim's internal shape; the view is
-// ItemStackView in world_api.ts). Stacks key on item id AND rarity, so a SUN
-// sword and a Normal sword are separate stacks.
+// ItemStackView in world_api.ts). Stacks key on item id, rarity AND enhancement
+// (+N), so a +4 SUN sword is a separate stack from a +0 Normal one.
 export interface ItemStack {
   itemId: string;
   rarity: Rarity;
+  plus: number; // enhancement level (0..MAX_PLUS)
   qty: number;
 }
 
-// A specific equipped item instance (id + the rarity it rolled at).
+// A specific equipped item instance (id + the rarity it rolled at + its +N).
 export interface EquippedItem {
   itemId: string;
   rarity: Rarity;
+  plus: number;
 }
 
 // Internal mutable entity. The sim owns these; the outside world only ever
