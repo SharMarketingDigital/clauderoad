@@ -184,6 +184,43 @@ html, body {
   overflow: hidden;
 }
 .bag-slot.filled { border-color: var(--gold); background: #1c2533; }
+.bag-slot.equippable { cursor: pointer; }
+.bag-slot.equippable:hover { border-color: #fff; }
+
+/* Equipped-slots row inside the bag window. */
+.equip-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.equip-slot {
+  flex: 1;
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--ink);
+  background: #161c25;
+  border: 1px dashed #3a4757;
+  border-radius: 4px;
+}
+.equip-slot.filled {
+  border-style: solid;
+  border-color: var(--gold);
+  background: #241c12;
+  cursor: pointer;
+}
+.equip-slot.filled:hover { border-color: #fff; }
+
+.bag-stats {
+  font-size: 11px;
+  color: var(--ink);
+  opacity: 0.9;
+  margin-bottom: 10px;
+  text-align: center;
+}
 
 /* Action bar — fixed row of ability slots, centered above the hint. */
 .action-bar {

@@ -11,12 +11,16 @@
 
 import { Rng } from './rng';
 import type { Entity } from './types';
-import type { IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView } from '../world_api';
+import type {
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, EquipSlot,
+} from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
 import { ABILITIES, type AbilityDef } from './content/abilities';
 import { ITEMS } from './content/items';
-import { BAG_SLOTS, addToBag } from './inventory';
+import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
+
+const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
 
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
@@ -78,10 +82,12 @@ export class Sim implements IWorld {
       hp: cls.baseHp, maxHp: cls.baseHp,
       targetId: null,
       str: cls.baseStr, weaponDamage: cls.weaponDamage,
+      baseStr: cls.baseStr, baseWeaponDamage: cls.weaponDamage,
+      baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
-      gold: 0, bag: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null },
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -96,10 +102,12 @@ export class Sim implements IWorld {
       x, z, facing: 0,
       hp: ENEMY_TEMPLATE.hp, maxHp: ENEMY_TEMPLATE.hp,
       targetId: null,
-      str: 0, weaponDamage: 0, swingTicks: 0, nextSwingAt: 0,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: ENEMY_TEMPLATE.hp, baseMaxMp: 0,
+      swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
-      gold: 0, bag: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null },
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -141,9 +149,18 @@ export class Sim implements IWorld {
   inventory(): InventoryView {
     const p = this.ents.get(this.localId);
     const stacks = p
-      ? p.bag.map((s) => ({ itemId: s.itemId, name: ITEMS[s.itemId]?.name ?? s.itemId, qty: s.qty }))
+      ? p.bag.map((s) => ({
+          itemId: s.itemId,
+          name: ITEMS[s.itemId]?.name ?? s.itemId,
+          qty: s.qty,
+          equipSlot: ITEMS[s.itemId]?.slot,
+        }))
       : [];
-    return { capacity: BAG_SLOTS, stacks };
+    const equipment = EQUIP_SLOTS.map((slot) => {
+      const id = p ? p.equipment[slot] : null;
+      return { slot, itemId: id ?? null, name: id ? (ITEMS[id]?.name ?? id) : null };
+    });
+    return { capacity: BAG_SLOTS, stacks, equipment };
   }
 
   sendCommand(cmd: Command): void {
@@ -162,6 +179,7 @@ export class Sim implements IWorld {
         mp: e.mp, maxMp: e.maxMp,
         level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
         gold: e.gold,
+        str: e.str, weaponDamage: e.weaponDamage,
       });
     }
     return out;
@@ -270,8 +288,9 @@ export class Sim implements IWorld {
 
   private levelUp(p: Entity): void {
     p.level += 1;
-    p.maxHp += HP_PER_LEVEL;
-    p.maxMp += MP_PER_LEVEL;
+    p.baseMaxHp += HP_PER_LEVEL;
+    p.baseMaxMp += MP_PER_LEVEL;
+    this.recomputeStats(p); // fold base + gear into effective max HP/MP
     p.hp = p.maxHp; // ding! restore to full — rewarding, gentle pacing
     p.mp = p.maxMp;
     p.attrPoints += ATTR_POINTS_PER_LEVEL;
@@ -309,10 +328,66 @@ export class Sim implements IWorld {
       case 'use-ability':
         this.useAbility(p, cmd.slot);
         break;
+      case 'equip':
+        this.equip(p, cmd.itemId);
+        break;
+      case 'unequip':
+        this.unequip(p, cmd.slot);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
     }
+  }
+
+  // ---------- equipment ----------
+  // Equip an item the player holds in the bag. Swaps out whatever occupies the
+  // target slot (back to the bag) and folds the new gear's stats into combat.
+  private equip(p: Entity, itemId: string): void {
+    const def = ITEMS[itemId];
+    if (!def || !def.slot) return; // unknown or not equippable
+    if (!removeFromBag(p.bag, itemId, 1)) return; // must actually hold it
+    const prev = p.equipment[def.slot];
+    p.equipment[def.slot] = itemId;
+    // Return the displaced item to the bag. (Removing the equipped item above
+    // frees room in the common qty-1 case; only a full bag of other stacks
+    // could lose it — acceptable for now, like the loot-on-full behavior.)
+    if (prev) addToBag(p.bag, prev, 1);
+    this.recomputeStats(p);
+  }
+
+  private unequip(p: Entity, slot: EquipSlot): void {
+    const itemId = p.equipment[slot];
+    if (!itemId) return;
+    if (!addToBag(p.bag, itemId, 1)) return; // bag full: keep it equipped
+    p.equipment[slot] = null;
+    this.recomputeStats(p);
+  }
+
+  // Recompute EFFECTIVE stats = base (class + level) + sum of equipped gear.
+  // Combat reads p.str/p.weaponDamage/p.maxHp/p.maxMp, so this is what makes a
+  // weapon actually change auto-attack and ability damage. Current HP/MP are
+  // clamped down if a max dropped (e.g. unequipping +HP armor).
+  private recomputeStats(p: Entity): void {
+    let bonusStr = 0;
+    let bonusWeapon = 0;
+    let bonusMaxHp = 0;
+    let bonusMaxMp = 0;
+    for (const slot of EQUIP_SLOTS) {
+      const id = p.equipment[slot];
+      const stats = id ? ITEMS[id]?.stats : undefined;
+      if (!stats) continue;
+      bonusStr += stats.str ?? 0;
+      bonusWeapon += stats.weaponDamage ?? 0;
+      bonusMaxHp += stats.maxHp ?? 0;
+      bonusMaxMp += stats.maxMp ?? 0;
+    }
+    p.str = p.baseStr + bonusStr;
+    p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
+    p.maxHp = p.baseMaxHp + bonusMaxHp;
+    p.maxMp = p.baseMaxMp + bonusMaxMp;
+    if (p.hp > p.maxHp) p.hp = p.maxHp;
+    if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
 
   // Cast an action-bar ability on the current target. Gated by the global
@@ -449,6 +524,8 @@ export class Sim implements IWorld {
       // Economy & bag (stacks are in deterministic insertion order).
       mix(e.gold);
       for (const s of e.bag) { mix(strHash(s.itemId)); mix(s.qty); }
+      // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).
+      for (const slot of EQUIP_SLOTS) mix(strHash(e.equipment[slot] ?? ''));
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);

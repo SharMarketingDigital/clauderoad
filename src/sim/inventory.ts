@@ -24,3 +24,13 @@ export function addToBag(
   bag.push({ itemId, qty });
   return true;
 }
+
+// Remove `qty` of an item from the bag (decrementing or dropping the stack).
+// Returns false if the bag doesn't hold enough.
+export function removeFromBag(bag: ItemStack[], itemId: string, qty: number): boolean {
+  const idx = bag.findIndex((s) => s.itemId === itemId);
+  if (idx < 0 || bag[idx].qty < qty) return false;
+  bag[idx].qty -= qty;
+  if (bag[idx].qty <= 0) bag.splice(idx, 1);
+  return true;
+}

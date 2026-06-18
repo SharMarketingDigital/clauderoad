@@ -9,6 +9,10 @@
 
 export type EntityKind = 'player' | 'enemy';
 
+// Equipment slots a character can fill. Defined here (the seam) so both the
+// sim's item content and the UI agree on the set.
+export type EquipSlot = 'weapon' | 'armor';
+
 export interface EntityView {
   readonly id: number;
   readonly kind: EntityKind;
@@ -26,19 +30,34 @@ export interface EntityView {
   readonly xpToNext: number; // XP needed to reach the next level
   readonly attrPoints: number; // unspent attribute points ("pontos disponíveis")
   readonly gold: number; // currency (0 for entities that don't carry gold)
+  // EFFECTIVE combat stats (base + equipped gear). The character sheet shows
+  // these and they drive damage, so equipping a weapon visibly raises them.
+  readonly str: number;
+  readonly weaponDamage: number;
 }
 
 // One stack in the player's bag, with the item's display name resolved.
+// `equipSlot` is set when the item is equippable (so the UI knows a click on it
+// should equip it, and into which slot).
 export interface ItemStackView {
   readonly itemId: string;
   readonly name: string;
   readonly qty: number;
+  readonly equipSlot?: EquipSlot;
 }
 
-// The player's bag for the inventory window: filled stacks + total slot count.
+// One equipment slot's current contents (null when empty).
+export interface EquipView {
+  readonly slot: EquipSlot;
+  readonly itemId: string | null;
+  readonly name: string | null;
+}
+
+// The player's bag + equipped slots, for the inventory window.
 export interface InventoryView {
   readonly capacity: number;
   readonly stacks: ReadonlyArray<ItemStackView>;
+  readonly equipment: ReadonlyArray<EquipView>;
 }
 
 // Player intent / commands. The client streams these into the world.
@@ -51,7 +70,9 @@ export type Command =
   | { t: 'stop' }
   | { t: 'cycle-target' } // Tab: select the nearest enemy in front, then cycle
   | { t: 'set-target'; id: number | null } // click a specific entity (null clears)
-  | { t: 'use-ability'; slot: number }; // press an action-bar slot (1-based)
+  | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
+  | { t: 'equip'; itemId: string } // equip an item from the bag into its slot
+  | { t: 'unequip'; slot: EquipSlot }; // move an equipped item back to the bag
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

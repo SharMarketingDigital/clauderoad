@@ -555,6 +555,41 @@ describe('loot & inventory', () => {
   });
 });
 
+describe('equipment', () => {
+  it('equipping the Espada Velha raises attack damage; unequipping lowers it and returns it', () => {
+    const sim = new Sim(7);
+    const player = () => sim.entities().find((e) => e.kind === 'player')!;
+    const dmg = () => meleeDamage(player().str, player().weaponDamage); // per-swing damage
+
+    // Grind until the sword drops into the bag (5% per kill; fixed seed, so this
+    // is deterministic — the cap is just a safety net well above the ~20 expected).
+    let got = false;
+    for (let i = 0; i < 400 && !got; i++) {
+      killNearestEnemy(sim);
+      got = sim.inventory().stacks.some((s) => s.itemId === 'old_sword');
+    }
+    expect(got).toBe(true);
+    const before = dmg();
+
+    // Equip from the bag: it moves into the weapon slot and out of the bag, and
+    // the computed attack damage actually goes up.
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
+    sim.step();
+    const equipped = sim.inventory();
+    expect(equipped.equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('old_sword');
+    expect(equipped.stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
+    expect(dmg()).toBeGreaterThan(before);
+
+    // Unequip: back to the bag, damage drops to exactly the pre-equip value.
+    sim.sendCommand({ t: 'unequip', slot: 'weapon' });
+    sim.step();
+    const unequipped = sim.inventory();
+    expect(unequipped.equipment.find((e) => e.slot === 'weapon')!.itemId).toBeNull();
+    expect(unequipped.stacks.some((s) => s.itemId === 'old_sword')).toBe(true);
+    expect(dmg()).toBe(before);
+  });
+});
+
 // Guard the load-bearing sim invariants that tsc alone won't catch: no
 // non-deterministic clocks/RNG and no presentation-layer imports leaking into
 // the deterministic core. Scans the source (comments stripped to avoid the

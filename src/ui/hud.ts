@@ -1,5 +1,5 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
-import type { IWorld, AbilityView, InventoryView } from '../world_api';
+import type { IWorld, AbilityView, InventoryView, EntityView } from '../world_api';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -24,7 +24,14 @@ export class Hud {
   private bagTitle: HTMLDivElement;
   private bagGrid: HTMLDivElement;
   private bagSlots: HTMLDivElement[] = [];
+  private bagStats: HTMLDivElement;
+  private equipRow: HTMLDivElement;
+  private equipCells: HTMLDivElement[] = [];
   private bagOpen = false;
+  // latest world + inventory, captured each frame so click handlers (equip /
+  // unequip) can send commands against the current state.
+  private world: IWorld | null = null;
+  private lastInv: InventoryView | null = null;
 
   constructor() {
     this.root = document.createElement('div');
@@ -50,6 +57,8 @@ export class Hud {
       <div class="action-bar"></div>
       <div class="bag" hidden>
         <div class="bag-title">Bolsa</div>
+        <div class="equip-row"></div>
+        <div class="bag-stats"></div>
         <div class="bag-grid"></div>
       </div>
       <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; arrastar gira</div>
@@ -71,6 +80,8 @@ export class Hud {
     this.bag = this.root.querySelector('.bag') as HTMLDivElement;
     this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
     this.bagGrid = this.root.querySelector('.bag-grid') as HTMLDivElement;
+    this.bagStats = this.root.querySelector('.bag-stats') as HTMLDivElement;
+    this.equipRow = this.root.querySelector('.equip-row') as HTMLDivElement;
 
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
@@ -86,6 +97,7 @@ export class Hud {
   }
 
   update(world: IWorld): void {
+    this.world = world; // so bag click handlers can send equip/unequip commands
     const id = world.localPlayerId();
     if (id == null) return;
     const ents = world.entities();
@@ -120,14 +132,39 @@ export class Hud {
     this.goldAmt.textContent = String(p.gold);
 
     this.updateActionBar(world.abilities());
-    if (this.bagOpen) this.updateBag(world.inventory());
+    if (this.bagOpen) this.updateBag(world.inventory(), p);
   }
 
-  private updateBag(inv: InventoryView): void {
-    // Build the fixed slot grid once (capacity comes from the sim).
+  private updateBag(inv: InventoryView, p: EntityView): void {
+    this.lastInv = inv; // click handlers read this to know what's where
+
+    // Equipment slots (click an occupied one to unequip). Built once.
+    while (this.equipCells.length < inv.equipment.length) {
+      const j = this.equipCells.length;
+      const cell = document.createElement('div');
+      cell.className = 'equip-slot';
+      cell.addEventListener('click', () => this.onEquipClick(j));
+      this.equipRow.appendChild(cell);
+      this.equipCells.push(cell);
+    }
+    for (let j = 0; j < this.equipCells.length; j++) {
+      const eq = inv.equipment[j];
+      const cell = this.equipCells[j];
+      const label = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      cell.classList.toggle('filled', eq.itemId != null);
+      cell.title = eq.name ? `${label}: ${eq.name}` : label;
+      cell.textContent = eq.name ? `${label}: ${eq.name}` : `${label}: —`;
+    }
+
+    // Tiny "ficha": the effective stats the equipment drives.
+    this.bagStats.textContent = `Força ${p.str} · Dano de arma ${p.weaponDamage}`;
+
+    // Bag grid (click an equippable stack to equip it). Slots built once.
     while (this.bagSlots.length < inv.capacity) {
+      const i = this.bagSlots.length;
       const slot = document.createElement('div');
       slot.className = 'bag-slot';
+      slot.addEventListener('click', () => this.onBagClick(i));
       this.bagGrid.appendChild(slot);
       this.bagSlots.push(slot);
     }
@@ -137,14 +174,27 @@ export class Hud {
       const stack = inv.stacks[i];
       if (stack) {
         slot.classList.add('filled');
-        slot.title = stack.name;
+        slot.classList.toggle('equippable', stack.equipSlot != null);
+        slot.title = stack.equipSlot ? `${stack.name} (clique p/ equipar)` : stack.name;
         slot.textContent = stack.qty > 1 ? `${stack.name} ×${stack.qty}` : stack.name;
       } else {
-        slot.classList.remove('filled');
+        slot.classList.remove('filled', 'equippable');
         slot.title = '';
         slot.textContent = '';
       }
     }
+  }
+
+  // Click a bag stack -> equip it (no-op for non-equippable items).
+  private onBagClick(i: number): void {
+    const stack = this.lastInv?.stacks[i];
+    if (stack?.equipSlot && this.world) this.world.sendCommand({ t: 'equip', itemId: stack.itemId });
+  }
+
+  // Click an equipped slot -> unequip it back to the bag.
+  private onEquipClick(j: number): void {
+    const eq = this.lastInv?.equipment[j];
+    if (eq?.itemId && this.world) this.world.sendCommand({ t: 'unequip', slot: eq.slot });
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {
