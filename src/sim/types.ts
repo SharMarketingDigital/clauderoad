@@ -14,6 +14,11 @@ export interface Entity {
   // tab-target: id of the selected enemy, or null. Only the player uses this
   // today; enemies keep it null.
   targetId: number | null;
+  // combat (melee auto-attack). Enemies don't attack yet, so they carry zeros.
+  str: number;
+  weaponDamage: number;
+  swingTicks: number; // ticks between melee swings (0 = cannot auto-attack)
+  nextSwingAt: number; // earliest tick the next swing may land
   // enemy wander state
   targetX: number;
   targetZ: number;

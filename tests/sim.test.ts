@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { Sim } from '../src/sim/sim';
+import { Sim, meleeDamage, STR_TO_DAMAGE, RESPAWN_TICKS, inFrontOf } from '../src/sim/sim';
+import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
+import { CLASSES } from '../src/sim/content/classes';
 import type { Command } from '../src/world_api';
 
 // Run a FIXED, scripted command sequence against a fresh Sim and return the
@@ -123,5 +125,109 @@ describe('tab-target', () => {
     sim.sendCommand({ t: 'set-target', id: null });
     sim.step();
     expect(sim.localTargetId()).toBeNull();
+  });
+});
+
+// Drive `sim`'s player one tick toward its current target (id `tid`). Mirrors
+// what a human (or the HUD-driven input) does: walk into melee range.
+function chaseTarget(sim: Sim, tid: number | null): void {
+  const t = sim.entities().find((e) => e.id === tid);
+  const p = sim.entities().find((e) => e.kind === 'player')!;
+  sim.sendCommand(t ? { t: 'move', dx: t.x - p.x, dz: t.z - p.z } : { t: 'stop' });
+  sim.step();
+}
+
+describe('combat', () => {
+  it('melee damage = weapon + floor(str * STR_TO_DAMAGE)', () => {
+    expect(meleeDamage(20, 6)).toBe(6 + Math.floor(20 * STR_TO_DAMAGE)); // warrior defaults
+    expect(meleeDamage(0, 0)).toBe(0);
+    expect(meleeDamage(7, 3)).toBe(3 + Math.floor(7 * STR_TO_DAMAGE));
+    // damage rises with both inputs
+    expect(meleeDamage(40, 6)).toBeGreaterThan(meleeDamage(20, 6));
+    expect(meleeDamage(20, 12)).toBeGreaterThan(meleeDamage(20, 6));
+  });
+
+  it('inFrontOf: only the forward half-plane counts as "in front"', () => {
+    // facing 0 => forward is +Z
+    expect(inFrontOf(0, 1, 0)).toBe(true); // ahead
+    expect(inFrontOf(0, -1, 0)).toBe(false); // behind
+    expect(inFrontOf(1, 0, 0)).toBe(false); // 90° to the side is not "in front"
+    // facing +X (Math.PI/2) => forward is +X
+    expect(inFrontOf(1, 0, Math.PI / 2)).toBe(true);
+    expect(inFrontOf(-1, 0, Math.PI / 2)).toBe(false);
+  });
+
+  it('damage lands once per swing (timer-gated), and the HP the HUD reads drops by meleeDamage', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId()!;
+    const hp = (): number | undefined => sim.entities().find((e) => e.id === tid)?.hp;
+    const full = hp()!;
+    expect(full).toBeGreaterThan(0);
+
+    // close in until the first swing lands
+    let guard = 0;
+    while (hp() === full && guard++ < 2000) chaseTarget(sim, tid);
+    expect(guard).toBeLessThan(2000);
+
+    // exactly one swing's worth of damage (proves discrete swings, not per-tick)
+    const cls = CLASSES[0];
+    const swing = meleeDamage(cls.baseStr, cls.weaponDamage);
+    const afterFirst = hp()!;
+    expect(afterFirst).toBe(full - swing);
+
+    // the swing timer must gate the next hit: HP stays flat well within one
+    // swing window (~40 ticks). A per-tick or one-shot model would fail this.
+    for (let i = 0; i < 30; i++) {
+      chaseTarget(sim, tid);
+      expect(hp()).toBe(afterFirst);
+    }
+  });
+
+  it('attacks until the target dies, clears the selection, then a same-type enemy respawns ~15s later', () => {
+    const sim = new Sim(7);
+    const enemyCount = (): number => sim.entities().filter((e) => e.kind === 'enemy').length;
+    expect(enemyCount()).toBe(ENEMY_COUNT);
+
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId();
+    expect(tid).not.toBeNull();
+
+    const alive = (): boolean => sim.entities().some((e) => e.id === tid);
+    let ticks = 0;
+    while (alive() && ticks < 2000) {
+      chaseTarget(sim, tid);
+      ticks++;
+    }
+    expect(ticks).toBeLessThan(2000); // it actually died (didn't time out)
+    expect(sim.localTargetId()).toBeNull(); // dead target clears the selection
+    expect(enemyCount()).toBe(ENEMY_COUNT - 1);
+
+    // Pin the ~15s delay: still one short right up to the respawn tick, then back.
+    const deathTick = sim.tick;
+    sim.sendCommand({ t: 'stop' });
+    while (sim.tick < deathTick + RESPAWN_TICKS - 1) sim.step();
+    expect(enemyCount()).toBe(ENEMY_COUNT - 1); // not yet
+    sim.step(); // reaches deathTick + RESPAWN_TICKS
+    expect(enemyCount()).toBe(ENEMY_COUNT); // respawned
+    // ...and it is the same type (only one template today).
+    const names = sim.entities().filter((e) => e.kind === 'enemy').map((e) => e.name);
+    expect(names.every((n) => n === ENEMY_TEMPLATE.name)).toBe(true);
+  });
+
+  it('the kill + rng-respawn path is deterministic (same seed => identical hash)', () => {
+    const runKill = (seed: number): string => {
+      const sim = new Sim(seed);
+      sim.sendCommand({ t: 'cycle-target' });
+      sim.step();
+      const tid = sim.localTargetId();
+      for (let i = 0; i < 800; i++) chaseTarget(sim, tid); // chase + kill
+      for (let i = 0; i <= RESPAWN_TICKS; i++) sim.step(); // idle through the respawn
+      return sim.hash();
+    };
+    expect(runKill(7)).toBe(runKill(7));
+    expect(runKill(7)).not.toBe(runKill(123));
   });
 });

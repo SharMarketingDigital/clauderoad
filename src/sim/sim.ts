@@ -21,6 +21,9 @@ export const WORLD_HALF = 60; // world spans -WORLD_HALF..WORLD_HALF on X and Z
 
 const PLAYER_SPEED = 6; // units/sec
 const ENEMY_SPEED = 2.4; // units/sec
+const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
+const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
+export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
 
 export class Sim implements IWorld {
   tick = 0;
@@ -35,6 +38,8 @@ export class Sim implements IWorld {
   // host and drained at the start of the next tick — so ALL state mutation
   // still happens inside step(), keeping the sim deterministic.
   private pending: Command[] = [];
+  // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
+  private respawnQueue: number[] = [];
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -51,6 +56,8 @@ export class Sim implements IWorld {
       x: 0, z: 0, facing: 0,
       hp: cls.baseHp, maxHp: cls.baseHp,
       targetId: null,
+      str: cls.baseStr, weaponDamage: cls.weaponDamage,
+      swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -65,6 +72,7 @@ export class Sim implements IWorld {
       x, z, facing: 0,
       hp: ENEMY_TEMPLATE.hp, maxHp: ENEMY_TEMPLATE.hp,
       targetId: null,
+      str: 0, weaponDamage: 0, swingTicks: 0, nextSwingAt: 0,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -110,8 +118,54 @@ export class Sim implements IWorld {
     for (const e of this.ents.values()) {
       if (e.kind === 'enemy') this.stepEnemy(e);
     }
+    // Combat runs on the post-movement positions, then deaths repopulate.
+    if (player) this.autoAttack(player);
+    this.processRespawns();
     // A target that died or no longer exists clears the selection.
     if (player) this.validateTarget(player);
+  }
+
+  // ---------- combat (melee auto-attack) ----------
+  // When the player has a living target that is in range and in front, land a
+  // swing every `swingTicks`. The timer is preserved while out of range, so a
+  // ready swing fires the moment the target comes back into reach.
+  private autoAttack(p: Entity): void {
+    if (p.targetId == null || p.swingTicks <= 0) return;
+    const t = this.ents.get(p.targetId);
+    if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // validateTarget clears it
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > MELEE_RANGE) return; // out of range: hold the swing
+    // Require facing the target only while approaching. At contact the bodies
+    // overlap, the direction vector collapses to ~0, and the player constantly
+    // overshoots — requiring "in front" there would skip swings on the enemy
+    // we're standing on. (The frontal rule still applies on the approach.)
+    if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
+    if (this.tick < p.nextSwingAt) return; // swing still on cooldown
+    p.nextSwingAt = this.tick + p.swingTicks;
+    t.hp -= meleeDamage(p.str, p.weaponDamage);
+    if (t.hp <= 0) {
+      t.hp = 0;
+      this.killEnemy(t);
+    }
+  }
+
+  private killEnemy(e: Entity): void {
+    this.ents.delete(e.id);
+    // Respawn a same-type enemy after a delay. (One template today; pass the
+    // template id here once there are several.)
+    this.respawnQueue.push(this.tick + RESPAWN_TICKS);
+  }
+
+  private processRespawns(): void {
+    if (this.respawnQueue.length === 0) return;
+    const remaining: number[] = [];
+    for (const at of this.respawnQueue) {
+      if (this.tick >= at) this.spawnEnemy();
+      else remaining.push(at);
+    }
+    this.respawnQueue = remaining;
   }
 
   // ---------- target selection (tab-target) ----------
@@ -141,14 +195,7 @@ export class Sim implements IWorld {
       p.targetId = null;
       return;
     }
-    const fx = Math.sin(p.facing);
-    const fz = Math.cos(p.facing);
-    const inFront = enemies.filter((e) => {
-      const dx = e.x - p.x;
-      const dz = e.z - p.z;
-      const len = Math.hypot(dx, dz) || 1;
-      return (dx / len) * fx + (dz / len) * fz > 0;
-    });
+    const inFront = enemies.filter((e) => inFrontOf(e.x - p.x, e.z - p.z, p.facing));
     const pool = inFront.length > 0 ? inFront : enemies;
     // Sort by distance; break ties by id so cycling is deterministic.
     pool.sort((a, b) => {
@@ -219,10 +266,29 @@ export class Sim implements IWorld {
       const e = this.ents.get(id)!;
       mix(id); mix(e.x); mix(e.z); mix(e.facing); mix(e.hp);
       mix(e.targetId == null ? 0 : e.targetId);
+      mix(e.nextSwingAt);
     }
+    // Pending respawns are deterministic state too (FIFO order is stable).
+    for (const at of this.respawnQueue) mix(at);
     mix(this.tick);
     return h.toString(16);
   }
+}
+
+// Provisional melee hit. Grounded loosely in WoW Classic, where a swing deals
+// weapon damage plus a contribution from attack power, and Strength feeds AP
+// (~1 AP per STR for warriors). Simplified here to weapon + floor(STR * k).
+// No RNG, so it's deterministic; tune the curve later (see GDD §B1).
+export const STR_TO_DAMAGE = 0.5;
+export function meleeDamage(str: number, weaponDamage: number): number {
+  return weaponDamage + Math.floor(str * STR_TO_DAMAGE);
+}
+
+// True when the offset (dx,dz) points into the forward half-plane for `facing`
+// (the actor's forward is +Z at facing 0). Used by both target cycling and the
+// melee swing gate. Normalization is unnecessary — only the sign matters.
+export function inFrontOf(dx: number, dz: number, facing: number): boolean {
+  return dx * Math.sin(facing) + dz * Math.cos(facing) > 0;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
