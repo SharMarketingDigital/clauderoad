@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import type { IWorld, EntityKind, EntityView } from '../world_api';
 
+const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
+
 export class Renderer {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
@@ -11,6 +13,11 @@ export class Renderer {
   private raycaster = new THREE.Raycaster();
   // One reusable selection marker, moved onto the targeted enemy each frame.
   private selectionRing: THREE.Mesh;
+  // Hit flashes: entity id -> seconds of white flash remaining. Driven by the
+  // host clock (presentation only), decayed each frame.
+  private flashes = new Map<number, number>();
+  private lastRenderMs = 0;
+  private projV = new THREE.Vector3(); // scratch for project()
 
   // third-person orbit camera state
   private camYaw = 0;
@@ -104,10 +111,45 @@ export class Renderer {
     return this.camYaw;
   }
 
+  // Start a quick white flash on an entity's model (e.g. when it takes a hit).
+  flash(id: number): void {
+    this.flashes.set(id, FLASH_DURATION);
+  }
+
+  // Project a world point to screen pixels (for DOM overlays like damage text).
+  // `visible` is false when the point is behind the camera / outside the frustum.
+  project(x: number, y: number, z: number): { x: number; y: number; visible: boolean } {
+    this.projV.set(x, y, z).project(this.camera);
+    return {
+      x: (this.projV.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-this.projV.y * 0.5 + 0.5) * window.innerHeight,
+      visible: this.projV.z > -1 && this.projV.z < 1,
+    };
+  }
+
   render(world: IWorld): void {
+    const nowMs = performance.now(); // host clock — fine here, never in src/sim
+    const dt = this.lastRenderMs ? Math.min(0.1, (nowMs - this.lastRenderMs) / 1000) : 0;
+    this.lastRenderMs = nowMs;
+
     this.sync(world);
+    this.applyFlashes(dt);
     this.updateCamera(world);
     this.gl.render(this.scene, this.camera);
+  }
+
+  private applyFlashes(dt: number): void {
+    for (const [id, remaining] of this.flashes) {
+      const m = this.meshes.get(id);
+      const left = remaining - dt;
+      if (!m || left <= 0) {
+        if (m) setFlash(m, 0);
+        this.flashes.delete(id);
+        continue;
+      }
+      this.flashes.set(id, left);
+      setFlash(m, left / FLASH_DURATION); // fade the white glow out
+    }
   }
 
   private sync(world: IWorld): void {
@@ -211,6 +253,20 @@ function makeSelectionRing(): THREE.Mesh {
   ring.position.y = 0.06; // just above the ground plane
   ring.visible = false;
   return ring;
+}
+
+// Drive an actor's white hit-flash by tinting its materials' emissive. intensity
+// 0 restores the normal (unlit-emissive) look. Each actor owns its materials
+// (see makeActor), so this never bleeds onto other entities.
+function setFlash(group: THREE.Object3D, intensity: number): void {
+  group.traverse((o) => {
+    const mat = (o as THREE.Mesh).material;
+    if (mat && !Array.isArray(mat) && (mat as THREE.MeshStandardMaterial).emissive) {
+      const m = mat as THREE.MeshStandardMaterial;
+      m.emissive.setRGB(1, 1, 1);
+      m.emissiveIntensity = intensity;
+    }
+  });
 }
 
 function clamp(v: number, lo: number, hi: number): number {

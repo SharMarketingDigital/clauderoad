@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { Sim, meleeDamage, STR_TO_DAMAGE, RESPAWN_TICKS, inFrontOf } from '../src/sim/sim';
+import {
+  Sim,
+  meleeDamage,
+  STR_TO_DAMAGE,
+  RESPAWN_TICKS,
+  EVENT_TTL_TICKS,
+  inFrontOf,
+} from '../src/sim/sim';
 import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import type { Command } from '../src/world_api';
@@ -229,5 +236,54 @@ describe('combat', () => {
     };
     expect(runKill(7)).toBe(runKill(7));
     expect(runKill(7)).not.toBe(runKill(123));
+  });
+});
+
+describe('combat events (damage feedback)', () => {
+  it('a swing emits a damage event the render can read, at the target position', () => {
+    const sim = new Sim(7);
+    expect(sim.recentEvents().length).toBe(0); // nothing has happened yet
+
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId()!;
+
+    // chase until the first swing lands and produces an event
+    let guard = 0;
+    while (sim.recentEvents().length === 0 && guard++ < 2000) chaseTarget(sim, tid);
+    expect(guard).toBeLessThan(2000);
+
+    const ev = sim.recentEvents()[0];
+    expect(ev.kind).toBe('damage');
+    expect(ev.targetId).toBe(tid);
+    const cls = CLASSES[0];
+    expect(ev.amount).toBe(meleeDamage(cls.baseStr, cls.weaponDamage));
+    expect(ev.tick).toBe(sim.tick); // emitted on the current tick
+    expect(ev.seq).toBeGreaterThan(0); // monotonic id for de-dup
+
+    // position was captured from the (still-living) target on the hit tick
+    const target = sim.entities().find((e) => e.id === tid)!;
+    expect(ev.x).toBe(target.x);
+    expect(ev.z).toBe(target.z);
+  });
+
+  it('damage events are pruned after the retention window', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'cycle-target' });
+    sim.step();
+    const tid = sim.localTargetId()!;
+
+    let guard = 0;
+    while (sim.recentEvents().length === 0 && guard++ < 2000) chaseTarget(sim, tid);
+    expect(sim.recentEvents().length).toBeGreaterThan(0);
+    const evTick = sim.recentEvents()[0].tick;
+
+    // stop fighting (clear target so no new events) and let the window elapse
+    sim.sendCommand({ t: 'set-target', id: null });
+    while (sim.tick <= evTick + EVENT_TTL_TICKS) {
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+    }
+    expect(sim.recentEvents().length).toBe(0);
   });
 });

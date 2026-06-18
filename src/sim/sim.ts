@@ -11,7 +11,7 @@
 
 import { Rng } from './rng';
 import type { Entity } from './types';
-import type { IWorld, EntityView, Command } from '../world_api';
+import type { IWorld, EntityView, Command, SimEvent } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
 
@@ -24,6 +24,7 @@ const ENEMY_SPEED = 2.4; // units/sec
 const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
 export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
+export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 
 export class Sim implements IWorld {
   tick = 0;
@@ -40,6 +41,10 @@ export class Sim implements IWorld {
   private pending: Command[] = [];
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
   private respawnQueue: number[] = [];
+  // Recent presentation events (damage numbers, hit flashes). Bounded by age
+  // (EVENT_TTL_TICKS) so it never grows unbounded; `seq` is monotonic forever.
+  private events: SimEvent[] = [];
+  private nextEventSeq = 1;
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -87,6 +92,10 @@ export class Sim implements IWorld {
     return p ? p.targetId : null;
   }
 
+  recentEvents(): ReadonlyArray<SimEvent> {
+    return this.events;
+  }
+
   sendCommand(cmd: Command): void {
     // Movement is a held intent (latest wins); everything else is a one-shot
     // action queued for the next tick.
@@ -121,6 +130,7 @@ export class Sim implements IWorld {
     // Combat runs on the post-movement positions, then deaths repopulate.
     if (player) this.autoAttack(player);
     this.processRespawns();
+    this.pruneEvents();
     // A target that died or no longer exists clears the selection.
     if (player) this.validateTarget(player);
   }
@@ -144,11 +154,32 @@ export class Sim implements IWorld {
     if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
     p.nextSwingAt = this.tick + p.swingTicks;
-    t.hp -= meleeDamage(p.str, p.weaponDamage);
+    const dmg = meleeDamage(p.str, p.weaponDamage);
+    t.hp -= dmg;
+    // Emit a presentation event at the target's current position (captured now
+    // so the floating number still shows even if this swing kills it).
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'damage',
+      targetId: t.id,
+      amount: dmg,
+      x: t.x,
+      z: t.z,
+    });
     if (t.hp <= 0) {
       t.hp = 0;
       this.killEnemy(t);
     }
+  }
+
+  // Drop presentation events older than the retention window. They are purely
+  // cosmetic, so this never affects gameplay or determinism of the world state.
+  private pruneEvents(): void {
+    if (this.events.length === 0) return;
+    const cutoff = this.tick - EVENT_TTL_TICKS;
+    if (this.events[0].tick > cutoff) return; // nothing old enough yet
+    this.events = this.events.filter((e) => e.tick > cutoff);
   }
 
   private killEnemy(e: Entity): void {
@@ -270,6 +301,8 @@ export class Sim implements IWorld {
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
+    // The monotonic event counter fingerprints "how much combat has happened".
+    mix(this.nextEventSeq);
     mix(this.tick);
     return h.toString(16);
   }

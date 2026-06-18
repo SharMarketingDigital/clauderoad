@@ -7,17 +7,34 @@ import { Sim, DT } from './sim/sim';
 import { Renderer } from './render/renderer';
 import { Input } from './game/input';
 import { Hud } from './ui/hud';
+import { CombatText } from './ui/combat_text';
 
 const WORLD_SEED = 1337; // fixed seed -> the world is the same place every load
+const FCT_WORLD_Y = 2.2; // height (just above the head) where damage numbers pop
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const sim = new Sim(WORLD_SEED);
 const renderer = new Renderer(canvas);
 const input = new Input(canvas, renderer);
 const hud = new Hud();
+const combatText = new CombatText();
 
 let last = performance.now() / 1000;
 let acc = 0;
+let lastEventSeq = 0; // cursor: highest sim event seq already turned into visuals
+
+// Turn new sim events into presentation: flash the hit model + pop a number.
+function drawCombatFeedback(): void {
+  for (const ev of sim.recentEvents()) {
+    if (ev.seq <= lastEventSeq) continue;
+    lastEventSeq = ev.seq;
+    if (ev.kind === 'damage') {
+      renderer.flash(ev.targetId);
+      const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
+      if (p.visible) combatText.spawn(p.x, p.y, ev.amount);
+    }
+  }
+}
 
 function frame(): void {
   const now = performance.now() / 1000;
@@ -33,6 +50,7 @@ function frame(): void {
     acc -= DT;
   }
 
+  drawCombatFeedback();
   renderer.render(sim);
   hud.update(sim);
   requestAnimationFrame(frame);
