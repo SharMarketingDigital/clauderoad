@@ -25,6 +25,20 @@ export interface EntityView {
   readonly xp: number; // XP into the CURRENT level
   readonly xpToNext: number; // XP needed to reach the next level
   readonly attrPoints: number; // unspent attribute points ("pontos disponíveis")
+  readonly gold: number; // currency (0 for entities that don't carry gold)
+}
+
+// One stack in the player's bag, with the item's display name resolved.
+export interface ItemStackView {
+  readonly itemId: string;
+  readonly name: string;
+  readonly qty: number;
+}
+
+// The player's bag for the inventory window: filled stacks + total slot count.
+export interface InventoryView {
+  readonly capacity: number;
+  readonly stacks: ReadonlyArray<ItemStackView>;
 }
 
 // Player intent / commands. The client streams these into the world.
@@ -82,5 +96,7 @@ export interface IWorld {
   recentEvents(): ReadonlyArray<SimEvent>;
   // The local player's action bar (icons + live cooldown/readiness) for the HUD.
   abilities(): ReadonlyArray<AbilityView>;
+  // The local player's bag (resolved item names + capacity) for the HUD window.
+  inventory(): InventoryView;
   sendCommand(cmd: Command): void;
 }

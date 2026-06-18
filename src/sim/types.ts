@@ -1,5 +1,12 @@
 import type { EntityKind } from '../world_api';
 
+// One stack of items in a bag (the sim's internal shape; the view is
+// ItemStackView in world_api.ts).
+export interface ItemStack {
+  itemId: string;
+  qty: number;
+}
+
 // Internal mutable entity. The sim owns these; the outside world only ever
 // sees the read-only EntityView (see world_api.ts).
 export interface Entity {
@@ -28,6 +35,9 @@ export interface Entity {
   level: number;
   xp: number; // XP accumulated into the current level
   attrPoints: number; // unspent attribute points
+  // economy & inventory (player; enemies carry 0 / empty)
+  gold: number;
+  bag: ItemStack[];
   // enemy wander state
   targetX: number;
   targetZ: number;

@@ -16,7 +16,10 @@ import {
 import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES } from '../src/sim/content/abilities';
+import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
+import { ITEMS } from '../src/sim/content/items';
 import type { Command } from '../src/world_api';
+import type { ItemStack } from '../src/sim/types';
 
 // Run a FIXED, scripted command sequence against a fresh Sim and return the
 // world fingerprint. This is how we prove the core invariant: determinism.
@@ -444,8 +447,12 @@ function killNearestEnemy(sim: Sim): boolean {
 
 describe('progression (XP & levels)', () => {
   it('the XP curve is gentle early and ramps up', () => {
+    // pin the exact shape (25·L·(L+1)) at several points, not just L1/L2, so a
+    // differently-shaped curve that happens to match early is still caught
     expect(xpForLevel(1)).toBe(50);
     expect(xpForLevel(2)).toBe(150);
+    expect(xpForLevel(3)).toBe(300);
+    expect(xpForLevel(4)).toBe(500);
     expect(xpForLevel(3)).toBeGreaterThan(xpForLevel(2)); // ramps with level
     // gentle start: level 2 costs no more than ~3 kills of a basic mob
     expect(xpForLevel(1)).toBeLessThanOrEqual(3 * ENEMY_TEMPLATE.xp);
@@ -453,24 +460,98 @@ describe('progression (XP & levels)', () => {
 
   it('killing mobs grants XP, crosses the threshold, and boosts max HP/MP + attr points', () => {
     const sim = new Sim(7);
-    const p = (): { level: number; xp: number; maxHp: number; maxMp: number; hp: number; attrPoints: number } =>
-      sim.entities().find((e) => e.kind === 'player')!;
-    expect(p().level).toBe(1);
-    const hp0 = p().maxHp;
-    const mp0 = p().maxMp;
+    const player = () => sim.entities().find((e) => e.kind === 'player')!;
+    expect(player().level).toBe(1);
+    const hp0 = player().maxHp;
+    const mp0 = player().maxMp;
 
     // exactly enough kills to cross the level-1 threshold (50 XP / 25 = 2 wolves)
     const kills = Math.ceil(xpForLevel(1) / ENEMY_TEMPLATE.xp);
     for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim)).toBe(true);
 
-    const pp = p();
+    const pp = player();
     expect(pp.level).toBe(2);
     expect(pp.maxHp).toBe(hp0 + HP_PER_LEVEL);
     expect(pp.maxMp).toBe(mp0 + MP_PER_LEVEL);
     expect(pp.attrPoints).toBe(ATTR_POINTS_PER_LEVEL);
-    expect(pp.hp).toBe(pp.maxHp); // full restore on ding
+    expect(pp.hp).toBe(pp.maxHp); // full restore on ding...
+    expect(pp.mp).toBe(pp.maxMp); // ...for MP too
+    expect(pp.xp).toBe(0); // landed exactly on the threshold
+    expect(pp.xpToNext).toBe(xpForLevel(2)); // bar now tracks the next level
     // and a level-up event was emitted for the visual feedback
     expect(sim.recentEvents().some((e) => e.kind === 'levelup' && e.amount === 2)).toBe(true);
+
+    // one more kill: XP accumulates again toward level 3 (the HUD bar refills)
+    expect(killNearestEnemy(sim)).toBe(true);
+    const after = player();
+    expect(after.level).toBe(2);
+    expect(after.xp).toBe(ENEMY_TEMPLATE.xp); // 25 progress into level 2
+    expect(after.xpToNext).toBe(xpForLevel(2)); // still 150 to reach level 3
+  });
+
+  it('the level-up path is deterministic (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      const kills = Math.ceil(xpForLevel(1) / ENEMY_TEMPLATE.xp); // crosses level 1->2
+      for (let i = 0; i < kills; i++) killNearestEnemy(sim);
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
+describe('loot & inventory', () => {
+  it('addToBag stacks onto existing items, fills slots, and rejects new stacks when full', () => {
+    const bag: ItemStack[] = [];
+    // fill every slot with a distinct stack
+    for (let i = 0; i < BAG_SLOTS; i++) expect(addToBag(bag, `item_${i}`, 1)).toBe(true);
+    expect(bag.length).toBe(BAG_SLOTS);
+    // full: a NEW item type has no slot
+    expect(addToBag(bag, 'overflow', 1)).toBe(false);
+    expect(bag.length).toBe(BAG_SLOTS);
+    // ...but more of an EXISTING stack still fits (stacks in place, no new slot)
+    expect(addToBag(bag, 'item_0', 4)).toBe(true);
+    expect(bag.find((s) => s.itemId === 'item_0')!.qty).toBe(5);
+  });
+
+  it('a kill always drops gold, items come from the drop table with resolved names, reproducibly', () => {
+    const lootAfter = (seed: number, kills: number): { gold: number; inv: ReturnType<Sim['inventory']> } => {
+      const sim = new Sim(seed);
+      for (let i = 0; i < kills; i++) killNearestEnemy(sim);
+      const gold = sim.entities().find((e) => e.kind === 'player')!.gold;
+      return { gold, inv: sim.inventory() };
+    };
+
+    // one kill -> always some gold, within the template's range
+    const one = lootAfter(7, 1);
+    expect(one.gold).toBeGreaterThanOrEqual(ENEMY_TEMPLATE.goldMin);
+    expect(one.gold).toBeLessThanOrEqual(ENEMY_TEMPLATE.goldMax);
+    expect(one.inv.capacity).toBe(BAG_SLOTS); // the view reports the slot count
+
+    // over a dozen kills: at least one item, every stack a VALID drop-table item
+    // with its display name resolved from ITEMS (exactly what the HUD renders)
+    const many = lootAfter(7, 12);
+    expect(many.inv.stacks.length).toBeGreaterThan(0);
+    const dropIds = ENEMY_TEMPLATE.drops.map((d) => d.itemId);
+    for (const s of many.inv.stacks) {
+      expect(dropIds).toContain(s.itemId);
+      expect(s.qty).toBeGreaterThan(0);
+      expect(s.name).toBe(ITEMS[s.itemId].name);
+    }
+
+    // reproducible: same seed + same kills => identical gold AND bag contents
+    expect(lootAfter(7, 12)).toEqual(many);
+  });
+
+  it('loot is part of the deterministic fingerprint (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      for (let i = 0; i < 4; i++) killNearestEnemy(sim); // earns gold + items
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
   });
 });
 

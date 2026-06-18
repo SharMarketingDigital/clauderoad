@@ -1,5 +1,5 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
-import type { IWorld, AbilityView } from '../world_api';
+import type { IWorld, AbilityView, InventoryView } from '../world_api';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -18,6 +18,13 @@ export class Hud {
   // action bar: slot number -> its DOM refs (built lazily from world.abilities())
   private actionBar: HTMLDivElement;
   private slots = new Map<number, { root: HTMLDivElement; cd: HTMLDivElement }>();
+  // gold + inventory window (toggled with I; pure UI state, not a world command)
+  private goldAmt: HTMLSpanElement;
+  private bag: HTMLDivElement;
+  private bagTitle: HTMLDivElement;
+  private bagGrid: HTMLDivElement;
+  private bagSlots: HTMLDivElement[] = [];
+  private bagOpen = false;
 
   constructor() {
     this.root = document.createElement('div');
@@ -39,8 +46,13 @@ export class Hud {
           <div class="hp"><div class="hp-fill target-hp-fill"></div><span class="hp-text target-hp-text"></span></div>
         </div>
       </div>
+      <div class="gold">&#9679; <span class="gold-amt">0</span></div>
       <div class="action-bar"></div>
-      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; arrastar gira &middot; scroll zoom</div>
+      <div class="bag" hidden>
+        <div class="bag-title">Bolsa</div>
+        <div class="bag-grid"></div>
+      </div>
+      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; arrastar gira</div>
     `;
     document.body.appendChild(this.root);
     this.hpFill = this.root.querySelector('.hp-fill') as HTMLDivElement;
@@ -55,6 +67,22 @@ export class Hud {
     this.targetHpFill = this.root.querySelector('.target-hp-fill') as HTMLDivElement;
     this.targetHpText = this.root.querySelector('.target-hp-text') as HTMLSpanElement;
     this.actionBar = this.root.querySelector('.action-bar') as HTMLDivElement;
+    this.goldAmt = this.root.querySelector('.gold-amt') as HTMLSpanElement;
+    this.bag = this.root.querySelector('.bag') as HTMLDivElement;
+    this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
+    this.bagGrid = this.root.querySelector('.bag-grid') as HTMLDivElement;
+
+    // The inventory window is pure UI state — open/close with I (Esc closes).
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
+      else if (e.key === 'Escape') this.setBag(false);
+    });
+  }
+
+  private setBag(open: boolean): void {
+    this.bagOpen = open;
+    this.bag.hidden = !open;
   }
 
   update(world: IWorld): void {
@@ -89,7 +117,34 @@ export class Hud {
       this.targetFrame.hidden = true;
     }
 
+    this.goldAmt.textContent = String(p.gold);
+
     this.updateActionBar(world.abilities());
+    if (this.bagOpen) this.updateBag(world.inventory());
+  }
+
+  private updateBag(inv: InventoryView): void {
+    // Build the fixed slot grid once (capacity comes from the sim).
+    while (this.bagSlots.length < inv.capacity) {
+      const slot = document.createElement('div');
+      slot.className = 'bag-slot';
+      this.bagGrid.appendChild(slot);
+      this.bagSlots.push(slot);
+    }
+    this.bagTitle.textContent = `Bolsa (${inv.stacks.length}/${inv.capacity})`;
+    for (let i = 0; i < this.bagSlots.length; i++) {
+      const slot = this.bagSlots[i];
+      const stack = inv.stacks[i];
+      if (stack) {
+        slot.classList.add('filled');
+        slot.title = stack.name;
+        slot.textContent = stack.qty > 1 ? `${stack.name} ×${stack.qty}` : stack.name;
+      } else {
+        slot.classList.remove('filled');
+        slot.title = '';
+        slot.textContent = '';
+      }
+    }
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {

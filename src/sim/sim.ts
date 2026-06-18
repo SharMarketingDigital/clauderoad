@@ -11,10 +11,12 @@
 
 import { Rng } from './rng';
 import type { Entity } from './types';
-import type { IWorld, EntityView, Command, SimEvent, AbilityView } from '../world_api';
+import type { IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
 import { ABILITIES, type AbilityDef } from './content/abilities';
+import { ITEMS } from './content/items';
+import { BAG_SLOTS, addToBag } from './inventory';
 
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
@@ -79,6 +81,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
+      gold: 0, bag: [],
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -96,6 +99,7 @@ export class Sim implements IWorld {
       str: 0, weaponDamage: 0, swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
+      gold: 0, bag: [],
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -134,6 +138,14 @@ export class Sim implements IWorld {
     });
   }
 
+  inventory(): InventoryView {
+    const p = this.ents.get(this.localId);
+    const stacks = p
+      ? p.bag.map((s) => ({ itemId: s.itemId, name: ITEMS[s.itemId]?.name ?? s.itemId, qty: s.qty }))
+      : [];
+    return { capacity: BAG_SLOTS, stacks };
+  }
+
   sendCommand(cmd: Command): void {
     // Movement is a held intent (latest wins); everything else is a one-shot
     // action queued for the next tick.
@@ -149,6 +161,7 @@ export class Sim implements IWorld {
         x: e.x, z: e.z, facing: e.facing, hp: e.hp, maxHp: e.maxHp,
         mp: e.mp, maxMp: e.maxMp,
         level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
+        gold: e.gold,
       });
     }
     return out;
@@ -227,7 +240,22 @@ export class Sim implements IWorld {
     // Respawn a same-type enemy after a delay. (One template today; pass the
     // template id / xp reward per-entity once there are several.)
     this.respawnQueue.push(this.tick + RESPAWN_TICKS);
-    if (killer.kind === 'player') this.gainXp(killer, ENEMY_TEMPLATE.xp);
+    if (killer.kind === 'player') {
+      this.gainXp(killer, ENEMY_TEMPLATE.xp);
+      this.rollLoot(killer);
+    }
+  }
+
+  // Roll a kill's loot into the killer's bag. ALL randomness goes through the
+  // sim Rng (never Math.random) so the same seed + commands drop the same loot.
+  // (Single enemy template today; read the reward from the dead entity's
+  // template once there are several.)
+  private rollLoot(p: Entity): void {
+    const t = ENEMY_TEMPLATE;
+    p.gold += this.rng.int(t.goldMin, t.goldMax + 1); // always a little gold
+    for (const drop of t.drops) {
+      if (this.rng.next() < drop.chance) addToBag(p.bag, drop.itemId, 1);
+    }
   }
 
   // Award XP and level up across as many thresholds as it crosses (carrying the
@@ -418,6 +446,9 @@ export class Sim implements IWorld {
       for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
       // Progression (level implies maxHp/maxMp, so they need not be mixed too).
       mix(e.level); mix(e.xp); mix(e.attrPoints);
+      // Economy & bag (stacks are in deterministic insertion order).
+      mix(e.gold);
+      for (const s of e.bag) { mix(strHash(s.itemId)); mix(s.qty); }
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
@@ -458,4 +489,11 @@ function dist2(a: { x: number; z: number }, b: { x: number; z: number }): number
   const dx = a.x - b.x;
   const dz = a.z - b.z;
   return dx * dx + dz * dz;
+}
+
+// Stable 32-bit hash of a string, for folding item ids into the world hash().
+function strHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return h;
 }
