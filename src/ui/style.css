@@ -1,0 +1,93 @@
+:root {
+  --hp: #c0392b;
+  --panel: rgba(12, 16, 22, 0.72);
+  --gold: #c8a85a;
+  --ink: #e8e2d2;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+
+#game { display: block; width: 100vw; height: 100vh; }
+
+.hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); }
+
+.unit-frame {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 230px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+}
+
+/* Target frame: sits just to the right of the player frame; hidden until an
+   enemy is selected. The [hidden] rule beats the .unit-frame display:flex. */
+.target-frame { left: 260px; }
+.unit-frame[hidden] { display: none; }
+.portrait-target { color: #e0a0a0; }
+
+.portrait {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  color: var(--gold);
+  background: #1c2530;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+}
+
+.bars { flex: 1; }
+.name { font-weight: 600; font-size: 14px; letter-spacing: 0.02em; }
+
+.hp {
+  position: relative;
+  height: 16px;
+  margin-top: 4px;
+  background: #2a0d0a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hp-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(180deg, #e05544, var(--hp));
+  transition: width 0.15s ease-out;
+}
+
+.hp-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  text-shadow: 0 1px 2px #000;
+}
+
+.hint {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  opacity: 0.9;
+  background: var(--panel);
+  border: 1px solid rgba(200, 168, 90, 0.4);
+  border-radius: 999px;
+}
