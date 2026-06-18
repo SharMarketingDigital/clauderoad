@@ -555,38 +555,90 @@ describe('loot & inventory', () => {
   });
 });
 
+// Kill mobs until `itemId` lands in the bag (deterministic for a fixed seed;
+// `cap` is just a safety net). Returns whether it was obtained.
+function killUntilBagHas(sim: Sim, itemId: string, cap: number): boolean {
+  for (let i = 0; i < cap; i++) {
+    if (sim.inventory().stacks.some((s) => s.itemId === itemId)) return true;
+    killNearestEnemy(sim);
+  }
+  return sim.inventory().stacks.some((s) => s.itemId === itemId);
+}
+
 describe('equipment', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const weaponItem = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId;
+
   it('equipping the Espada Velha raises attack damage; unequipping lowers it and returns it', () => {
     const sim = new Sim(7);
-    const player = () => sim.entities().find((e) => e.kind === 'player')!;
-    const dmg = () => meleeDamage(player().str, player().weaponDamage); // per-swing damage
-
-    // Grind until the sword drops into the bag (5% per kill; fixed seed, so this
-    // is deterministic — the cap is just a safety net well above the ~20 expected).
-    let got = false;
-    for (let i = 0; i < 400 && !got; i++) {
-      killNearestEnemy(sim);
-      got = sim.inventory().stacks.some((s) => s.itemId === 'old_sword');
-    }
-    expect(got).toBe(true);
+    const dmg = () => meleeDamage(player(sim).str, player(sim).weaponDamage); // per-swing damage
+    // Grind for the sword (5% per kill; fixed seed -> deterministic, lands fast).
+    expect(killUntilBagHas(sim, 'old_sword', 400)).toBe(true);
     const before = dmg();
 
-    // Equip from the bag: it moves into the weapon slot and out of the bag, and
-    // the computed attack damage actually goes up.
+    // Equip from the bag: into the weapon slot, out of the bag, damage goes up.
     sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
     sim.step();
-    const equipped = sim.inventory();
-    expect(equipped.equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('old_sword');
-    expect(equipped.stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
+    expect(weaponItem(sim)).toBe('old_sword');
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
     expect(dmg()).toBeGreaterThan(before);
 
     // Unequip: back to the bag, damage drops to exactly the pre-equip value.
     sim.sendCommand({ t: 'unequip', slot: 'weapon' });
     sim.step();
-    const unequipped = sim.inventory();
-    expect(unequipped.equipment.find((e) => e.slot === 'weapon')!.itemId).toBeNull();
-    expect(unequipped.stacks.some((s) => s.itemId === 'old_sword')).toBe(true);
+    expect(weaponItem(sim)).toBeNull();
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(true);
     expect(dmg()).toBe(before);
+  });
+
+  it('equipping armor raises max HP; unequipping returns it and keeps hp within max', () => {
+    const sim = new Sim(7);
+    expect(killUntilBagHas(sim, 'wolf_leather', 400)).toBe(true);
+    const armorBonus = ITEMS.wolf_leather.stats?.maxHp ?? 0;
+    expect(armorBonus).toBeGreaterThan(0);
+    const maxBefore = player(sim).maxHp;
+
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather' });
+    sim.step();
+    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
+    expect(player(sim).maxHp).toBe(maxBefore + armorBonus);
+    expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp);
+
+    sim.sendCommand({ t: 'unequip', slot: 'armor' });
+    sim.step();
+    expect(player(sim).maxHp).toBe(maxBefore);
+    expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp); // clamp invariant holds
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'wolf_leather')).toBe(true);
+  });
+
+  it('equip/unequip no-op safely: non-equippable, not held, and empty slot', () => {
+    const sim = new Sim(7);
+    // a non-equippable item (no slot) is ignored
+    sim.sendCommand({ t: 'equip', itemId: 'health_potion' });
+    sim.step();
+    expect(weaponItem(sim)).toBeNull();
+    // an equippable item the player does NOT hold is ignored (no phantom equip)
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
+    sim.step();
+    expect(weaponItem(sim)).toBeNull();
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'old_sword')).toBe(false);
+    // unequipping an empty slot does nothing
+    sim.sendCommand({ t: 'unequip', slot: 'weapon' });
+    sim.step();
+    expect(weaponItem(sim)).toBeNull();
+  });
+
+  it('equipping is part of the deterministic fingerprint (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      if (killUntilBagHas(sim, 'old_sword', 400)) {
+        sim.sendCommand({ t: 'equip', itemId: 'old_sword' });
+        sim.step();
+      }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
   });
 });
 
