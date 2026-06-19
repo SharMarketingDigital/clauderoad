@@ -17,10 +17,11 @@ export type EquipSlot = 'weapon' | 'armor';
 // seam so content, sim, and UI agree; the UI maps these to colors.
 export type Rarity = 'normal' | 'sos' | 'som' | 'sun';
 
-// Status effect kinds: stun/knockdown (can't act), root (can't move), slow
-// (moves/attacks slower), dot (damage over time). Defined at the seam so the sim,
-// content and renderer agree; render shows a marker by kind.
-export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot';
+// Status effect kinds. Debuffs: stun/knockdown (can't act), root (can't move),
+// slow (moves/attacks slower), dot (damage over time). Buffs: defense (the
+// caster takes reduced incoming damage — the Sword's Postura Defensiva). Defined
+// at the seam so the sim, content and renderer agree; render shows a marker by kind.
+export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense';
 
 export interface EntityView {
   readonly id: number;

@@ -682,12 +682,13 @@ function driveIntoWolvesUntilDead(sim: Sim): void {
   }
 }
 
-// Approach the nearest wolf and cast Golpe Forte (slot 1) on it, dropping the
-// target the SAME tick so the follow-up auto-attack doesn't finish it off — the
-// wolf survives with the ability's status effects on it. Returns the wolf id.
-// Casting on the FIRST in-melee tick (d <= MELEE_RANGE) guarantees no prior
-// auto-attack landed, so this is robust to player-speed / damage retuning.
-function stunWolf(sim: Sim): number | null {
+// Approach the nearest wolf and land ONE ability cast on it, dropping the target
+// the SAME tick so the follow-up auto-attack doesn't finish it off — the wolf
+// survives carrying the ability's status effects. `slot` selects the ability:
+// 1 = Golpe Forte (bleed + slow), 3 = Atordoamento (stun). Casting on the FIRST
+// in-melee tick (d <= MELEE_RANGE) guarantees no prior auto-attack landed, so
+// this is robust to player-speed / damage retuning. Returns the wolf id.
+function castWolf(sim: Sim, slot: number): number | null {
   for (let i = 0; i < 2000; i++) {
     const p = sim.entities().find((e) => e.kind === 'player')!;
     const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
@@ -702,7 +703,7 @@ function stunWolf(sim: Sim): number | null {
     } else {
       // in melee: set target + cast + drop the target the SAME tick, so ONLY the cast hits
       sim.sendCommand({ t: 'set-target', id: w.id });
-      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.sendCommand({ t: 'use-ability', slot });
       sim.sendCommand({ t: 'set-target', id: null });
       sim.sendCommand({ t: 'stop' });
       sim.step();
@@ -716,14 +717,15 @@ function stunWolf(sim: Sim): number | null {
 describe('status effects', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
   const wolfById = (sim: Sim, id: number) => sim.entities().find((e) => e.id === id);
-  // Golpe Forte effect durations (data-as-code, 20Hz): stun 1.0s, slow 3.0s, dot 2.0s @0.5s.
+  // Sword-kit effect durations (data-as-code, 20Hz): Atordoamento stun 1.0s;
+  // Golpe Forte slow 3.0s and dot 2.0s @0.5s.
   const STUN_TICKS = 20;
   const DOT_MAG = 2;
   const DOT_PERIOD = 10;
 
   it('stun: a wolf is frozen for exactly the stun duration, then resumes acting', () => {
     const sim = new Sim(7);
-    const wid = stunWolf(sim);
+    const wid = castWolf(sim, 3); // Atordoamento
     expect(wid).not.toBeNull();
     const castTick = sim.tick; // the stun landed on this tick
     const w0 = wolfById(sim, wid!)!;
@@ -759,13 +761,14 @@ describe('status effects', () => {
 
   it('dot: a bleed drains HP by its magnitude on each period tick, then stops at expiry', () => {
     const sim = new Sim(7);
-    const wid = stunWolf(sim);
+    const wid = castWolf(sim, 1); // Golpe Forte (bleed)
     expect(wid).not.toBeNull();
     const castTick = sim.tick;
     expect(wolfById(sim, wid!)!.statuses).toContain('dot');
     const hp0 = wolfById(sim, wid!)!.hp;
 
-    // HP flat until just before the first period tick (player idle + wolf stunned)
+    // HP flat until just before the first period tick (player idle, no target ->
+    // the wolf takes no hit but its own bleed; that fires only on period ticks)
     while (sim.tick < castTick + DOT_PERIOD - 1) sim.step();
     expect(wolfById(sim, wid!)!.hp).toBe(hp0);
     sim.step(); // first period tick (cast + period)
@@ -783,11 +786,8 @@ describe('status effects', () => {
 
   it('slow: a slowed wolf chases at ~half speed (not full, and it does move)', () => {
     const sim = new Sim(7);
-    const wid = stunWolf(sim);
+    const wid = castWolf(sim, 1); // Golpe Forte (slow)
     expect(wid).not.toBeNull();
-    // wait out the stun (the longer slow is still active)
-    let guard = 0;
-    while (wolfById(sim, wid!)?.statuses.includes('stun') && guard++ < 100) sim.step();
     expect(wolfById(sim, wid!)!.statuses).toContain('slow');
 
     // open a real gap so the wolf must chase the whole window (player outruns it)
@@ -817,13 +817,68 @@ describe('status effects', () => {
   it('the status lifecycle (apply -> expire -> cleanup) is deterministic (same seed => same hash)', () => {
     const run = (seed: number): string => {
       const sim = new Sim(seed);
-      const wid = stunWolf(sim);
+      const wid = castWolf(sim, 1); // Golpe Forte (bleed + slow)
       expect(wid).not.toBeNull();
       for (let i = 0; i < 80; i++) sim.step(); // past all effects (slow 60t) -> cleanup fingerprinted
       return sim.hash();
     };
     expect(run(7)).toBe(run(7));
     expect(run(7)).not.toBe(run(123));
+  });
+});
+
+// The full Sword kit on a multi-slot bar: Golpe Forte (slot 1, covered by the
+// status tests above), Postura Defensiva (slot 2, a self-buff), Atordoamento
+// (slot 3, the stun — its freeze is covered by the status 'stun' test).
+describe('sword kit (multi-slot abilities)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('the action bar exposes all three sword slots, in order', () => {
+    const bar = new Sim(7).abilities();
+    expect(bar.map((a) => a.slot)).toEqual([1, 2, 3]);
+    expect(bar.map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+  });
+
+  it('Postura Defensiva: a self-buff (no target) lasting its full duration, then expiring', () => {
+    const sim = new Sim(7);
+    // Flee to an empty corner first so stray wolves can't end the buff early by
+    // killing us — the buff timer itself is independent of movement.
+    const fleeStep = () => {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: WORLD_HALF - p.x, dz: WORLD_HALF - p.z });
+      sim.step();
+    };
+    for (let i = 0; i < 60; i++) fleeStep();
+
+    const p0 = player(sim);
+    sim.sendCommand({ t: 'move', dx: WORLD_HALF - p0.x, dz: WORLD_HALF - p0.z });
+    sim.sendCommand({ t: 'use-ability', slot: 2 }); // a buff: castable with no enemy target
+    sim.step();
+    const castTick = sim.tick;
+    expect(player(sim).statuses).toContain('defense');
+
+    // pin the 6s (120t) duration on both edges
+    while (sim.tick < castTick + 120 - 1) fleeStep();
+    expect(player(sim).statuses).toContain('defense');
+    fleeStep(); // -> cast + 120
+    expect(player(sim).statuses).not.toContain('defense');
+  });
+
+  it('Postura Defensiva halves incoming damage (a braced player loses fewer HP)', () => {
+    // Same seed + identical movement => identical wolf bites; the ONLY difference
+    // between the two runs is the mitigation buff, so any HP gap IS the buff.
+    const run = (brace: boolean) => {
+      const sim = new Sim(7);
+      approachUntilAggro(sim); // walk in until a wolf aggros (deterministic, no target set)
+      if (brace) sim.sendCommand({ t: 'use-ability', slot: 2 });
+      sim.sendCommand({ t: 'stop' });
+      for (let i = 0; i < 100; i++) sim.step(); // stand and take bites, inside the 6s buff
+      return player(sim);
+    };
+    const guarded = run(true);
+    const exposed = run(false);
+    expect(exposed.hp).toBeLessThan(exposed.maxHp); // the wolf actually landed hits (test is meaningful)
+    expect(guarded.hp).toBeGreaterThan(exposed.hp); // bracing mitigated the damage taken
   });
 });
 

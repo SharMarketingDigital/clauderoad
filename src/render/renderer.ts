@@ -311,12 +311,16 @@ const STATUS_COLORS: Record<string, number> = {
   root: 0x8b5a2b, // brown
   slow: 0x4aa3ff, // blue
   dot: 0xff3030, // red (bleed)
+  defense: 0x59d0b0, // teal — a protective buff (Postura Defensiva), not a threat
 };
 
 // Status display priority: the bead shows the most "important" active effect
-// (a stun/knockdown should always win over a slow/dot), not whichever happens to
-// sit at index 0 — so the colour doesn't depend on application/expiry order.
-const STATUS_PRIORITY: Record<string, number> = { stun: 0, knockdown: 0, root: 1, slow: 2, dot: 3 };
+// (a stun/knockdown should always win over a slow/dot/buff), not whichever happens
+// to sit at index 0 — so the colour doesn't depend on application/expiry order.
+// The defense buff ranks last: a debuff on the same actor is always more urgent.
+const STATUS_PRIORITY: Record<string, number> = {
+  stun: 0, knockdown: 0, root: 1, slow: 2, dot: 3, defense: 4,
+};
 
 // Show/hide + color the per-entity status bead by its highest-priority status.
 function updateStatusMarker(actor: THREE.Object3D, e: EntityView): void {

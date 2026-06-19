@@ -840,6 +840,17 @@ export class Sim implements IWorld {
     if (this.tick < p.gcdUntil) return; // global cooldown
     if (this.tick < (p.abilityReadyAt[slot] ?? 0)) return; // own cooldown
     if (p.mp < def.mpCost) return; // not enough MP
+
+    // A self-buff (Postura Defensiva) needs no target/range: spend the cost,
+    // start the cooldowns, and apply its effects to the caster.
+    if (def.kind === 'buff') {
+      p.mp -= def.mpCost;
+      p.gcdUntil = this.tick + GCD_TICKS;
+      p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
+      this.applyCastEffects(p, def, p);
+      return;
+    }
+
     if (p.targetId == null) return;
     const t = this.ents.get(p.targetId);
     if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // needs a living enemy target
@@ -856,14 +867,20 @@ export class Sim implements IWorld {
     p.gcdUntil = this.tick + GCD_TICKS;
     p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
     this.hitEnemy(t, abilityDamage(def, p.str, p.weaponDamage), p);
-    // Apply the ability's status effects to the target — only if it survived the hit.
-    if (def.effects && t.hp > 0) {
-      for (const ef of def.effects) {
-        this.applyStatus(
-          t, ef.kind, Math.round(ef.durationSecs * TICK_RATE),
-          ef.magnitude ?? 0, ef.periodSecs ? Math.round(ef.periodSecs * TICK_RATE) : 0, p.id,
-        );
-      }
+    // Debuff the target — only if it survived the hit.
+    if (t.hp > 0) this.applyCastEffects(t, def, p);
+  }
+
+  // Apply an ability's status effects to `target` (the enemy for a strike, the
+  // caster for a buff), converting the data-as-code seconds to ticks. `caster`
+  // credits any DoT damage back to the player.
+  private applyCastEffects(target: Entity, def: AbilityDef, caster: Entity): void {
+    if (!def.effects) return;
+    for (const ef of def.effects) {
+      this.applyStatus(
+        target, ef.kind, Math.round(ef.durationSecs * TICK_RATE),
+        ef.magnitude ?? 0, ef.periodSecs ? Math.round(ef.periodSecs * TICK_RATE) : 0, caster.id,
+      );
     }
   }
 
@@ -1016,13 +1033,16 @@ export class Sim implements IWorld {
   // downs the player when HP hits 0.
   private hitPlayer(p: Entity, dmg: number): void {
     if (dmg <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
-    p.hp = Math.max(0, p.hp - dmg);
+    // Postura Defensiva (and any future mitigation buff) reduces the hit. Floor
+    // at 1 so a mitigated blow still registers, and show the ACTUAL HP lost.
+    const taken = Math.max(1, Math.round(dmg * this.defenseFactor(p)));
+    p.hp = Math.max(0, p.hp - taken);
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
       kind: 'damage',
       targetId: p.id,
-      amount: dmg,
+      amount: taken,
       x: p.x,
       z: p.z,
     });
@@ -1062,6 +1082,16 @@ export class Sim implements IWorld {
     let f = 1;
     for (const s of e.effects) {
       if (s.kind === 'slow' && s.magnitude > 0 && s.magnitude < f) f = s.magnitude;
+    }
+    return f;
+  }
+  // Incoming-damage multiplier from active 'defense' buffs (the strongest, i.e.
+  // smallest, applies), or 1 when unbuffed. Mirrors slowFactor's clamp: only a
+  // valid factor in (0,1) counts, so a malformed buff can never amplify damage.
+  private defenseFactor(e: Entity): number {
+    let f = 1;
+    for (const s of e.effects) {
+      if (s.kind === 'defense' && s.magnitude > 0 && s.magnitude < f) f = s.magnitude;
     }
     return f;
   }
@@ -1208,7 +1238,7 @@ export function meleeDamage(str: number, weaponDamage: number): number {
 // An ability's hit: the base melee swing scaled up, so it always out-damages
 // the auto-attack. Pure & deterministic (no RNG); tune the multiplier later.
 export function abilityDamage(def: AbilityDef, str: number, weaponDamage: number): number {
-  return Math.round(meleeDamage(str, weaponDamage) * def.damageMultiplier);
+  return Math.round(meleeDamage(str, weaponDamage) * (def.damageMultiplier ?? 0));
 }
 
 function rarityDef(id: Rarity): RarityDef {
