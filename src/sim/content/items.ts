@@ -11,6 +11,15 @@ export interface ItemStats {
   maxMp?: number;
 }
 
+// What a consumable restores when used from the bag. The use/heal path is fully
+// generic, so a new consumable's EFFECT is just another ITEMS entry (e.g. a Mana
+// Potion: consumable: { healMp: N }) with no sim changes. (To make it actually
+// DROP, add it to a content drop table too — still data-as-code.)
+export interface ConsumableEffect {
+  healHp?: number; // restore up to this much HP (clamped to maxHp)
+  healMp?: number; // restore up to this much MP (clamped to maxMp) — for a future Mana Potion
+}
+
 export interface ItemDef {
   id: string;
   name: string;
@@ -18,10 +27,12 @@ export interface ItemDef {
   stats?: ItemStats; // bonuses applied while equipped
   elixirFor?: EquipSlot; // present => an alchemy Elixir that upgrades this slot
   luckyPowder?: boolean; // the alchemy luck booster
+  consumable?: ConsumableEffect; // present => usable from the bag for this effect
 }
 
 export const ITEMS: Record<string, ItemDef> = {
-  health_potion: { id: 'health_potion', name: 'Poção de Vida' }, // consumable (no effect yet)
+  // consumable: heals ~40% of the 120-HP starter, à la a WoW Classic minor healing potion
+  health_potion: { id: 'health_potion', name: 'Poção de Vida', consumable: { healHp: 50 } },
   // crude leather "armor" — common drop, gives a little HP
   wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'armor', stats: { maxHp: 20 } },
   // the starter weapon upgrade: a big chunk of weapon damage over bare fists
@@ -31,3 +42,7 @@ export const ITEMS: Record<string, ItemDef> = {
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', elixirFor: 'armor' },
   lucky_powder: { id: 'lucky_powder', name: 'Pó da Sorte', luckyPowder: true },
 };
+
+// Shared cooldown between consumable uses (seconds) — classic "potion sickness",
+// so they can't be spammed. The Sim converts this to ticks.
+export const POTION_COOLDOWN_SECS = 5;

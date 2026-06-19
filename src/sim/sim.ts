@@ -17,7 +17,7 @@ import type {
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
 import { ABILITIES, type AbilityDef } from './content/abilities';
-import { ITEMS } from './content/items';
+import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
 import {
   BOSS_TEMPLATE, BOSS_SPAWN_X, BOSS_SPAWN_Z, BOSS_FIRST_SPAWN_TICK, BOSS_RESPAWN_TICKS,
@@ -41,6 +41,7 @@ const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facin
 export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
+export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
 
 // Progression (provisional — GDD §B4b: GENTLE, rewarding pacing; NOT Silkroad's
 // brutal grind). Per level-up: +HP/+MP max and +5 attribute points.
@@ -100,7 +101,7 @@ export class Sim implements IWorld {
       baseStr: cls.baseStr, baseWeaponDamage: cls.weaponDamage,
       baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
+      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
@@ -121,7 +122,7 @@ export class Sim implements IWorld {
       str: 0, weaponDamage: 0,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: ENEMY_TEMPLATE.hp, baseMaxMp: 0,
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
@@ -142,7 +143,7 @@ export class Sim implements IWorld {
       str: t.str, weaponDamage: t.weaponDamage,
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: true, summoned: false,
@@ -211,7 +212,7 @@ export class Sim implements IWorld {
       str: 0, weaponDamage: 0,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: BOSS_TEMPLATE.minionHp, baseMaxMp: 0,
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: true,
@@ -264,6 +265,7 @@ export class Sim implements IWorld {
           rarityName: rarityDef(s.rarity).name,
           plus: s.plus,
           equipSlot: ITEMS[s.itemId]?.slot,
+          consumable: ITEMS[s.itemId]?.consumable != null,
         }))
       : [];
     const equipment = EQUIP_SLOTS.map((slot) => {
@@ -497,6 +499,9 @@ export class Sim implements IWorld {
       case 'enhance':
         this.enhance(p, cmd.slot, cmd.useLuckyPowder);
         break;
+      case 'use-item':
+        this.useItem(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
@@ -549,6 +554,36 @@ export class Sim implements IWorld {
       kind: success ? 'enhance-success' : 'enhance-fail',
       targetId: p.id,
       amount: eq.plus,
+      x: p.x,
+      z: p.z,
+    });
+  }
+
+  // ---------- consumables ----------
+  // Use a consumable from the bag (e.g. a Health Potion): consume exactly one of
+  // the given stack and apply its data-defined effect, each part clamped to the
+  // player's maximum. A short shared cooldown stops potion-spam. Refuses — with
+  // no consume and no cooldown — when still on cooldown or when the effect would
+  // do nothing (e.g. drinking at full HP), so a potion is never wasted.
+  // Deterministic: no Rng, purely tick-driven.
+  private useItem(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    const effect = ITEMS[itemId]?.consumable;
+    if (!effect) return; // not a consumable
+    if (this.tick < p.potionReadyAt) return; // shared potion cooldown still running
+    // How much it WOULD restore, each capped to the headroom below the max.
+    const healHp = effect.healHp ? Math.min(effect.healHp, p.maxHp - p.hp) : 0;
+    const healMp = effect.healMp ? Math.min(effect.healMp, p.maxMp - p.mp) : 0;
+    if (healHp <= 0 && healMp <= 0) return; // nothing to do — don't burn the item
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
+    p.hp += healHp;
+    p.mp += healMp;
+    p.potionReadyAt = this.tick + POTION_COOLDOWN_TICKS;
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'heal',
+      targetId: p.id,
+      amount: healHp + healMp, // the actual amount restored (after the clamp)
       x: p.x,
       z: p.z,
     });
@@ -696,7 +731,7 @@ export class Sim implements IWorld {
       mix(id); mix(e.x); mix(e.z); mix(e.facing); mix(e.hp);
       mix(e.targetId == null ? 0 : e.targetId);
       mix(e.nextSwingAt);
-      mix(e.mp); mix(e.gcdUntil);
+      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt);
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
       // Progression (level implies maxHp/maxMp, so they need not be mixed too).

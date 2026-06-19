@@ -186,6 +186,8 @@ html, body {
 .bag-slot.filled { border-color: var(--gold); background: #1c2533; }
 .bag-slot.equippable { cursor: pointer; }
 .bag-slot.equippable:hover { border-color: #fff; }
+.bag-slot.usable { cursor: pointer; }
+.bag-slot.usable:hover { border-color: #6bff8a; } /* green: "drink me" */
 
 /* Rarity colors (placed AFTER .filled so they win the equal-specificity tie).
    Normal gray · SOS blue · SOM purple · SUN gold (with a glow). */
@@ -381,6 +383,12 @@ html, body {
   font-size: 30px;
   color: #ffd86b;
   text-shadow: 0 0 10px #b9821f, 0 1px 3px #000;
+}
+
+/* Heal number: green and restorative (consumables). */
+.fct-heal {
+  color: #6bff8a;
+  text-shadow: 0 0 6px #1c7a3a, 0 1px 2px #000;
 }
 
 @keyframes fct-pop {

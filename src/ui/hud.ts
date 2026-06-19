@@ -216,13 +216,18 @@ export class Hud {
       if (stack) {
         slot.classList.add('filled');
         slot.classList.toggle('equippable', stack.equipSlot != null);
+        slot.classList.toggle('usable', stack.consumable);
         slot.dataset.rarity = stack.rarity; // UI colors the border/text by this
         const plusTag = stack.plus > 0 ? ` +${stack.plus}` : '';
         const label = `${stack.name}${plusTag} (${stack.rarityName})`;
-        slot.title = stack.equipSlot ? `${label} — clique p/ equipar` : label;
+        slot.title = stack.equipSlot
+          ? `${label} — clique p/ equipar`
+          : stack.consumable
+            ? `${label} — clique p/ usar`
+            : label;
         slot.textContent = stack.qty > 1 ? `${label} ×${stack.qty}` : label;
       } else {
-        slot.classList.remove('filled', 'equippable');
+        slot.classList.remove('filled', 'equippable', 'usable');
         delete slot.dataset.rarity;
         slot.title = '';
         slot.textContent = '';
@@ -230,12 +235,21 @@ export class Hud {
     }
   }
 
-  // Click a bag stack -> equip that exact item+rarity (no-op for non-equippable).
+  // Click a bag stack -> equip equippable gear, or use a consumable (potion).
+  // No-op for anything else (materials, etc.).
   private onBagClick(i: number): void {
     const stack = this.lastInv?.stacks[i];
-    if (stack?.equipSlot && this.world) {
+    if (!stack || !this.world) return;
+    if (stack.equipSlot) {
       this.world.sendCommand({
         t: 'equip',
+        itemId: stack.itemId,
+        rarity: stack.rarity,
+        plus: stack.plus,
+      });
+    } else if (stack.consumable) {
+      this.world.sendCommand({
+        t: 'use-item',
         itemId: stack.itemId,
         rarity: stack.rarity,
         plus: stack.plus,

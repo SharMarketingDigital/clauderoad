@@ -44,6 +44,10 @@ function drawCombatFeedback(): void {
     } else if (ev.kind === 'enhance-fail') {
       const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
       if (p.visible) combatText.spawn(p.x, p.y, `Falhou (+${ev.amount})`, 'fail');
+    } else if (ev.kind === 'heal') {
+      renderer.flash(ev.targetId);
+      const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
+      if (p.visible) combatText.spawn(p.x, p.y, `+${ev.amount}`, 'heal');
     } else if (ev.kind === 'boss-spawn') {
       hud.announce(`Um chefe surgiu: ${ev.text ?? 'Chefe'}!`);
     } else if (ev.kind === 'boss-defeat') {

@@ -11,6 +11,7 @@ import {
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
   GCD_TICKS,
+  POTION_COOLDOWN_TICKS,
   xpForLevel,
   HP_PER_LEVEL,
   MP_PER_LEVEL,
@@ -669,6 +670,146 @@ describe('equipment', () => {
         sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: s.rarity, plus: s.plus });
         sim.step();
       }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
+// Kill mobs until `itemId` lands in the bag at a specific rarity (deterministic
+// for a fixed seed; `cap` is a safety net). Used when a test needs a KNOWN stat
+// bonus (e.g. a Normal leather's small, predictable +maxHp).
+function killUntilBagHasRarity(sim: Sim, itemId: string, rarity: string, cap: number): boolean {
+  const has = (): boolean =>
+    sim.inventory().stacks.some((s) => s.itemId === itemId && s.rarity === rarity);
+  for (let i = 0; i < cap && !has(); i++) killNearestEnemy(sim);
+  return has();
+}
+
+describe('consumables', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const potionQty = (sim: Sim): number =>
+    sim
+      .inventory()
+      .stacks.filter((s) => s.itemId === 'health_potion')
+      .reduce((n, s) => n + s.qty, 0);
+
+  // The player can't take damage yet, so to get HP below max we equip a Normal
+  // wolf_leather: equipping lifts maxHp but never tops current HP up, opening a
+  // small, KNOWN gap (Normal's +maxHp < the potion's heal) to heal into. Also
+  // grinds a Health Potion and stops the player fighting, so no stray kill/level
+  // refills HP mid-test.
+  function setupHealGap(sim: Sim): void {
+    expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
+    expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
+    sim.step();
+  }
+
+  it('using a Health Potion heals HP (clamped to the max) and consumes one from the stack', () => {
+    const sim = new Sim(7);
+    setupHealGap(sim);
+    const heal = ITEMS.health_potion.consumable!.healHp!;
+    const hpBefore = player(sim).hp;
+    const maxHp = player(sim).maxHp;
+    const qtyBefore = potionQty(sim);
+    expect(hpBefore).toBeLessThan(maxHp); // the leather opened a gap to heal into
+    expect(hpBefore + heal).toBeGreaterThan(maxHp); // ...and the heal WOULD overflow it
+
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+
+    expect(player(sim).hp).toBe(maxHp); // healed up to — and clamped at — the max
+    expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp); // never over the cap
+    expect(potionQty(sim)).toBe(qtyBefore - 1); // exactly one potion spent
+  });
+
+  it('refuses at full HP — no potion consumed and no cooldown armed', () => {
+    const sim = new Sim(7);
+    expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
+    expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    expect(player(sim).hp).toBe(player(sim).maxHp); // full HP (nothing damages the player yet)
+
+    // (1) at full HP the potion does nothing AND is not consumed
+    const qtyBefore = potionQty(sim);
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(potionQty(sim)).toBe(qtyBefore);
+
+    // (2) the no-op armed NO cooldown: open a gap and a drink works on the very
+    // next tick (a wrongly-armed cooldown would block this and consume nothing).
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(potionQty(sim)).toBe(qtyBefore - 1); // healed immediately -> no lingering cooldown
+    expect(player(sim).hp).toBe(player(sim).maxHp);
+  });
+
+  it('respects the shared potion cooldown before another can be used', () => {
+    const sim = new Sim(7);
+    // two real uses are needed, so make sure at least two potions are in the bag
+    for (let i = 0; i < 800 && potionQty(sim) < 2; i++) killNearestEnemy(sim);
+    expect(potionQty(sim)).toBeGreaterThanOrEqual(2);
+    setupHealGap(sim); // stops fighting, equips Normal leather (opens an HP gap)
+    expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
+
+    // First drink: heals (to full here). Record the tick it applied so we can pin
+    // the cooldown's EXACT length (it ends at drinkTick + POTION_COOLDOWN_TICKS).
+    const qty0 = potionQty(sim);
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    const drinkTick = sim.tick;
+    expect(potionQty(sim)).toBe(qty0 - 1);
+
+    // Re-open the gap (unequip + re-equip the leather — equipping never tops HP
+    // up) so every later refusal can ONLY be the cooldown, not a full-HP no-op.
+    sim.sendCommand({ t: 'unequip', slot: 'armor' });
+    sim.step();
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
+
+    // Step to ONE TICK before the cooldown elapses; a use there is STILL refused
+    // (pins the lower edge — same both-sides rigor as the RESPAWN/EVENT_TTL tests).
+    while (sim.tick < drinkTick + POTION_COOLDOWN_TICKS - 2) sim.step();
+    const qtyEdge = potionQty(sim);
+    const hpEdge = player(sim).hp;
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step(); // applied at drinkTick + POTION_COOLDOWN_TICKS - 1: one tick short
+    expect(sim.tick).toBe(drinkTick + POTION_COOLDOWN_TICKS - 1);
+    expect(potionQty(sim)).toBe(qtyEdge); // blocked: nothing consumed
+    expect(player(sim).hp).toBe(hpEdge);
+
+    // Exactly at the boundary it works again (HP up, one more potion spent).
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step(); // applied at drinkTick + POTION_COOLDOWN_TICKS: cooldown elapsed
+    expect(sim.tick).toBe(drinkTick + POTION_COOLDOWN_TICKS);
+    expect(player(sim).hp).toBeGreaterThan(hpEdge);
+    expect(potionQty(sim)).toBe(qtyEdge - 1);
+  });
+
+  it('drinking a potion is part of the deterministic fingerprint (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      // assert the path is actually exercised — no silent skip if a drop ever fails
+      expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
+      expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
+      sim.step();
+      sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+      sim.step();
       return sim.hash();
     };
     expect(run(7)).toBe(run(7));

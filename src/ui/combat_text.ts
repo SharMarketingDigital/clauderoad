@@ -20,7 +20,7 @@ export class CombatText {
     screenX: number,
     screenY: number,
     text: string,
-    variant: 'damage' | 'levelup' | 'fail' = 'damage',
+    variant: 'damage' | 'levelup' | 'fail' | 'heal' = 'damage',
   ): void {
     const el = document.createElement('div');
     el.className = `fct fct-${variant}`;

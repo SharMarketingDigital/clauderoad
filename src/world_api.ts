@@ -54,6 +54,7 @@ export interface ItemStackView {
   readonly rarityName: string;
   readonly plus: number; // enhancement level (+N); shown in the name
   readonly equipSlot?: EquipSlot;
+  readonly consumable: boolean; // true => usable from the bag (a potion, etc.)
 }
 
 // One equipment slot's current contents (null fields when empty). `plus` is the
@@ -90,7 +91,8 @@ export type Command =
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
-  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean }; // alchemy "+N" attempt
+  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
+  | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number }; // consume a bag stack (potion, etc.)
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -115,6 +117,7 @@ export type SimEvent = {
   readonly tick: number;
   // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
+  // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
   // 'boss-spawn'/'boss-defeat'/'boss-summon': `text` = the boss name, for the announcement.
   // targetId is the affected entity; x/z anchors the on-screen effect.
   readonly kind:
@@ -122,6 +125,7 @@ export type SimEvent = {
     | 'levelup'
     | 'enhance-success'
     | 'enhance-fail'
+    | 'heal'
     | 'boss-spawn'
     | 'boss-defeat'
     | 'boss-summon';
