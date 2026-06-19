@@ -312,6 +312,7 @@ const STATUS_COLORS: Record<string, number> = {
   slow: 0x4aa3ff, // blue
   dot: 0xff3030, // red (bleed)
   defense: 0x59d0b0, // teal — a protective buff (Postura Defensiva), not a threat
+  crit: 0xff7a18, // burning orange — a fury/crit buff (Fúria)
 };
 
 // Status display priority: the bead shows the most "important" active effect
@@ -319,7 +320,7 @@ const STATUS_COLORS: Record<string, number> = {
 // to sit at index 0 — so the colour doesn't depend on application/expiry order.
 // The defense buff ranks last: a debuff on the same actor is always more urgent.
 const STATUS_PRIORITY: Record<string, number> = {
-  stun: 0, knockdown: 0, root: 1, slow: 2, dot: 3, defense: 4,
+  stun: 0, knockdown: 0, root: 1, slow: 2, dot: 3, defense: 4, crit: 5,
 };
 
 // Show/hide + color the per-entity status bead by its highest-priority status.

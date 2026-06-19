@@ -19,6 +19,7 @@ export class Hud {
   // action bar: slot number -> its DOM refs (built lazily from world.abilities())
   private actionBar: HTMLDivElement;
   private slots = new Map<number, { root: HTMLDivElement; cd: HTMLDivElement }>();
+  private lastBarSig = ''; // rebuild the bar when the active kit changes (weapon swap)
   // gold + inventory window (toggled with I; pure UI state, not a world command)
   private goldAmt: HTMLSpanElement;
   private bag: HTMLDivElement;
@@ -428,6 +429,14 @@ export class Hud {
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {
+    // When the active kit changes (e.g. equipping a spear swaps the whole bar),
+    // the cached slots show stale icons/names — wipe and rebuild from scratch.
+    const sig = abilities.map((a) => `${a.slot}:${a.name}:${a.icon}:${a.mpCost}`).join('|');
+    if (sig !== this.lastBarSig) {
+      this.lastBarSig = sig;
+      this.actionBar.textContent = '';
+      this.slots.clear();
+    }
     for (const a of abilities) {
       const slot = this.slots.get(a.slot) ?? this.createSlot(a);
       // Sweep the dark overlay clockwise as the cooldown runs down.

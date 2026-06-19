@@ -17,11 +17,17 @@ export type EquipSlot = 'weapon' | 'armor';
 // seam so content, sim, and UI agree; the UI maps these to colors.
 export type Rarity = 'normal' | 'sos' | 'som' | 'sun';
 
+// Weapon mastery ("class") ids. The equipped weapon picks the active mastery
+// (its kit + passive + auto-attack reach); unarmed falls back to Sword. Defined
+// at the seam so weapon content, the sim, and the UI agree on the set.
+export type MasteryId = 'sword' | 'spear';
+
 // Status effect kinds. Debuffs: stun/knockdown (can't act), root (can't move),
-// slow (moves/attacks slower), dot (damage over time). Buffs: defense (the
-// caster takes reduced incoming damage — the Sword's Postura Defensiva). Defined
-// at the seam so the sim, content and renderer agree; render shows a marker by kind.
-export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense';
+// slow (moves/attacks slower), dot (damage over time). Buffs: defense (the caster
+// takes reduced incoming damage — Sword's Postura Defensiva), crit (raised crit
+// chance — Spear's Fúria). Defined at the seam so the sim, content and renderer
+// agree; render shows a marker by kind.
+export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense' | 'crit';
 
 export interface EntityView {
   readonly id: number;

@@ -17,7 +17,7 @@ import type {
 } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
-import { ABILITIES, type AbilityDef } from './content/abilities';
+import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
 import {
@@ -42,6 +42,10 @@ const PLAYER_SPEED = 6; // units/sec
 export const ENEMY_SPEED = 2.4; // units/sec
 export const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
+export const CRIT_MULT = 2.0; // a critical hit deals this multiple (Spear's Fúria buff)
+// Highest action-bar slot any mastery uses — the hash fingerprints cooldowns for
+// slots 1..N so it stays complete regardless of which kit is active.
+const MAX_ABILITY_SLOTS = 8;
 export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
 // ~5s as a spirit before respawn — the early-WoW "cheap death + corpse run" model.
 // PROVISIONAL: the GDD B8 penalty (gear-durability loss, a real graveyard revive) is
@@ -286,7 +290,8 @@ export class Sim implements IWorld {
 
   abilities(): ReadonlyArray<AbilityView> {
     const p = this.ents.get(this.localId);
-    return ABILITIES.map((def) => {
+    const kit = p ? this.activeMastery(p).abilities : MASTERIES[DEFAULT_MASTERY].abilities;
+    return kit.map((def) => {
       const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
       const gcdLeft = p ? Math.max(0, p.gcdUntil - this.tick) : 0;
       const ready = !!p && cdLeft === 0 && gcdLeft === 0 && p.mp >= def.mpCost;
@@ -432,7 +437,7 @@ export class Sim implements IWorld {
     const dx = t.x - p.x;
     const dz = t.z - p.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > MELEE_RANGE) return; // out of range: hold the swing
+    if (dist > this.attackRange(p)) return; // out of range: hold the swing
     // Require facing the target only while approaching. At contact the bodies
     // overlap, the direction vector collapses to ~0, and the player constantly
     // overshoots — requiring "in front" there would skip swings on the enemy
@@ -440,7 +445,7 @@ export class Sim implements IWorld {
     if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
     p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
-    this.hitEnemy(t, meleeDamage(p.str, p.weaponDamage), p);
+    this.hitEnemy(t, this.rollCrit(p, meleeDamage(p.str, p.weaponDamage)), p);
   }
 
   // Apply a hit to an enemy: subtract HP, surface the floating damage number,
@@ -730,11 +735,13 @@ export class Sim implements IWorld {
     this.applyAction(p, { t: 'set-target', id: target.id });
     const dx = target.x - p.x;
     const dz = target.z - p.z;
-    const reach = MELEE_RANGE - 0.4;
+    const reach = this.attackRange(p) - 0.4;
     this.moveIntent =
       dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' };
-    // fire ready abilities (useAbility gates GCD / own cooldown / MP / range)
-    for (const def of ABILITIES) this.applyAction(p, { t: 'use-ability', slot: def.slot });
+    // fire every ready ability of the active kit (useAbility gates GCD / cooldown / MP / range)
+    for (const def of this.activeMastery(p).abilities) {
+      this.applyAction(p, { t: 'use-ability', slot: def.slot });
+    }
   }
 
   // The nearest living enemy by squared distance (id breaks ties -> deterministic).
@@ -822,6 +829,12 @@ export class Sim implements IWorld {
       bonusMaxHp += scale(stats.maxHp ?? 0);
       bonusMaxMp += scale(stats.maxMp ?? 0);
     }
+    // The active weapon mastery's passive is always on (e.g. Lança's +HP).
+    const passive = this.activeMastery(p).passive;
+    bonusStr += passive.str ?? 0;
+    bonusWeapon += passive.weaponDamage ?? 0;
+    bonusMaxHp += passive.maxHp ?? 0;
+    bonusMaxMp += passive.maxMp ?? 0;
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
     p.maxHp = p.baseMaxHp + bonusMaxHp;
@@ -830,45 +843,118 @@ export class Sim implements IWorld {
     if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
 
-  // Cast an action-bar ability on the current target. Gated by the global
-  // cooldown, the ability's own cooldown, MP, and melee range — all checked
-  // deterministically here. A successful cast deals the (bigger) hit and emits
-  // the same damage event the auto-attack does, so the number/flash show too.
+  // ---------- weapon mastery ----------
+  // The active mastery comes from the equipped weapon; unarmed (or a weapon with
+  // no mastery tag) falls back to the Sword tree — the starter style.
+  private activeMastery(p: Entity): MasteryDef {
+    const w = p.equipment.weapon;
+    const id = w ? ITEMS[w.itemId]?.mastery : undefined;
+    return MASTERIES[id ?? DEFAULT_MASTERY] ?? MASTERIES[DEFAULT_MASTERY];
+  }
+  // How far this player's auto-attack and (non-charge) abilities reach — the
+  // active mastery's range, or the default melee range when it sets none.
+  private attackRange(p: Entity): number {
+    return this.activeMastery(p).attackRange ?? MELEE_RANGE;
+  }
+
+  // Cast an action-bar ability from the active mastery's kit. Gated by the global
+  // cooldown, the ability's own cooldown, MP, and (for targeted strikes) range —
+  // all checked deterministically here. A successful cast deals its hit(s) and
+  // emits the same damage event the auto-attack does, so numbers/flashes show.
   private useAbility(p: Entity, slot: number): void {
-    const def = ABILITIES.find((a) => a.slot === slot);
+    const def = this.activeMastery(p).abilities.find((a) => a.slot === slot);
     if (!def) return;
     if (this.tick < p.gcdUntil) return; // global cooldown
     if (this.tick < (p.abilityReadyAt[slot] ?? 0)) return; // own cooldown
     if (p.mp < def.mpCost) return; // not enough MP
 
-    // A self-buff (Postura Defensiva) needs no target/range: spend the cost,
-    // start the cooldowns, and apply its effects to the caster.
+    // A self-buff (Postura Defensiva / Fúria) needs no target/range: spend the
+    // cost, start the cooldowns, and apply its effects to the caster.
     if (def.kind === 'buff') {
-      p.mp -= def.mpCost;
-      p.gcdUntil = this.tick + GCD_TICKS;
-      p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
+      this.commitCast(p, def, slot);
       this.applyCastEffects(p, def, p);
+      return;
+    }
+
+    // A cone sweep (Varredura) hits every enemy in front within reach — anchored
+    // on the current target's direction when one is selected.
+    if (def.shape === 'cone') {
+      if (p.targetId == null) return; // press it with a target to orient the sweep
+      const t = this.ents.get(p.targetId);
+      if (!t || t.kind !== 'enemy' || t.hp <= 0) return;
+      if (Math.hypot(t.x - p.x, t.z - p.z) > this.attackRange(p)) return; // anchor must be in reach
+      p.facing = Math.atan2(t.x - p.x, t.z - p.z); // face the target so the cone is predictable
+      this.commitCast(p, def, slot);
+      for (const e of this.enemiesInCone(p)) {
+        this.hitEnemy(e, this.rollCrit(p, abilityDamage(def, p.str, p.weaponDamage)), p);
+        if (e.hp > 0) this.applyCastEffects(e, def, p);
+      }
       return;
     }
 
     if (p.targetId == null) return;
     const t = this.ents.get(p.targetId);
     if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // needs a living enemy target
-    // Actions are drained before movement, so this range/facing gate sees
-    // start-of-tick positions (auto-attack checks post-move). One-tick edge on
-    // the exact range boundary; deterministic either way.
-    const dx = t.x - p.x;
-    const dz = t.z - p.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist > MELEE_RANGE) return; // melee ability: target must be in reach
-    if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
-    // Commit: spend MP, start the global + own cooldowns, deal the bigger hit.
+    let dx = t.x - p.x;
+    let dz = t.z - p.z;
+    let dist = Math.hypot(dx, dz);
+
+    // A charge (Investida) is a gap-closer: castable from afar, it dashes the
+    // player to just within reach of the target, then strikes.
+    if (def.charge) {
+      if (dist > (def.castRange ?? this.attackRange(p))) return; // too far to charge
+      this.dashTo(p, t);
+      dx = t.x - p.x;
+      dz = t.z - p.z;
+      dist = Math.hypot(dx, dz);
+    } else {
+      // Actions are drained before movement, so this range/facing gate sees
+      // start-of-tick positions (auto-attack checks post-move). One-tick edge on
+      // the exact range boundary; deterministic either way.
+      if (dist > this.attackRange(p)) return; // out of reach
+      if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
+    }
+    this.commitCast(p, def, slot);
+    this.hitEnemy(t, this.rollCrit(p, abilityDamage(def, p.str, p.weaponDamage)), p);
+    // Debuff the target — only if it survived the hit.
+    if (t.hp > 0) this.applyCastEffects(t, def, p);
+  }
+
+  // Spend MP and start the global + own cooldowns for a committed cast.
+  private commitCast(p: Entity, def: AbilityDef, slot: number): void {
     p.mp -= def.mpCost;
     p.gcdUntil = this.tick + GCD_TICKS;
     p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
-    this.hitEnemy(t, abilityDamage(def, p.str, p.weaponDamage), p);
-    // Debuff the target — only if it survived the hit.
-    if (t.hp > 0) this.applyCastEffects(t, def, p);
+  }
+
+  // Dash the player to just inside attack range of a target (a gap-closer),
+  // facing it. Clamped to the world, so it can never leave the map.
+  private dashTo(p: Entity, t: Entity): void {
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const d = Math.hypot(dx, dz);
+    if (d <= 0) return;
+    const stop = Math.max(0, d - (this.attackRange(p) - 0.3)); // leave us in reach, not on top
+    p.x = clamp(p.x + (dx / d) * stop, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(p.z + (dz / d) * stop, -WORLD_HALF, WORLD_HALF);
+    p.facing = Math.atan2(dx, dz);
+  }
+
+  // Every living enemy caught in the player's frontal cone within attack range
+  // (anything overlapping us is included, mirroring the auto-attack's contact rule).
+  private enemiesInCone(p: Entity): Entity[] {
+    const range = this.attackRange(p);
+    const hit: Entity[] = [];
+    for (const e of this.ents.values()) {
+      if (e.kind !== 'enemy' || e.hp <= 0) continue;
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > range) continue;
+      if (d > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) continue;
+      hit.push(e);
+    }
+    return hit;
   }
 
   // Apply an ability's status effects to `target` (the enemy for a strike, the
@@ -1095,6 +1181,19 @@ export class Sim implements IWorld {
     }
     return f;
   }
+  // Active crit chance (0..1) from 'crit' buffs (Spear's Fúria), or 0 unbuffed.
+  private critChance(e: Entity): number {
+    let c = 0;
+    for (const s of e.effects) if (s.kind === 'crit' && s.magnitude > 0) c += s.magnitude;
+    return c > 1 ? 1 : c;
+  }
+  // A player-dealt hit, with a crit roll folded in. The Rng is touched ONLY when a
+  // crit buff is up, so an unbuffed world's random stream (and hash) is unchanged.
+  private rollCrit(p: Entity, dmg: number): number {
+    const chance = this.critChance(p);
+    if (chance <= 0) return dmg;
+    return this.rng.next() < chance ? Math.round(dmg * CRIT_MULT) : dmg;
+  }
 
   // Tick an entity's status effects: apply any DoT damage due this tick, then drop
   // expired effects. Called for every entity at the start of each tick.
@@ -1192,7 +1291,8 @@ export class Sim implements IWorld {
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
       mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil);
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
-      for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
+      // Fingerprint a fixed slot range so it stays complete across masteries.
+      for (let slot = 1; slot <= MAX_ABILITY_SLOTS; slot++) mix(e.abilityReadyAt[slot] ?? 0);
       // Progression (level implies maxHp/maxMp, so they need not be mixed too).
       mix(e.level); mix(e.xp); mix(e.attrPoints);
       mix(e.baseStr); mix(e.baseInt); // spent attribute points (str/int)

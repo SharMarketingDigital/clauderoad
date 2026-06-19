@@ -1,7 +1,7 @@
 // Data-as-code item definitions. The bag stores item ids; the UI resolves names
 // through ITEMS via IWorld. Equippable items carry a `slot` and `stats` that the
 // sim sums onto the character while equipped (see recomputeStats in sim.ts).
-import type { EquipSlot } from '../../world_api';
+import type { EquipSlot, MasteryId } from '../../world_api';
 
 // Flat bonuses an equipped item grants. Provisional numbers — tune later.
 export interface ItemStats {
@@ -24,6 +24,7 @@ export interface ItemDef {
   id: string;
   name: string;
   slot?: EquipSlot; // present => equippable (into this slot)
+  mastery?: MasteryId; // weapons only: which mastery (kit + passive) this weapon activates
   stats?: ItemStats; // bonuses applied while equipped
   elixirFor?: EquipSlot; // present => an alchemy Elixir that upgrades this slot
   luckyPowder?: boolean; // the alchemy luck booster
@@ -37,7 +38,9 @@ export const ITEMS: Record<string, ItemDef> = {
   // crude leather "armor" — common drop, gives a little HP
   wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'armor', stats: { maxHp: 20 }, value: 8 },
   // the starter weapon upgrade: a big chunk of weapon damage over bare fists
-  old_sword: { id: 'old_sword', name: 'Espada Velha', slot: 'weapon', stats: { weaponDamage: 10 }, value: 30 },
+  old_sword: { id: 'old_sword', name: 'Espada Velha', slot: 'weapon', mastery: 'sword', stats: { weaponDamage: 10 }, value: 30 },
+  // a reach weapon: switches the character to the Lança mastery (area + crit kit)
+  iron_spear: { id: 'iron_spear', name: 'Lança de Ferro', slot: 'weapon', mastery: 'spear', stats: { weaponDamage: 12 }, value: 45 },
   // alchemy materials (no rarity; consumed to attempt a "+N" upgrade)
   elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', elixirFor: 'weapon', value: 15 },
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', elixirFor: 'armor', value: 15 },

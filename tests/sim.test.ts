@@ -11,6 +11,7 @@ import {
   WORLD_HALF,
   ENEMY_SPEED,
   MELEE_RANGE,
+  CRIT_MULT,
   DT,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
@@ -28,7 +29,7 @@ import {
 import { Rng } from '../src/sim/rng';
 import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
-import { ABILITIES } from '../src/sim/content/abilities';
+import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS } from '../src/sim/content/enhance';
@@ -879,6 +880,219 @@ describe('sword kit (multi-slot abilities)', () => {
     const exposed = run(false);
     expect(exposed.hp).toBeLessThan(exposed.maxHp); // the wolf actually landed hits (test is meaningful)
     expect(guarded.hp).toBeGreaterThan(exposed.hp); // bracing mitigated the damage taken
+  });
+});
+
+// Buy the Lança de Ferro from the vendor (it isn't a drop) and equip it, switching
+// the character to the Spear mastery. Farms the gold first; all deterministic.
+function equipSpear(sim: Sim): void {
+  const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
+  const price = VENDOR_STOCK.find((s) => s.itemId === 'iron_spear')!.price;
+  let guard = 0;
+  while (playerOf().gold < price && guard++ < 400) killNearestEnemy(sim);
+  for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
+    const p = playerOf();
+    sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
+    sim.step();
+  }
+  sim.sendCommand({ t: 'set-target', id: null });
+  sim.sendCommand({ t: 'buy', itemId: 'iron_spear' });
+  sim.sendCommand({ t: 'stop' });
+  sim.step();
+  const spear = sim.inventory().stacks.find((s) => s.itemId === 'iron_spear');
+  if (spear) {
+    sim.sendCommand({ t: 'equip', itemId: 'iron_spear', rarity: spear.rarity, plus: spear.plus });
+    sim.step();
+  }
+}
+
+// The Lança mastery: equipping a spear swaps the whole kit (area + crit), grants
+// a +HP passive, and unlocks the Estocada/Varredura/Investida/Fúria abilities.
+describe('spear mastery (Lança)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss);
+  const nearestWolf = (sim: Sim) => {
+    const p = player(sim);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    return wolves[0];
+  };
+
+  it('equipping a spear swaps the action bar to the Lança kit; unequipping restores the sword', () => {
+    const sim = new Sim(7);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    equipSpear(sim);
+    expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('iron_spear');
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Estocada', 'Varredura', 'Investida', 'Fúria']);
+    sim.sendCommand({ t: 'unequip', slot: 'weapon' });
+    sim.step();
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+  });
+
+  it('the Lança passive raises max HP while the spear is equipped', () => {
+    const sim = new Sim(7);
+    equipSpear(sim);
+    const withSpear = player(sim).maxHp;
+    sim.sendCommand({ t: 'unequip', slot: 'weapon' });
+    sim.step();
+    const without = player(sim).maxHp;
+    expect(withSpear - without).toBe(MASTERIES.spear.passive.maxHp); // exactly the passive (+HP)
+  });
+
+  it('Investida charges the player to the target, closing a real gap', () => {
+    const sim = new Sim(7);
+    equipSpear(sim);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    // approach a wolf (no target -> no premature auto-attack) into the charge window
+    let target: { id: number; x: number; z: number } | undefined;
+    let d0 = 0;
+    for (let i = 0; i < 800; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (!w) { sim.step(); continue; }
+      const d = Math.hypot(w.x - p.x, w.z - p.z);
+      if (d > 4 && d <= 11) { target = { id: w.id, x: w.x, z: w.z }; d0 = d; break; }
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+    }
+    expect(target).toBeDefined();
+
+    sim.sendCommand({ t: 'set-target', id: target!.id });
+    sim.sendCommand({ t: 'use-ability', slot: 3 }); // Investida (gap-closer)
+    sim.sendCommand({ t: 'stop' }); // the dash does the moving, not a manual step
+    sim.step();
+    const p = player(sim);
+    const dAfter = Math.hypot(target!.x - p.x, target!.z - p.z); // distance to the wolf's pre-cast spot
+    expect(dAfter).toBeLessThan(d0 - 2); // closed a real gap
+    expect(dAfter).toBeLessThanOrEqual(3.5); // landed within ~reach (spear range 3.0 + slack)
+  });
+
+  it('Varredura sweeps every enemy in front — one cast hits 2+ at once', () => {
+    const sim = new Sim(7);
+    equipSpear(sim);
+    const range = MASTERIES.spear.attackRange!;
+    let hits = 0;
+    for (let i = 0; i < 1500 && hits === 0; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (!w) { sim.step(); continue; }
+      // The cone re-faces toward the target on cast, so count using THAT facing.
+      const facing = Math.atan2(w.x - p.x, w.z - p.z);
+      const inCone = sim.entities().filter((e) => {
+        if (e.kind !== 'enemy' || e.boss || e.hp <= 0) return false;
+        const dx = e.x - p.x;
+        const dz = e.z - p.z;
+        const d = Math.hypot(dx, dz);
+        return d <= range && (d <= 1.0 || inFrontOf(dx, dz, facing));
+      });
+      if (inCone.length >= 2) {
+        const before = sim.recentEvents();
+        const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+        sim.sendCommand({ t: 'set-target', id: w.id }); // cone anchors on (and faces) this target
+        sim.sendCommand({ t: 'use-ability', slot: 2 }); // Varredura (cone)
+        sim.sendCommand({ t: 'stop' });
+        sim.step();
+        const dmg = sim.recentEvents().filter((e) => e.seq > lastSeq && e.kind === 'damage');
+        hits = new Set(dmg.map((e) => e.targetId)).size; // distinct enemies damaged this tick
+      } else {
+        sim.sendCommand({ t: 'set-target', id: null });
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); // push into the pack
+        sim.step();
+      }
+    }
+    expect(hits).toBeGreaterThanOrEqual(2); // a cone, not a single-target strike
+  });
+
+  it('Fúria makes hits critical (the next strike deals CRIT_MULT× its normal damage)', () => {
+    // Same seed + identical approach => identical base hit; the ONLY difference is
+    // the crit buff, so the damage ratio is exactly CRIT_MULT. Measure the first
+    // auto-attack (not GCD-gated, so Fúria can't desync the swing timing).
+    const measureFirstHit = (withFury: boolean): number => {
+      const sim = new Sim(7);
+      equipSpear(sim);
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      // approach a wolf without a target (no premature auto-attack) into spear reach
+      let wid = -1;
+      for (let i = 0; i < 800; i++) {
+        const p = player(sim);
+        const w = nearestWolf(sim);
+        if (!w) { sim.step(); continue; }
+        if (Math.hypot(w.x - p.x, w.z - p.z) <= 2.4) { wid = w.id; break; }
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+      }
+      expect(wid).not.toBe(-1);
+      if (withFury) {
+        sim.sendCommand({ t: 'use-ability', slot: 4 }); // Fúria: +100% crit for 5s
+        sim.step();
+      }
+      // target it and let the FIRST auto-attack land; capture exactly that hit
+      let dmg = -1;
+      for (let i = 0; i < 120 && dmg < 0; i++) {
+        const w = sim.entities().find((e) => e.id === wid);
+        if (!w) break; // can't die before its first hit — nothing else damages it
+        const p = player(sim);
+        const before = sim.recentEvents();
+        const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+        sim.sendCommand({ t: 'set-target', id: wid });
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); // stay in reach + facing
+        sim.step();
+        const hit = sim
+          .recentEvents()
+          .find((e) => e.seq > lastSeq && e.kind === 'damage' && e.targetId === wid);
+        if (hit) dmg = hit.amount;
+      }
+      return dmg;
+    };
+    const normal = measureFirstHit(false);
+    const crit = measureFirstHit(true);
+    expect(normal).toBeGreaterThan(0);
+    expect(crit).toBe(normal * CRIT_MULT);
+  });
+
+  it('Estocada knocks a target down (proven on the high-HP boss, which survives the hit)', () => {
+    const sim = new Sim(7);
+    equipSpear(sim);
+    while (!findBoss(sim)) sim.step(); // wait for the world boss — tanky enough to survive Estocada
+    const bossId = findBoss(sim)!.id;
+    let knocked = false;
+    for (let i = 0; i < 800 && !knocked; i++) {
+      const b = sim.entities().find((e) => e.id === bossId);
+      if (!b) break;
+      const p = player(sim);
+      sim.sendCommand({ t: 'set-target', id: bossId });
+      sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+      sim.sendCommand({ t: 'use-ability', slot: 1 }); // Estocada
+      sim.step();
+      const bb = sim.entities().find((e) => e.id === bossId);
+      if (bb && bb.statuses.includes('knockdown')) knocked = true;
+    }
+    expect(knocked).toBe(true);
+  });
+
+  it('an equipped-spear run is deterministic (same seed => identical world)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      equipSpear(sim);
+      for (let i = 0; i < 200; i++) {
+        sim.sendCommand({ t: 'use-ability', slot: 4 }); // Fúria (crit rolls touch the Rng)
+        sim.sendCommand({ t: 'use-ability', slot: 1 }); // Estocada
+        const p = player(sim);
+        const w = nearestWolf(sim);
+        if (w) {
+          sim.sendCommand({ t: 'set-target', id: w.id });
+          sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        }
+        sim.step();
+      }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
   });
 });
 
