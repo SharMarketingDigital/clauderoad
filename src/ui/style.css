@@ -281,6 +281,41 @@ html, body {
 .attr-btn:hover:not(:disabled) { background: #26344a; }
 .attr-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
 
+/* Vendor shop window (toggled with V). */
+.shop {
+  position: absolute;
+  right: 16px;
+  top: 80px;
+  width: 240px;
+  padding: 10px;
+  background: rgba(12, 16, 22, 0.92);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.shop[hidden] { display: none; } /* the [hidden] attribute must beat .shop's display:flex */
+.shop-title { font-weight: 700; color: var(--gold); }
+.shop-hint { font-size: 11px; opacity: 0.85; }
+.shop-buy, .shop-sell { display: flex; flex-direction: column; gap: 4px; }
+.shop-btn {
+  padding: 5px 8px;
+  font-size: 11px;
+  text-align: left;
+  color: var(--ink);
+  background: #1c2533;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.shop-btn.sell { border-color: #6bff8a; }
+.shop-btn:hover:not(:disabled) { background: #26344a; }
+.shop-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+
 /* Failed-refine banner (floating text). */
 .fct-fail {
   font-size: 22px;

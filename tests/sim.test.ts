@@ -8,6 +8,7 @@ import {
   enhanceChance,
   enhanceStat,
   STR_TO_DAMAGE,
+  WORLD_HALF,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
   GCD_TICKS,
@@ -35,6 +36,12 @@ import {
   BOSS_FIRST_SPAWN_TICK,
   BOSS_RESPAWN_TICKS,
 } from '../src/sim/content/bosses';
+import {
+  VENDOR_SPAWN_X,
+  VENDOR_SPAWN_Z,
+  VENDOR_INTERACT_RANGE,
+  VENDOR_STOCK,
+} from '../src/sim/content/vendor';
 import type { Command } from '../src/world_api';
 import type { ItemStack } from '../src/sim/types';
 
@@ -1177,6 +1184,163 @@ describe('consumables', () => {
     };
     expect(run(7)).toBe(run(7));
     expect(run(7)).not.toBe(run(123));
+  });
+});
+
+describe('vendor (shop)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const vendor = (sim: Sim) => sim.entities().find((e) => e.kind === 'npc')!;
+  const qtyOf = (sim: Sim, id: string): number =>
+    sim.inventory().stacks.filter((s) => s.itemId === id).reduce((n, s) => n + s.qty, 0);
+
+  // Walk the player up to the vendor (into interact range). Bounded; re-issues a
+  // move each tick (so it would resume even if a respawn reset the move intent).
+  function goToVendor(sim: Sim): void {
+    const range2 = VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
+    for (let i = 0; i < 3000; i++) {
+      const p = player(sim);
+      const v = vendor(sim);
+      const dx = v.x - p.x;
+      const dz = v.z - p.z;
+      if (dx * dx + dz * dz <= range2) break;
+      sim.sendCommand({ t: 'move', dx, dz });
+      sim.step();
+    }
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+  }
+
+  it('spawns a vendor NPC at its fixed point; the shop is in-range only when close', () => {
+    const sim = new Sim(7);
+    const v = vendor(sim);
+    expect(v).toBeDefined();
+    expect(v.x).toBe(VENDOR_SPAWN_X);
+    expect(v.z).toBe(VENDOR_SPAWN_Z);
+    expect(sim.shop().stock.length).toBe(VENDOR_STOCK.length);
+    expect(sim.shop().inRange).toBe(false); // player starts at (0,0), away from the vendor
+    goToVendor(sim);
+    expect(sim.shop().inRange).toBe(true);
+  });
+
+  it('selling a bag item adds (rarity-scaled) gold and removes it from the bag', () => {
+    const sim = new Sim(7);
+    expect(killUntilBagHas(sim, 'wolf_leather', 800)).toBe(true);
+    goToVendor(sim);
+    const leather = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
+    const goldBefore = player(sim).gold;
+    const qtyBefore = qtyOf(sim, 'wolf_leather');
+    const expected = rarityStat(ITEMS.wolf_leather.value!, leather.rarity);
+    expect(expected).toBeGreaterThan(0);
+    expect(leather.sellValue).toBe(expected); // the seam's sell price == what sell() will pay
+
+    sim.sendCommand({ t: 'sell', itemId: 'wolf_leather', rarity: leather.rarity, plus: leather.plus });
+    sim.step();
+
+    expect(player(sim).gold).toBe(goldBefore + leather.sellValue); // gold up by the shown sell value
+    expect(qtyOf(sim, 'wolf_leather')).toBe(qtyBefore - 1); // one removed
+  });
+
+  it('buying an item removes gold and adds it to the bag', () => {
+    const sim = new Sim(7);
+    const entry = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!;
+    for (let i = 0; i < 800 && player(sim).gold < entry.price; i++) killNearestEnemy(sim); // earn gold
+    expect(player(sim).gold).toBeGreaterThanOrEqual(entry.price);
+    goToVendor(sim);
+    const goldBefore = player(sim).gold;
+    const potsBefore = qtyOf(sim, 'health_potion');
+
+    sim.sendCommand({ t: 'buy', itemId: 'health_potion' });
+    sim.step();
+
+    expect(player(sim).gold).toBe(goldBefore - entry.price); // gold down by the price
+    expect(qtyOf(sim, 'health_potion')).toBe(potsBefore + 1); // item in the bag
+  });
+
+  it('cannot buy without enough gold', () => {
+    const sim = new Sim(7);
+    goToVendor(sim); // walked here, no kills -> 0 gold
+    const entry = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!;
+    expect(player(sim).gold).toBeLessThan(entry.price);
+    const goldBefore = player(sim).gold;
+
+    sim.sendCommand({ t: 'buy', itemId: 'health_potion' });
+    sim.step();
+
+    expect(player(sim).gold).toBe(goldBefore); // nothing spent
+    expect(qtyOf(sim, 'health_potion')).toBe(0); // nothing bought
+  });
+
+  it('cannot trade when far from the vendor', () => {
+    const sim = new Sim(7);
+    const entry = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!;
+    for (let i = 0; i < 800 && player(sim).gold < entry.price; i++) killNearestEnemy(sim);
+    // walk well away from the vendor (toward a far corner)
+    for (let i = 0; i < 120; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: -WORLD_HALF - p.x, dz: -WORLD_HALF - p.z });
+      sim.step();
+    }
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    expect(sim.shop().inRange).toBe(false);
+    const goldBefore = player(sim).gold;
+
+    sim.sendCommand({ t: 'buy', itemId: 'health_potion' });
+    sim.step();
+
+    expect(player(sim).gold).toBe(goldBefore); // blocked: out of range
+  });
+
+  it('shop trades are part of the deterministic fingerprint', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      const entry = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!;
+      for (let i = 0; i < 800 && player(sim).gold < entry.price; i++) killNearestEnemy(sim);
+      goToVendor(sim);
+      sim.sendCommand({ t: 'buy', itemId: 'health_potion' });
+      sim.step();
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+
+  it('selling scales the payout with item rarity (non-Normal pays above base)', () => {
+    const sim = new Sim(7);
+    const findLeather = () =>
+      sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather' && s.rarity !== 'normal');
+    for (let i = 0; i < 800 && !findLeather(); i++) killNearestEnemy(sim); // farm a rarer leather
+    const leather = findLeather();
+    expect(leather).toBeDefined();
+    if (!leather) return;
+    goToVendor(sim);
+    const base = ITEMS.wolf_leather.value!;
+    // expected payout from RARITIES (the source of truth), NOT the sim's own rarityStat
+    const expected = Math.round(base * RARITIES.find((r) => r.id === leather.rarity)!.statMultiplier);
+    expect(expected).toBeGreaterThan(base); // a non-Normal item is worth strictly MORE than base
+    const goldBefore = player(sim).gold;
+    sim.sendCommand({ t: 'sell', itemId: 'wolf_leather', rarity: leather.rarity, plus: leather.plus });
+    sim.step();
+    expect(player(sim).gold).toBe(goldBefore + expected); // paid the rarity-scaled value
+  });
+
+  it('the vendor NPC cannot be targeted, attacked, or damaged', () => {
+    const sim = new Sim(7);
+    const v = vendor(sim);
+    const hp0 = v.hp;
+    // clicking (set-target) the NPC is ignored — only living enemies are valid targets
+    sim.sendCommand({ t: 'set-target', id: v.id });
+    sim.step();
+    expect(sim.localTargetId()).toBeNull();
+    // Tab (cycle-target) never lands on the NPC
+    for (let i = 0; i < 20; i++) {
+      sim.sendCommand({ t: 'cycle-target' });
+      sim.step();
+      expect(sim.localTargetId()).not.toBe(v.id);
+    }
+    // combat happening around it never damages the NPC
+    for (let i = 0; i < 10; i++) killNearestEnemy(sim);
+    expect(vendor(sim).hp).toBe(hp0);
   });
 });
 

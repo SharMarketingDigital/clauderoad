@@ -12,7 +12,7 @@
 import { Rng } from './rng';
 import type { Entity } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
 } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
@@ -27,6 +27,9 @@ import {
   MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
 } from './content/enhance';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
+import {
+  VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
+} from './content/vendor';
 
 const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
 
@@ -93,10 +96,14 @@ export class Sim implements IWorld {
   private events: SimEvent[] = [];
   private nextEventSeq = 1;
 
+  // The town vendor NPC's entity id (a fixed, non-combat shopkeeper).
+  private vendorId = 0;
+
   constructor(seed: number) {
     this.rng = new Rng(seed);
     this.localId = this.spawnPlayer('Hero');
     for (let i = 0; i < ENEMY_COUNT; i++) this.spawnEnemy();
+    this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
   }
 
   // ---------- spawning ----------
@@ -141,6 +148,28 @@ export class Sim implements IWorld {
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
     });
+  }
+
+  // The town vendor: a fixed, non-combat NPC. kind 'npc' keeps it out of every
+  // enemy code path (no wander, no aggro, not targetable/attackable).
+  private spawnVendor(): number {
+    const id = this.nextId++;
+    this.ents.set(id, {
+      id, kind: 'npc', name: VENDOR_NAME,
+      x: VENDOR_SPAWN_X, z: VENDOR_SPAWN_Z, facing: 0,
+      hp: 100, maxHp: 100,
+      targetId: null,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      boss: false, summoned: false,
+      homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
+      targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
+    });
+    return id;
   }
 
   // Spawn the world boss at its fixed point. No Rng (fixed position), so it
@@ -281,6 +310,7 @@ export class Sim implements IWorld {
           plus: s.plus,
           equipSlot: ITEMS[s.itemId]?.slot,
           consumable: ITEMS[s.itemId]?.consumable != null,
+          sellValue: rarityStat(ITEMS[s.itemId]?.value ?? 0, s.rarity),
         }))
       : [];
     const equipment = EQUIP_SLOTS.map((slot) => {
@@ -298,6 +328,19 @@ export class Sim implements IWorld {
       };
     });
     return { capacity: BAG_SLOTS, stacks, equipment };
+  }
+
+  shop(): ShopView {
+    const p = this.ents.get(this.localId);
+    return {
+      name: VENDOR_NAME,
+      stock: VENDOR_STOCK.map((s) => ({
+        itemId: s.itemId,
+        name: ITEMS[s.itemId]?.name ?? s.itemId,
+        price: s.price,
+      })),
+      inRange: p ? this.nearVendor(p) : false,
+    };
   }
 
   sendCommand(cmd: Command): void {
@@ -526,6 +569,12 @@ export class Sim implements IWorld {
       case 'spend-attr':
         this.spendAttr(p, cmd.attr);
         break;
+      case 'buy':
+        this.buy(p, cmd.itemId);
+        break;
+      case 'sell':
+        this.sell(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
@@ -624,6 +673,36 @@ export class Sim implements IWorld {
     else p.baseInt += ATTR_INT_PER_POINT;
     this.recomputeStats(p);
     if (attr === 'int') p.mp = Math.min(p.maxMp, p.mp + MP_PER_INT);
+  }
+
+  // ---------- vendor (shop) ----------
+  // Buy one of a vendor stock item. Requires being near the vendor and enough
+  // gold; the item is added Normal/+0. Refuses (no charge) if the bag is full.
+  private buy(p: Entity, itemId: string): void {
+    if (!this.nearVendor(p)) return;
+    const entry = VENDOR_STOCK.find((s) => s.itemId === itemId);
+    if (!entry || p.gold < entry.price) return; // not sold here, or can't afford
+    if (!addToBag(p.bag, itemId, 'normal', 0, 1)) return; // bag full -> no purchase, no charge
+    p.gold -= entry.price;
+  }
+
+  // Sell one of a bag stack to the vendor for its (rarity-scaled) value. Requires
+  // being near the vendor and actually holding that exact stack.
+  private sell(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.nearVendor(p)) return;
+    const value = rarityStat(ITEMS[itemId]?.value ?? 0, rarity);
+    if (value <= 0) return; // worthless here -> don't let the player give it away for nothing
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
+    p.gold += value;
+  }
+
+  // Whether the player is close enough to the vendor NPC to trade.
+  private nearVendor(p: Entity): boolean {
+    const v = this.ents.get(this.vendorId);
+    if (!v) return false;
+    const dx = p.x - v.x;
+    const dz = p.z - v.z;
+    return dx * dx + dz * dz <= VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
   }
 
   // Recompute EFFECTIVE stats = base (class + level) + sum of equipped gear.

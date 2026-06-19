@@ -221,7 +221,8 @@ export class Renderer {
 // A simple capsule-ish humanoid with a "nose" so facing is visible. A boss is
 // drawn bigger and in a distinct menacing color so it reads as a boss.
 function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
-  const bodyColor = boss ? 0xa030d0 : kind === 'player' ? 0x3b82f6 : 0xb23b3b;
+  const bodyColor =
+    boss ? 0xa030d0 : kind === 'player' ? 0x3b82f6 : kind === 'npc' ? 0xe0b030 : 0xb23b3b;
   const g = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(0.5, 0.5, 1.7, 12),

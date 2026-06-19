@@ -39,6 +39,14 @@ export class Hud {
   private matLine: HTMLDivElement;
   private luckyOn = false; // UI state: whether to spend a Lucky Powder
   private bagOpen = false;
+  // vendor shop window (toggled with V)
+  private shopEl: HTMLDivElement;
+  private shopTitle: HTMLDivElement;
+  private shopHint: HTMLDivElement;
+  private shopBuy: HTMLDivElement;
+  private shopSell: HTMLDivElement;
+  private shopOpen = false;
+  private lastShopSig = ''; // skip rebuilding the buy/sell buttons when nothing changed
   // latest world + inventory, captured each frame so click handlers (equip /
   // unequip) can send commands against the current state.
   private world: IWorld | null = null;
@@ -82,7 +90,13 @@ export class Hud {
         </div>
         <div class="bag-grid"></div>
       </div>
-      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; arrastar gira</div>
+      <div class="shop" hidden>
+        <div class="shop-title"></div>
+        <div class="shop-hint"></div>
+        <div class="shop-buy"></div>
+        <div class="shop-sell"></div>
+      </div>
+      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; V loja &middot; arrastar gira</div>
       <div class="announce"></div>
     `;
     document.body.appendChild(this.root);
@@ -109,6 +123,11 @@ export class Hud {
     this.attrIntBtn = this.root.querySelector('.attr-int') as HTMLButtonElement;
     this.attrStrBtn.addEventListener('click', () => this.world?.sendCommand({ t: 'spend-attr', attr: 'str' }));
     this.attrIntBtn.addEventListener('click', () => this.world?.sendCommand({ t: 'spend-attr', attr: 'int' }));
+    this.shopEl = this.root.querySelector('.shop') as HTMLDivElement;
+    this.shopTitle = this.root.querySelector('.shop-title') as HTMLDivElement;
+    this.shopHint = this.root.querySelector('.shop-hint') as HTMLDivElement;
+    this.shopBuy = this.root.querySelector('.shop-buy') as HTMLDivElement;
+    this.shopSell = this.root.querySelector('.shop-sell') as HTMLDivElement;
     this.equipRow = this.root.querySelector('.equip-row') as HTMLDivElement;
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
     this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
@@ -123,13 +142,23 @@ export class Hud {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
-      else if (e.key === 'Escape') this.setBag(false);
+      else if (e.key.toLowerCase() === 'v') this.setShop(!this.shopOpen);
+      else if (e.key === 'Escape') {
+        this.setBag(false);
+        this.setShop(false);
+      }
     });
   }
 
   private setBag(open: boolean): void {
     this.bagOpen = open;
     this.bag.hidden = !open;
+  }
+
+  private setShop(open: boolean): void {
+    this.shopOpen = open;
+    this.shopEl.hidden = !open;
+    if (open) this.lastShopSig = ''; // force a rebuild on (re)open
   }
 
   // Show a brief center-screen announcement (e.g. a world boss appearing).
@@ -177,6 +206,56 @@ export class Hud {
 
     this.updateActionBar(world.abilities());
     if (this.bagOpen) this.updateBag(world.inventory(), p);
+    if (this.shopOpen) this.updateShop(world, p);
+  }
+
+  // Vendor shop: lists what the vendor sells (buy buttons, gated on gold) and the
+  // player's sellable bag stacks (sell buttons). Only usable while in range.
+  private updateShop(world: IWorld, p: EntityView): void {
+    const s = world.shop();
+    this.shopTitle.textContent = `${s.name} · Ouro: ${p.gold}`;
+    if (!s.inRange) {
+      this.shopHint.textContent = 'Aproxime-se do mercador para negociar.';
+      if (this.lastShopSig !== 'far') {
+        this.shopBuy.textContent = '';
+        this.shopSell.textContent = '';
+        this.lastShopSig = 'far';
+      }
+      return;
+    }
+    this.shopHint.textContent = 'Comprar / Vender:';
+    const inv = world.inventory();
+    // Rebuild the buttons only when gold / stock / sellable bag actually changed —
+    // not every frame — so the DOM (and hover/focus) isn't thrashed while open.
+    const sig =
+      `${p.gold}|` +
+      s.stock.map((e) => `${e.itemId}:${e.price}`).join(',') +
+      '|' +
+      inv.stacks.map((st) => `${st.itemId}:${st.rarity}:${st.plus}:${st.qty}:${st.sellValue}`).join(',');
+    if (sig === this.lastShopSig) return;
+    this.lastShopSig = sig;
+
+    this.shopBuy.textContent = '';
+    for (const e of s.stock) {
+      const btn = document.createElement('button');
+      btn.className = 'shop-btn';
+      btn.textContent = `Comprar ${e.name} — ${e.price}`;
+      btn.disabled = p.gold < e.price;
+      btn.addEventListener('click', () => world.sendCommand({ t: 'buy', itemId: e.itemId }));
+      this.shopBuy.appendChild(btn);
+    }
+    this.shopSell.textContent = '';
+    for (const st of inv.stacks) {
+      if (st.sellValue <= 0) continue;
+      const btn = document.createElement('button');
+      btn.className = 'shop-btn sell';
+      const tag = st.plus > 0 ? ` +${st.plus}` : '';
+      btn.textContent = `Vender ${st.name}${tag} — ${st.sellValue}`;
+      btn.addEventListener('click', () =>
+        world.sendCommand({ t: 'sell', itemId: st.itemId, rarity: st.rarity, plus: st.plus }),
+      );
+      this.shopSell.appendChild(btn);
+    }
   }
 
   private updateBag(inv: InventoryView, p: EntityView): void {

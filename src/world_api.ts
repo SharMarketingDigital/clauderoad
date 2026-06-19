@@ -7,7 +7,7 @@
 // concretely. To add a feature, extend IWorld first, then implement it in
 // every world (offline Sim, and later the online ClientWorld).
 
-export type EntityKind = 'player' | 'enemy';
+export type EntityKind = 'player' | 'enemy' | 'npc';
 
 // Equipment slots a character can fill. Defined here (the seam) so both the
 // sim's item content and the UI agree on the set.
@@ -58,6 +58,7 @@ export interface ItemStackView {
   readonly plus: number; // enhancement level (+N); shown in the name
   readonly equipSlot?: EquipSlot;
   readonly consumable: boolean; // true => usable from the bag (a potion, etc.)
+  readonly sellValue: number; // gold the vendor pays for ONE of this stack (rarity-scaled)
 }
 
 // One equipment slot's current contents (null fields when empty). `plus` is the
@@ -81,6 +82,21 @@ export interface InventoryView {
   readonly equipment: ReadonlyArray<EquipView>;
 }
 
+// One item the vendor sells (to BUY), with its resolved name and gold price.
+export interface ShopEntryView {
+  readonly itemId: string;
+  readonly name: string;
+  readonly price: number;
+}
+
+// The vendor's storefront, for the shop window. `inRange` is whether the local
+// player is close enough to actually trade (the sim enforces this too).
+export interface ShopView {
+  readonly name: string;
+  readonly stock: ReadonlyArray<ShopEntryView>;
+  readonly inRange: boolean;
+}
+
 // Player intent / commands. The client streams these into the world.
 // Offline they hit the local Sim; online they will be sent to the server.
 //
@@ -96,7 +112,9 @@ export type Command =
   | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
   | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
-  | { t: 'spend-attr'; attr: 'str' | 'int' }; // spend one attribute point on Strength or Intelligence
+  | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
+  | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
+  | { t: 'sell'; itemId: string; rarity: Rarity; plus: number }; // sell one bag stack to the vendor
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -158,5 +176,7 @@ export interface IWorld {
   abilities(): ReadonlyArray<AbilityView>;
   // The local player's bag (resolved item names + capacity) for the HUD window.
   inventory(): InventoryView;
+  // The vendor's storefront (stock + whether the player is in range) for the shop.
+  shop(): ShopView;
   sendCommand(cmd: Command): void;
 }
