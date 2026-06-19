@@ -142,6 +142,43 @@ html, body {
 }
 .gold-amt { font-weight: 700; color: var(--ink); }
 
+/* Auto-play (bot) toggle — sits under the gold; lights up green when active. */
+.bot-toggle {
+  position: absolute;
+  top: 124px;
+  left: 16px;
+  padding: 4px 10px;
+  font-size: 12px;
+  pointer-events: auto;
+  color: var(--ink);
+  background: #1c2533;
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.bot-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
+/* Prominent "the bot is driving" banner, centered at the top. */
+.bot-indicator {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #d6f5b0;
+  background: rgba(42, 58, 28, 0.85);
+  border: 1px solid #8fd14a;
+  border-radius: 6px;
+  animation: bot-pulse 1.4s ease-in-out infinite;
+}
+@keyframes bot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* Inventory window — centered modal-ish panel, toggled with I. */
 .bag {
   position: absolute;

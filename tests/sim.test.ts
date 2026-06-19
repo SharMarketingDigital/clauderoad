@@ -1903,6 +1903,74 @@ describe('world boss', () => {
   });
 });
 
+// Auto-play (bot): the sim drives the player end-to-end — hunt, attack, loot,
+// spend points. The whole point is a hands-off run that still earns progress,
+// stays deterministic, and cleanly hands control back when toggled off.
+describe('bot (auto-play)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('off by default; the set-bot command flips it on and off', () => {
+    const sim = new Sim(7);
+    expect(sim.botActive()).toBe(false);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    sim.step();
+    expect(sim.botActive()).toBe(true);
+    sim.sendCommand({ t: 'set-bot', on: false });
+    sim.step();
+    expect(sim.botActive()).toBe(false);
+  });
+
+  it('with the bot on, the player hunts on its own: earns loot + XP without hanging', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    // Drive nothing but the clock. Every kill drops gold, so gold rising proves
+    // the bot engaged and killed an enemy entirely on its own. The cap is the
+    // "doesn't hang/livelock" guard — if the bot stalled, we'd hit it and fail.
+    let scored = false;
+    for (let i = 0; i < 4000 && !scored; i++) {
+      sim.step();
+      if (player(sim).gold > 0) scored = true;
+    }
+    const p = player(sim);
+    expect(scored).toBe(true); // engaged + killed a wolf hands-off
+    expect(p.gold).toBeGreaterThan(0); // loot (gold) earned
+    // XP earned too: it either banked XP toward the next level or already dinged.
+    expect(p.level > 1 || p.xp > 0).toBe(true);
+    // It spends earned attribute points immediately, so none sit unspent.
+    expect(p.attrPoints).toBe(0);
+  });
+
+  it('toggling off hands control back: the target clears and farming stops', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    sim.step();
+    for (let i = 0; i < 4000 && player(sim).gold === 0; i++) sim.step();
+    expect(player(sim).gold).toBeGreaterThan(0); // it was actively farming
+
+    sim.sendCommand({ t: 'set-bot', on: false });
+    sim.step();
+    expect(sim.botActive()).toBe(false);
+    expect(sim.localTargetId()).toBe(null); // off clears the bot's target
+
+    // Idle with NO commands: gold can't rise without the player attacking, so a
+    // frozen total proves the sim is no longer driving the character.
+    const goldFrozen = player(sim).gold;
+    for (let i = 0; i < 300; i++) sim.step();
+    expect(player(sim).gold).toBe(goldFrozen);
+  });
+
+  it('an auto-play run is deterministic (same seed => identical world)', () => {
+    const botRun = (seed: number): string => {
+      const sim = new Sim(seed);
+      sim.sendCommand({ t: 'set-bot', on: true });
+      for (let i = 0; i < 1500; i++) sim.step();
+      return sim.hash();
+    };
+    expect(botRun(7)).toBe(botRun(7));
+    expect(botRun(7)).not.toBe(botRun(123));
+  });
+});
+
 // Guard the load-bearing sim invariants that tsc alone won't catch: no
 // non-deterministic clocks/RNG and no presentation-layer imports leaking into
 // the deterministic core. Scans the source (comments stripped to avoid the

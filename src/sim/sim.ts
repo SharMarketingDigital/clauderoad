@@ -10,7 +10,7 @@
 // server runs ONE Sim for everyone and the client mirrors snapshots.
 
 import { Rng } from './rng';
-import type { Entity } from './types';
+import type { Entity, ItemStack } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
   StatusKind,
@@ -49,6 +49,7 @@ export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type ene
 export const DEATH_RESPAWN_TICKS = 5 * TICK_RATE;
 const PLAYER_SPAWN_X = 0; // the "graveyard"/safe point a downed player wakes up at
 const PLAYER_SPAWN_Z = 0;
+const BOT_LOW_HP_FRAC = 0.35; // auto-play drinks/retreats below this fraction of max HP
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
@@ -99,6 +100,8 @@ export class Sim implements IWorld {
 
   // The town vendor NPC's entity id (a fixed, non-combat shopkeeper).
   private vendorId = 0;
+  // Auto-play: when on, the sim drives the player and manual input is ignored.
+  private botEnabled = false;
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
@@ -344,6 +347,10 @@ export class Sim implements IWorld {
     };
   }
 
+  botActive(): boolean {
+    return this.botEnabled;
+  }
+
   sendCommand(cmd: Command): void {
     // Movement is a held intent (latest wins); everything else is a one-shot
     // action queued for the next tick.
@@ -379,11 +386,26 @@ export class Sim implements IWorld {
     // expired stun lets the entity act this tick. Snapshot: a DoT may remove an entity.
     for (const e of [...this.ents.values()]) this.stepStatuses(e);
     const player = this.ents.get(this.localId);
-    // Drain one-shot actions first, then movement, then enemies.
+    // Drain one-shot actions. The bot toggle is always honored; other MANUAL
+    // commands apply only while the bot is OFF (auto-play ignores manual input).
+    // Then, if the bot is on, it decides the player's actions + movement this tick.
     if (player) {
-      for (const cmd of this.pending) this.applyAction(player, cmd);
+      for (const cmd of this.pending) {
+        if (cmd.t === 'set-bot') {
+          this.botEnabled = cmd.on;
+          if (!cmd.on) {
+            this.moveIntent = { t: 'stop' }; // hand control back to the human
+            player.targetId = null;
+          }
+        } else if (!this.botEnabled) {
+          this.applyAction(player, cmd);
+        }
+      }
+      this.pending.length = 0;
+      if (this.botEnabled) this.botStep(player);
+    } else {
+      this.pending.length = 0;
     }
-    this.pending.length = 0;
     if (player) this.stepPlayer(player);
     for (const e of this.ents.values()) {
       if (e.kind === 'enemy') this.stepEnemy(e, player);
@@ -665,6 +687,75 @@ export class Sim implements IWorld {
       x: p.x,
       z: p.z,
     });
+  }
+
+  // ---------- bot (auto-play) ----------
+  // Decide the player's actions for this tick when auto-play is on. ALL decisions
+  // are deterministic functions of world state (no Rng/clock), and every action
+  // goes through the SAME applyAction path a human's commands use — the bot never
+  // bypasses the simulation (it respects range, cooldowns, MP, swing timers).
+  private botStep(p: Entity): void {
+    // a spirit or a stunned actor can't act — just hold (respawn / stun-end is automatic)
+    if (p.deadUntil !== 0 || this.isIncapacitated(p)) {
+      this.moveIntent = { t: 'stop' };
+      return;
+    }
+    // spend any earned attribute points (pump Strength for faster kills)
+    while (p.attrPoints > 0) this.applyAction(p, { t: 'spend-attr', attr: 'str' });
+
+    const target = this.nearestEnemy(p);
+    const lowHp = p.hp < p.maxHp * BOT_LOW_HP_FRAC;
+    const potion = this.bagStack(p, 'health_potion'); // an actual held stack, exact rarity/plus
+
+    // low HP: drink a potion if we hold one (the no-op is harmless if it's on cooldown)
+    if (lowHp && potion) {
+      this.applyAction(p, { t: 'use-item', itemId: potion.itemId, rarity: potion.rarity, plus: potion.plus });
+    }
+    // low HP, no potion, and an enemy in our face -> back off to disengage and survive
+    if (lowHp && !potion && target) {
+      const dxe = target.x - p.x;
+      const dze = target.z - p.z;
+      const dangerR = ENEMY_TEMPLATE.aggroRadius + 1;
+      if (dxe * dxe + dze * dze <= dangerR * dangerR) {
+        this.moveIntent = { t: 'move', dx: p.x - target.x, dz: p.z - target.z }; // away
+        return;
+      }
+    }
+
+    // hunt: pick the nearest enemy, close to range, and attack it
+    if (!target) {
+      this.moveIntent = { t: 'stop' };
+      return;
+    }
+    this.applyAction(p, { t: 'set-target', id: target.id });
+    const dx = target.x - p.x;
+    const dz = target.z - p.z;
+    const reach = MELEE_RANGE - 0.4;
+    this.moveIntent =
+      dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' };
+    // fire ready abilities (useAbility gates GCD / own cooldown / MP / range)
+    for (const def of ABILITIES) this.applyAction(p, { t: 'use-ability', slot: def.slot });
+  }
+
+  // The nearest living enemy by squared distance (id breaks ties -> deterministic).
+  private nearestEnemy(p: Entity): Entity | undefined {
+    let best: Entity | undefined;
+    let bestD2 = Infinity;
+    for (const e of this.ents.values()) {
+      if (e.kind !== 'enemy' || e.hp <= 0) continue;
+      const d2 = (e.x - p.x) ** 2 + (e.z - p.z) ** 2;
+      if (d2 < bestD2 || (d2 === bestD2 && best !== undefined && e.id < best.id)) {
+        bestD2 = d2;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  // The first held stack of an item (so the bot uses the exact rarity/plus the
+  // use-item command needs to match), or undefined if none is carried.
+  private bagStack(p: Entity, itemId: string): ItemStack | undefined {
+    return p.bag.find((s) => s.itemId === itemId && s.qty > 0);
   }
 
   // ---------- attributes ----------

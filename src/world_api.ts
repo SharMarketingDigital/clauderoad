@@ -120,7 +120,8 @@ export type Command =
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
-  | { t: 'sell'; itemId: string; rarity: Rarity; plus: number }; // sell one bag stack to the vendor
+  | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
+  | { t: 'set-bot'; on: boolean }; // toggle auto-play (the sim drives the player; manual input ignored)
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -184,5 +185,8 @@ export interface IWorld {
   inventory(): InventoryView;
   // The vendor's storefront (stock + whether the player is in range) for the shop.
   shop(): ShopView;
+  // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
+  // this for the indicator + to know manual input is being ignored.
+  botActive(): boolean;
   sendCommand(cmd: Command): void;
 }

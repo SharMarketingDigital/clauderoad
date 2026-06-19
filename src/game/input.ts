@@ -75,6 +75,11 @@ export class Input {
   // Push queued actions + the current movement intent into the world. Called
   // once per frame.
   apply(world: IWorld): void {
+    // Auto-play drives the player from the sim; ignore (and drop) manual input.
+    if (world.botActive()) {
+      this.pending.length = 0;
+      return;
+    }
     for (const cmd of this.pending) world.sendCommand(cmd);
     this.pending.length = 0;
 

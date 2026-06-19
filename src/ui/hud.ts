@@ -47,6 +47,9 @@ export class Hud {
   private shopSell: HTMLDivElement;
   private shopOpen = false;
   private lastShopSig = ''; // skip rebuilding the buy/sell buttons when nothing changed
+  // auto-play (bot) toggle + indicator
+  private botToggleBtn: HTMLButtonElement;
+  private botIndicator: HTMLDivElement;
   // latest world + inventory, captured each frame so click handlers (equip /
   // unequip) can send commands against the current state.
   private world: IWorld | null = null;
@@ -73,6 +76,8 @@ export class Hud {
         </div>
       </div>
       <div class="gold">&#9679; <span class="gold-amt">0</span></div>
+      <button class="bot-toggle">Bot: OFF (B)</button>
+      <div class="bot-indicator" hidden>&#9679; AUTO-PLAY</div>
       <div class="action-bar"></div>
       <div class="bag" hidden>
         <div class="bag-title">Bolsa</div>
@@ -137,17 +142,26 @@ export class Hud {
       this.luckyToggle.textContent = `Pó da Sorte: ${this.luckyOn ? 'ON' : 'OFF'}`;
       this.luckyToggle.classList.toggle('on', this.luckyOn);
     });
+    this.botToggleBtn = this.root.querySelector('.bot-toggle') as HTMLButtonElement;
+    this.botIndicator = this.root.querySelector('.bot-indicator') as HTMLDivElement;
+    this.botToggleBtn.addEventListener('click', () => this.toggleBot());
 
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
       else if (e.key.toLowerCase() === 'v') this.setShop(!this.shopOpen);
+      else if (e.key.toLowerCase() === 'b') this.toggleBot();
       else if (e.key === 'Escape') {
         this.setBag(false);
         this.setShop(false);
       }
     });
+  }
+
+  // Flip auto-play on/off via the same command a click on the button sends.
+  private toggleBot(): void {
+    if (this.world) this.world.sendCommand({ t: 'set-bot', on: !this.world.botActive() });
   }
 
   private setBag(open: boolean): void {
@@ -171,6 +185,11 @@ export class Hud {
 
   update(world: IWorld): void {
     this.world = world; // so bag click handlers can send equip/unequip commands
+    // Auto-play state: light up the button + show the "AUTO-PLAY" indicator.
+    const bot = world.botActive();
+    this.botToggleBtn.textContent = `Bot: ${bot ? 'ON' : 'OFF'} (B)`;
+    this.botToggleBtn.classList.toggle('on', bot);
+    this.botIndicator.hidden = !bot;
     const id = world.localPlayerId();
     if (id == null) return;
     const ents = world.entities();
