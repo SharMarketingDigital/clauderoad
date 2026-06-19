@@ -48,6 +48,8 @@ function drawCombatFeedback(): void {
       hud.announce(`Um chefe surgiu: ${ev.text ?? 'Chefe'}!`);
     } else if (ev.kind === 'boss-defeat') {
       hud.announce(`${ev.text ?? 'O chefe'} foi derrotado!`);
+    } else if (ev.kind === 'boss-summon') {
+      hud.announce(`${ev.text ?? 'O chefe'} chama a matilha!`);
     }
   }
 }

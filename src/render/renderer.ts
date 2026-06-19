@@ -179,6 +179,7 @@ export class Renderer {
     // Park the selection ring under the current target (if any).
     if (targetView) {
       this.selectionRing.position.set(targetView.x, 0.06, targetView.z);
+      this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : 1); // match the bigger boss
       this.selectionRing.visible = true;
     } else {
       this.selectionRing.visible = false;

@@ -115,9 +115,16 @@ export type SimEvent = {
   readonly tick: number;
   // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
-  // 'boss-spawn'/'boss-defeat': `text` = the boss name, for the announcement.
+  // 'boss-spawn'/'boss-defeat'/'boss-summon': `text` = the boss name, for the announcement.
   // targetId is the affected entity; x/z anchors the on-screen effect.
-  readonly kind: 'damage' | 'levelup' | 'enhance-success' | 'enhance-fail' | 'boss-spawn' | 'boss-defeat';
+  readonly kind:
+    | 'damage'
+    | 'levelup'
+    | 'enhance-success'
+    | 'enhance-fail'
+    | 'boss-spawn'
+    | 'boss-defeat'
+    | 'boss-summon';
   readonly targetId: number;
   readonly amount: number;
   readonly x: number;

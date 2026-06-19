@@ -58,6 +58,9 @@ export interface Entity {
   // a world boss (special enemy): much more HP, boss loot, distinct visuals,
   // and a separate spawn/respawn timer.
   boss: boolean;
+  // a boss-summoned minion: ephemeral (when killed it does NOT enter the common
+  // respawn queue, so summons don't permanently grow the wolf population).
+  summoned: boolean;
   // enemy wander state
   targetX: number;
   targetZ: number;

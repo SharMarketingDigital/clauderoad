@@ -21,6 +21,7 @@ import { ITEMS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
 import {
   BOSS_TEMPLATE, BOSS_SPAWN_X, BOSS_SPAWN_Z, BOSS_FIRST_SPAWN_TICK, BOSS_RESPAWN_TICKS,
+  MINION_SPAWN_RADIUS,
 } from './content/bosses';
 import {
   MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
@@ -72,6 +73,9 @@ export class Sim implements IWorld {
   // the next boss should spawn (Infinity while one is alive). Tick-driven only.
   private bossId: number | null = null;
   private bossSpawnAt = BOSS_FIRST_SPAWN_TICK;
+  // How many HP-threshold minion summons the current boss has already fired
+  // (reset when a new boss spawns). Indexes BOSS_TEMPLATE.summonThresholds.
+  private bossSummonsFired = 0;
   // Recent presentation events (damage numbers, hit flashes). Bounded by age
   // (EVENT_TTL_TICKS) so it never grows unbounded; `seq` is monotonic forever.
   private events: SimEvent[] = [];
@@ -99,7 +103,7 @@ export class Sim implements IWorld {
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
-      boss: false,
+      boss: false, summoned: false,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -120,7 +124,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
-      boss: false,
+      boss: false, summoned: false,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -141,11 +145,12 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
-      boss: true,
+      boss: true, summoned: false,
       targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
     });
     this.bossId = id;
     this.bossSpawnAt = Infinity; // don't schedule another while this one lives
+    this.bossSummonsFired = 0; // fresh boss -> can summon all its waves again
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
@@ -155,6 +160,62 @@ export class Sim implements IWorld {
       x: BOSS_SPAWN_X,
       z: BOSS_SPAWN_Z,
       text: t.name,
+    });
+  }
+
+  // Fire a minion-summon wave for each HP threshold the boss has NEWLY crossed.
+  // Thresholds are descending and fire once each (bossSummonsFired advances), so
+  // one big hit crossing several fires several. HP only drops, so no un-firing.
+  private checkBossSummons(boss: Entity): void {
+    const thresholds = BOSS_TEMPLATE.summonThresholds;
+    while (
+      this.bossSummonsFired < thresholds.length &&
+      boss.hp <= boss.maxHp * thresholds[this.bossSummonsFired]
+    ) {
+      this.summonMinions(boss);
+      this.bossSummonsFired++;
+    }
+  }
+
+  // Spawn a ring of minions around the boss and announce the call.
+  private summonMinions(boss: Entity): void {
+    const n = BOSS_TEMPLATE.minionCount;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      this.spawnMinion(
+        clamp(boss.x + Math.cos(a) * MINION_SPAWN_RADIUS, -WORLD_HALF, WORLD_HALF),
+        clamp(boss.z + Math.sin(a) * MINION_SPAWN_RADIUS, -WORLD_HALF, WORLD_HALF),
+      );
+    }
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'boss-summon',
+      targetId: boss.id,
+      amount: 0,
+      x: boss.x,
+      z: boss.z,
+      text: BOSS_TEMPLATE.name,
+    });
+  }
+
+  // A boss minion: a common-mob-like enemy (selectable/attackable) but ephemeral
+  // (summoned:true) so killing it doesn't feed the common respawn queue.
+  private spawnMinion(x: number, z: number): void {
+    const id = this.nextId++;
+    this.ents.set(id, {
+      id, kind: 'enemy', name: BOSS_TEMPLATE.minionName,
+      x, z, facing: 0,
+      hp: BOSS_TEMPLATE.minionHp, maxHp: BOSS_TEMPLATE.minionHp,
+      targetId: null,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: BOSS_TEMPLATE.minionHp, baseMaxMp: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
+      level: 1, xp: 0, attrPoints: 0,
+      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      boss: false, summoned: true,
+      targetX: x, targetZ: z, repickAt: 0,
     });
   }
 
@@ -287,10 +348,15 @@ export class Sim implements IWorld {
     if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
     p.nextSwingAt = this.tick + p.swingTicks;
-    const dmg = meleeDamage(p.str, p.weaponDamage);
+    this.hitEnemy(t, meleeDamage(p.str, p.weaponDamage), p);
+  }
+
+  // Apply a hit to an enemy: subtract HP, surface the floating damage number,
+  // fire the boss's minion summons when its HP crosses a threshold, and kill it
+  // at 0. Centralized so every damage source goes through the same path.
+  private hitEnemy(t: Entity, dmg: number, killer: Entity): void {
     t.hp -= dmg;
-    // Emit a presentation event at the target's current position (captured now
-    // so the floating number still shows even if this swing kills it).
+    // Captured at the target's current position so the number shows even on a kill.
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
@@ -300,9 +366,13 @@ export class Sim implements IWorld {
       x: t.x,
       z: t.z,
     });
+    // Fire any crossed summon thresholds — even on a lethal blow — so a future
+    // retune (bigger hits / smaller HP bands) can never silently drop a wave.
+    // The boss isn't removed until killEnemy below, so its position is valid.
+    if (t.boss) this.checkBossSummons(t);
     if (t.hp <= 0) {
       t.hp = 0;
-      this.killEnemy(t, p);
+      this.killEnemy(t, killer);
     }
   }
 
@@ -332,8 +402,8 @@ export class Sim implements IWorld {
         z: dead.z,
         text: BOSS_TEMPLATE.name,
       });
-    } else {
-      // Respawn a same-type common enemy after a delay.
+    } else if (!dead.summoned) {
+      // Common enemies respawn after a delay; summoned minions are ephemeral.
       this.respawnQueue.push(this.tick + RESPAWN_TICKS);
     }
     if (killer.kind === 'player') {
@@ -538,21 +608,7 @@ export class Sim implements IWorld {
     p.mp -= def.mpCost;
     p.gcdUntil = this.tick + GCD_TICKS;
     p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
-    const dmg = abilityDamage(def, p.str, p.weaponDamage);
-    t.hp -= dmg;
-    this.events.push({
-      seq: this.nextEventSeq++,
-      tick: this.tick,
-      kind: 'damage',
-      targetId: t.id,
-      amount: dmg,
-      x: t.x,
-      z: t.z,
-    });
-    if (t.hp <= 0) {
-      t.hp = 0;
-      this.killEnemy(t, p);
-    }
+    this.hitEnemy(t, abilityDamage(def, p.str, p.weaponDamage), p);
   }
 
   // Tab: select the nearest living enemy in front; repeated presses cycle
@@ -659,9 +715,10 @@ export class Sim implements IWorld {
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
-    // Boss schedule (Infinity while alive -> sentinel).
+    // Boss schedule (Infinity while alive -> sentinel) + summon progress.
     mix(this.bossId ?? -1);
     mix(Number.isFinite(this.bossSpawnAt) ? this.bossSpawnAt : -1);
+    mix(this.bossSummonsFired);
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);
     mix(this.tick);

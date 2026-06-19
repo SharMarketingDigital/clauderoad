@@ -449,13 +449,17 @@ describe('abilities (Golpe Forte, slot 1)', () => {
   });
 });
 
-// Select the nearest enemy and beat it to death by chasing + auto-attacking.
-// Returns true if the target actually died within the tick budget.
+// Kill the nearest COMMON enemy (never the world boss) by chasing + attacking.
+// Targets a specific wolf by id (not cycle-target) so grind helpers stay
+// isolated from the boss regardless of its spawn timer. Returns true if it died.
 function killNearestEnemy(sim: Sim): boolean {
-  sim.sendCommand({ t: 'cycle-target' });
-  sim.step();
-  const tid = sim.localTargetId();
-  if (tid == null) return false;
+  const p = sim.entities().find((e) => e.kind === 'player')!;
+  const d2 = (e: { x: number; z: number }): number => (e.x - p.x) ** 2 + (e.z - p.z) ** 2;
+  const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
+  if (wolves.length === 0) return false;
+  wolves.sort((a, b) => d2(a) - d2(b));
+  const tid = wolves[0].id;
+  sim.sendCommand({ t: 'set-target', id: tid });
   let guard = 0;
   while (sim.entities().some((e) => e.id === tid) && guard++ < 3000) chaseTarget(sim, tid);
   return guard < 3000;
@@ -870,6 +874,22 @@ describe('alchemy ("+N")', () => {
 describe('world boss', () => {
   const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss);
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const minionCount = (sim: Sim): number =>
+    sim.entities().filter((e) => e.name === BOSS_TEMPLATE.minionName).length;
+
+  // Beat the live boss to death (targets the boss by id; auto-attack + ability).
+  const killBoss = (sim: Sim): void => {
+    const id = findBoss(sim)!.id;
+    sim.sendCommand({ t: 'set-target', id });
+    let guard = 0;
+    while (sim.entities().some((e) => e.id === id) && guard++ < 8000) {
+      const b = sim.entities().find((e) => e.id === id);
+      const p = player(sim);
+      if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.step();
+    }
+  };
 
   it('spawns at its scheduled tick, with boss HP and an announcement', () => {
     const sim = new Sim(7);
@@ -889,25 +909,32 @@ describe('world boss', () => {
     ).toBe(true);
   });
 
-  it('is tanky to kill, announces defeat, drops rich loot, and respawns on its timer', () => {
+  it('is tanky (many landed hits), announces defeat, drops rich loot, and respawns on schedule', () => {
     const sim = new Sim(7);
     while (!findBoss(sim)) sim.step(); // advance to the boss spawn (player idle -> 0 gold)
     const bossId = findBoss(sim)!.id;
     expect(player(sim).gold).toBe(0);
 
-    // target the boss and beat it down (auto-attack + ability)
+    // target the boss and beat it down, counting the hits that actually LAND on it
     sim.sendCommand({ t: 'set-target', id: bossId });
     const alive = (): boolean => sim.entities().some((e) => e.id === bossId);
-    let hits = 0;
-    while (alive() && hits++ < 8000) {
+    let guard = 0;
+    let lastSeq = 0;
+    let landedHits = 0;
+    while (alive() && guard++ < 8000) {
       const b = sim.entities().find((e) => e.id === bossId);
       const p = player(sim);
       if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
       sim.sendCommand({ t: 'use-ability', slot: 1 });
       sim.step();
+      for (const ev of sim.recentEvents()) {
+        if (ev.seq <= lastSeq) continue;
+        lastSeq = ev.seq;
+        if (ev.kind === 'damage' && ev.targetId === bossId) landedHits++;
+      }
     }
     expect(alive()).toBe(false); // died within budget
-    expect(hits).toBeGreaterThan(40); // took MANY hits — not a common one-/few-shot mob
+    expect(landedHits).toBeGreaterThan(20); // genuinely tanky — a common wolf takes ~3 hits
     expect(sim.recentEvents().some((e) => e.kind === 'boss-defeat')).toBe(true);
 
     // rich loot: gold gained dwarfs a common mob's max
@@ -915,12 +942,14 @@ describe('world boss', () => {
     expect(goldGained).toBeGreaterThanOrEqual(BOSS_TEMPLATE.goldMin);
     expect(goldGained).toBeGreaterThan(ENEMY_TEMPLATE.goldMax);
 
-    // gone now; a new boss appears after the respawn delay
+    // gone now; a new boss appears EXACTLY after the respawn delay (both sides pinned)
     const deathTick = sim.tick;
     expect(findBoss(sim)).toBeUndefined();
     sim.sendCommand({ t: 'stop' });
-    while (sim.tick < deathTick + BOSS_RESPAWN_TICKS) sim.step();
-    expect(findBoss(sim)).toBeDefined();
+    while (sim.tick < deathTick + BOSS_RESPAWN_TICKS - 1) sim.step();
+    expect(findBoss(sim)).toBeUndefined(); // still gone one tick before the deadline
+    sim.step();
+    expect(findBoss(sim)).toBeDefined(); // respawned exactly on schedule
   });
 
   it('has a more generous loot table than a common mob (gold + rarities)', () => {
@@ -947,6 +976,111 @@ describe('world boss', () => {
     };
     const N = 4000;
     expect(nonNormal(BOSS_RARITIES, N)).toBeGreaterThan(nonNormal(RARITIES, N));
+  });
+
+  it('can be selected with Tab (cycle-target), like any enemy', () => {
+    const sim = new Sim(7);
+    while (!findBoss(sim)) sim.step();
+    const bossId = findBoss(sim)!.id; // boss is at (0,30), in front of the origin-facing player
+    let landed = false;
+    for (let i = 0; i < 30 && !landed; i++) {
+      sim.sendCommand({ t: 'cycle-target' });
+      sim.step();
+      if (sim.localTargetId() === bossId) landed = true;
+    }
+    expect(landed).toBe(true); // Tab cycling reaches the boss
+  });
+
+  it('the boss spawn -> kill -> respawn path is deterministic (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      while (!sim.entities().some((e) => e.boss)) sim.step();
+      const bossId = sim.entities().find((e) => e.boss)!.id;
+      sim.sendCommand({ t: 'set-target', id: bossId });
+      let guard = 0;
+      while (sim.entities().some((e) => e.id === bossId) && guard++ < 8000) {
+        const b = sim.entities().find((e) => e.id === bossId);
+        const p = sim.entities().find((e) => e.kind === 'player')!;
+        if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+        sim.step();
+      }
+      const deathTick = sim.tick;
+      while (sim.tick < deathTick + BOSS_RESPAWN_TICKS) sim.step(); // through the respawn
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+
+  it('summons one wave per threshold, each in its 75/50/25 band, with no repeats', () => {
+    const sim = new Sim(7);
+    while (!findBoss(sim)) sim.step();
+    const bossId = findBoss(sim)!.id;
+    expect(minionCount(sim)).toBe(0); // nothing summoned before any damage
+
+    sim.sendCommand({ t: 'set-target', id: bossId });
+    const alive = (): boolean => sim.entities().some((e) => e.id === bossId);
+    let lastSeq = 0;
+    const summonFracs: number[] = []; // boss HP fraction captured at each summon
+    let guard = 0;
+    while (alive() && guard++ < 8000) {
+      const b = sim.entities().find((e) => e.id === bossId);
+      const p = player(sim);
+      if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.step();
+      for (const ev of sim.recentEvents()) {
+        if (ev.seq <= lastSeq) continue;
+        lastSeq = ev.seq;
+        if (ev.kind === 'boss-summon') {
+          const cur = sim.entities().find((e) => e.id === bossId);
+          summonFracs.push(cur ? cur.hp / cur.maxHp : 0);
+        }
+      }
+    }
+    // exactly one wave per threshold — no repeats in a band
+    expect(summonFracs.length).toBe(BOSS_TEMPLATE.summonThresholds.length);
+    // ...and each wave fired in its own descending band (75 / 50 / 25%)
+    expect(summonFracs[0]).toBeLessThanOrEqual(0.75);
+    expect(summonFracs[0]).toBeGreaterThan(0.5);
+    expect(summonFracs[1]).toBeLessThanOrEqual(0.5);
+    expect(summonFracs[1]).toBeGreaterThan(0.25);
+    expect(summonFracs[2]).toBeLessThanOrEqual(0.25);
+    expect(summonFracs[2]).toBeGreaterThan(0);
+    // the minions are out there (none were killed — the player only hit the boss)
+    expect(minionCount(sim)).toBe(
+      BOSS_TEMPLATE.summonThresholds.length * BOSS_TEMPLATE.minionCount,
+    );
+  });
+
+  it('resets its summon thresholds on respawn (a FULL fresh wave set next fight)', () => {
+    const sim = new Sim(7);
+    while (!findBoss(sim)) sim.step();
+    killBoss(sim); // fight 1 fires all its waves
+    // wait for the boss to come back
+    sim.sendCommand({ t: 'stop' });
+    while (!findBoss(sim)) sim.step();
+
+    // fight 2: killing the FRESH boss must fire the WHOLE set again (full reset,
+    // not a partial one) — a stuck/partly-reset counter would summon fewer.
+    const id2 = findBoss(sim)!.id;
+    sim.sendCommand({ t: 'set-target', id: id2 });
+    let lastSeq = sim.recentEvents().reduce((m, e) => Math.max(m, e.seq), 0);
+    let summons = 0;
+    let guard = 0;
+    while (sim.entities().some((e) => e.id === id2) && guard++ < 8000) {
+      const b = sim.entities().find((e) => e.id === id2);
+      const p = player(sim);
+      if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.step();
+      for (const ev of sim.recentEvents()) {
+        if (ev.seq <= lastSeq) continue;
+        lastSeq = ev.seq;
+        if (ev.kind === 'boss-summon') summons++;
+      }
+    }
+    expect(summons).toBe(BOSS_TEMPLATE.summonThresholds.length);
   });
 });
 
