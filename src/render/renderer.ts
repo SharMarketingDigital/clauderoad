@@ -161,6 +161,8 @@ export class Renderer {
       let m = this.meshes.get(e.id);
       if (!m) {
         m = makeActor(e.kind, e.boss);
+        // Champion/Elite wolves are drawn larger so the tier reads at a glance.
+        if (e.kind === 'enemy' && !e.boss) m.scale.setScalar(TIER_SCALE[e.tier] ?? 1);
         m.userData.entityId = e.id; // so pick() can map a hit back to the entity
         this.scene.add(m);
         this.meshes.set(e.id, m);
@@ -182,7 +184,7 @@ export class Renderer {
     // Park the selection ring under the current target (if any).
     if (targetView) {
       this.selectionRing.position.set(targetView.x, 0.06, targetView.z);
-      this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : 1); // match the bigger boss
+      this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : (TIER_SCALE[targetView.tier] ?? 1)); // match boss/tier size
       this.selectionRing.visible = true;
     } else {
       this.selectionRing.visible = false;
@@ -299,10 +301,19 @@ function updateHostileTint(actor: THREE.Object3D, e: EntityView): void {
   if (e.kind !== 'enemy' || e.boss) return;
   const body = actor.userData.body as THREE.Mesh | undefined;
   if (!body) return;
-  (body.material as THREE.MeshStandardMaterial).color.setHex(
-    e.hostile ? HOSTILE_COLOR : ENEMY_COLOR,
-  );
+  // Aggroed enemies flash the hostile color; idle ones show their tier color so
+  // Champions/Elites read as distinct even at rest.
+  const base = TIER_COLOR[e.tier] ?? ENEMY_COLOR;
+  (body.material as THREE.MeshStandardMaterial).color.setHex(e.hostile ? HOSTILE_COLOR : base);
 }
+
+// Per-tier visuals (presentation-only; mirrors content/enemies ENEMY_TIERS).
+const TIER_SCALE: Record<string, number> = { normal: 1, champion: 1.35, elite: 1.7 };
+const TIER_COLOR: Record<string, number> = {
+  normal: 0xb23b3b, // the common wolf red (== ENEMY_COLOR)
+  champion: 0xd98a2b, // burnished orange
+  elite: 0xc94fd0, // arcane violet — the rarest, nastiest tier
+};
 
 // Status-effect indicator colors (matches the StatusKind union).
 const STATUS_COLORS: Record<string, number> = {

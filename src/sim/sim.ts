@@ -16,7 +16,7 @@ import type {
   StatusKind,
 } from '../world_api';
 import { CLASSES } from './content/classes';
-import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
+import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier } from './content/enemies';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
@@ -79,6 +79,7 @@ export class Sim implements IWorld {
   tick = 0;
 
   private rng: Rng;
+  private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
   private ents = new Map<number, Entity>();
   private nextId = 1;
   private localId: number;
@@ -109,8 +110,11 @@ export class Sim implements IWorld {
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
+    // Enemy tiers roll from an INDEPENDENT deterministic substream so adding the
+    // feature doesn't reshuffle the main loot/position Rng — worlds stay comparable.
+    this.tierRng = new Rng((seed ^ 0x9e3779b9) >>> 0);
     this.localId = this.spawnPlayer('Hero');
-    for (let i = 0; i < ENEMY_COUNT; i++) this.spawnEnemy();
+    for (let i = 0; i < ENEMY_COUNT; i++) this.spawnEnemy(); // the starting pack is all baseline
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
   }
 
@@ -129,7 +133,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: false, summoned: false,
       homeX: 0, homeZ: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
@@ -137,21 +141,29 @@ export class Sim implements IWorld {
     return id;
   }
 
-  private spawnEnemy(): void {
+  // Spawn a common enemy. `tiered` respawns may roll a tougher Champion/Elite
+  // tier (more HP/damage/reward, drawn bigger); the starting pack passes false so
+  // construction stays baseline. The tier roll uses the independent tierRng, so
+  // the main loot/position stream is untouched whichever tier comes up.
+  private spawnEnemy(tiered = false): void {
     const id = this.nextId++;
     const x = this.rng.range(-WORLD_HALF, WORLD_HALF);
     const z = this.rng.range(-WORLD_HALF, WORLD_HALF);
+    const tier = tiered ? pickEnemyTier(this.tierRng.next()) : ENEMY_TIERS[0];
+    const hp = Math.round(ENEMY_TEMPLATE.hp * tier.hpMult);
+    const name = tier.nameSuffix ? `${ENEMY_TEMPLATE.name} ${tier.nameSuffix}` : ENEMY_TEMPLATE.name;
     this.ents.set(id, {
-      id, kind: 'enemy', name: ENEMY_TEMPLATE.name,
+      id, kind: 'enemy', name,
       x, z, facing: 0,
-      hp: ENEMY_TEMPLATE.hp, maxHp: ENEMY_TEMPLATE.hp,
+      hp, maxHp: hp,
       targetId: null,
-      str: ENEMY_TEMPLATE.str, weaponDamage: ENEMY_TEMPLATE.weaponDamage,
-      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: ENEMY_TEMPLATE.hp, baseMaxMp: 0,
+      str: Math.round(ENEMY_TEMPLATE.str * tier.damageMult),
+      weaponDamage: Math.round(ENEMY_TEMPLATE.weaponDamage * tier.damageMult),
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: hp, baseMaxMp: 0,
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: tier.id,
       boss: false, summoned: false,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -172,7 +184,7 @@ export class Sim implements IWorld {
       swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: false, summoned: false,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
@@ -195,7 +207,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: true, summoned: false,
       homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
       targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
@@ -265,7 +277,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: false, summoned: true,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -376,6 +388,7 @@ export class Sim implements IWorld {
         int: e.baseInt,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         boss: e.boss,
+        tier: e.tier,
         hostile: e.kind === 'enemy' && e.targetId != null,
         dead: e.kind === 'player' && e.deadUntil !== 0,
         statuses: e.effects.map((s) => s.kind),
@@ -509,18 +522,20 @@ export class Sim implements IWorld {
       this.respawnQueue.push(this.tick + RESPAWN_TICKS);
     }
     if (killer.kind === 'player') {
-      this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : ENEMY_TEMPLATE.xp);
-      this.rollLoot(killer, dead.boss);
+      const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
+      this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : Math.round(ENEMY_TEMPLATE.xp * tier.xpMult));
+      this.rollLoot(killer, dead.boss, dead.boss ? 1 : tier.goldMult);
     }
   }
 
   // Roll a kill's loot into the killer's bag. ALL randomness goes through the
   // sim Rng (never Math.random) so the same seed + commands drop the same loot.
   // The boss uses its own (bigger gold, generous drops, far better rarities) table.
-  private rollLoot(p: Entity, boss: boolean): void {
+  private rollLoot(p: Entity, boss: boolean, goldMult = 1): void {
     const t = boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
     const rarities = boss ? BOSS_TEMPLATE.rarities : RARITIES;
-    p.gold += this.rng.int(t.goldMin, t.goldMax + 1); // always a little gold
+    // Same Rng draw as before (so the loot stream is unchanged), scaled by tier.
+    p.gold += Math.round(this.rng.int(t.goldMin, t.goldMax + 1) * goldMult);
     for (const drop of t.drops) {
       // First decide if the item drops at all, then roll HOW rare it is.
       // Only equippable gear has a meaningful rarity; materials/consumables drop
@@ -567,7 +582,7 @@ export class Sim implements IWorld {
     if (this.respawnQueue.length === 0) return;
     const remaining: number[] = [];
     for (const at of this.respawnQueue) {
-      if (this.tick >= at) this.spawnEnemy();
+      if (this.tick >= at) this.spawnEnemy(true); // reinforcements can be Champion/Elite
       else remaining.push(at);
     }
     this.respawnQueue = remaining;
@@ -1317,6 +1332,7 @@ export class Sim implements IWorld {
         mix(strHash(eq ? `${eq.itemId}:${eq.rarity}` : ''));
         mix(eq ? eq.plus : -1);
       }
+      mix(strHash(e.tier)); // enemy strength tier (scales hp/damage/reward)
       // Active status effects (kind + timing/magnitude/source all drive future behavior).
       for (const s of e.effects) {
         mix(strHash(s.kind)); mix(s.expiresAt); mix(s.magnitude);

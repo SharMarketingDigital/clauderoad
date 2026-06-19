@@ -27,7 +27,7 @@ import {
   inFrontOf,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
-import { ENEMY_COUNT, ENEMY_TEMPLATE } from '../src/sim/content/enemies';
+import { ENEMY_COUNT, ENEMY_TEMPLATE, ENEMY_TIERS } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
@@ -260,9 +260,10 @@ describe('combat', () => {
     expect(enemyCount()).toBe(ENEMY_COUNT - 1); // not yet
     sim.step(); // reaches deathTick + RESPAWN_TICKS
     expect(enemyCount()).toBe(ENEMY_COUNT); // respawned
-    // ...and the respawned common mobs are the same type (boss excluded).
+    // ...and the respawned common mobs are the same base type (a grey wolf of
+    // some tier — a Champion/Elite carries a name suffix, boss excluded).
     const names = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss).map((e) => e.name);
-    expect(names.every((n) => n === ENEMY_TEMPLATE.name)).toBe(true);
+    expect(names.every((n) => n.startsWith(ENEMY_TEMPLATE.name))).toBe(true);
   });
 
   it('the kill + rng-respawn path is deterministic (same seed => identical hash)', () => {
@@ -1259,6 +1260,52 @@ describe('bow mastery (Arco)', () => {
         }
         sim.step();
       }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
+// Champion & Elite tiers: the starting pack is baseline, but reinforcements roll
+// occasional tougher tiers (more HP/damage/reward, drawn bigger).
+describe('enemy tiers (champion & elite)', () => {
+  const wolves = (sim: Sim) => sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
+
+  it('the starting pack is all baseline; respawns introduce tougher tiers', () => {
+    const sim = new Sim(7);
+    expect(wolves(sim).every((w) => w.tier === 'normal')).toBe(true);
+    expect(wolves(sim).every((w) => w.maxHp === ENEMY_TEMPLATE.hp)).toBe(true);
+
+    // farm so the map churns reinforcements in; catch the first tiered wolf
+    let tiered: { tier: string; maxHp: number; str: number } | undefined;
+    for (let i = 0; i < 300 && !tiered; i++) {
+      killNearestEnemy(sim);
+      tiered = wolves(sim).find((w) => w.tier !== 'normal');
+    }
+    expect(tiered).toBeDefined();
+    expect(['champion', 'elite']).toContain(tiered!.tier);
+    expect(tiered!.maxHp).toBeGreaterThan(ENEMY_TEMPLATE.hp); // tougher than a baseline wolf
+  });
+
+  it('a tiered wolf has HP and damage scaled by its tier multipliers', () => {
+    const sim = new Sim(7);
+    let tiered: { tier: string; maxHp: number; str: number } | undefined;
+    for (let i = 0; i < 300 && !tiered; i++) {
+      killNearestEnemy(sim);
+      tiered = wolves(sim).find((w) => w.tier !== 'normal');
+    }
+    expect(tiered).toBeDefined();
+    const def = ENEMY_TIERS.find((t) => t.id === tiered!.tier)!;
+    expect(def.hpMult).toBeGreaterThan(1);
+    expect(tiered!.maxHp).toBe(Math.round(ENEMY_TEMPLATE.hp * def.hpMult)); // HP scaled
+    expect(tiered!.str).toBe(Math.round(ENEMY_TEMPLATE.str * def.damageMult)); // bites harder
+  });
+
+  it('the tier system is deterministic (same seed => identical world)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      for (let i = 0; i < 60; i++) killNearestEnemy(sim); // farm so respawns roll tiers
       return sim.hash();
     };
     expect(run(7)).toBe(run(7));

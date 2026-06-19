@@ -1,4 +1,6 @@
 // Data-as-code content for mobs.
+import type { EnemyTierId } from '../../world_api';
+
 export interface DropEntry {
   itemId: string; // an id in content/items.ts ITEMS
   chance: number; // 0..1, rolled independently via the sim Rng
@@ -47,3 +49,38 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
   ],
 };
 export const ENEMY_COUNT = 12;
+
+// Enemy strength tiers. A spawn rolls one by weight: most mobs are 'normal', a
+// chunk are 'champion', and a few are 'elite' — each tougher, harder-hitting,
+// more rewarding, and drawn bigger. Multipliers apply to the base template; the
+// name gets a suffix and the renderer scales/tints by `scale`/tier.
+export interface EnemyTier {
+  id: EnemyTierId;
+  nameSuffix: string; // appended to the base name ('' for normal)
+  weight: number; // relative spawn weight
+  hpMult: number;
+  damageMult: number; // scales str + weaponDamage (a harder bite)
+  goldMult: number;
+  xpMult: number;
+  scale: number; // render size multiplier
+}
+
+export const ENEMY_TIERS: EnemyTier[] = [
+  { id: 'normal', nameSuffix: '', weight: 80, hpMult: 1, damageMult: 1, goldMult: 1, xpMult: 1, scale: 1 },
+  { id: 'champion', nameSuffix: 'Campeão', weight: 16, hpMult: 3, damageMult: 1.6, goldMult: 4, xpMult: 3, scale: 1.35 },
+  { id: 'elite', nameSuffix: 'de Elite', weight: 4, hpMult: 6, damageMult: 2.2, goldMult: 9, xpMult: 6, scale: 1.7 },
+];
+
+const TIER_WEIGHT_TOTAL = ENEMY_TIERS.reduce((s, t) => s + t.weight, 0);
+
+// Pick a tier from a roll in [0,1) by weight. Pure (the sim supplies the roll),
+// so it stays deterministic and content has no Rng dependency.
+export function pickEnemyTier(roll: number): EnemyTier {
+  const target = roll * TIER_WEIGHT_TOTAL;
+  let acc = 0;
+  for (const t of ENEMY_TIERS) {
+    acc += t.weight;
+    if (target < acc) return t;
+  }
+  return ENEMY_TIERS[0];
+}

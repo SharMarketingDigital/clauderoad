@@ -1,4 +1,4 @@
-import type { EntityKind, EquipSlot, Rarity, StatusKind } from '../world_api';
+import type { EntityKind, EquipSlot, Rarity, StatusKind, EnemyTierId } from '../world_api';
 
 // One active status effect on an entity (see the sim's status system).
 export interface StatusEffect {
@@ -79,6 +79,9 @@ export interface Entity {
   // a boss-summoned minion: ephemeral (when killed it does NOT enter the common
   // respawn queue, so summons don't permanently grow the wolf population).
   summoned: boolean;
+  // enemy strength tier ('normal' for the player/NPCs/boss); scales HP/damage/
+  // reward at spawn and drives the renderer's size/tint.
+  tier: EnemyTierId;
   // enemy AI: the leash anchor — where the CURRENT chase began. The enemy gives
   // up if led `leashRadius` from here. Players carry zeros (unused).
   homeX: number;
