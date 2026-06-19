@@ -391,6 +391,12 @@ html, body {
   text-shadow: 0 0 6px #1c7a3a, 0 1px 2px #000;
 }
 
+/* Incoming damage (the player got bitten): hot red, so it reads distinctly. */
+.fct-hurt {
+  color: #ff5555;
+  text-shadow: 0 0 6px #7a1c1c, 0 1px 2px #000;
+}
+
 @keyframes fct-pop {
   0%   { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
   15%  { transform: translate(-50%, -10px) scale(1.15); opacity: 1; }

@@ -466,6 +466,155 @@ function killNearestEnemy(sim: Sim): boolean {
   return guard < 3000;
 }
 
+// Run the player toward the nearest wolf until one aggros (hostile); returns
+// that wolf's id, or null if none aggroed within the cap.
+function approachUntilAggro(sim: Sim): number | null {
+  for (let i = 0; i < 2000; i++) {
+    const hostile = sim.entities().find((e) => e.kind === 'enemy' && !e.boss && e.hostile);
+    if (hostile) return hostile.id;
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
+    if (wolves.length === 0) return null;
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    const w = wolves[0];
+    sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+    sim.step();
+  }
+  return null;
+}
+
+// Run the player away from the nearest enemy until everything is well clear of
+// aggro range, so the next few steps are combat-free. The player (speed 6)
+// outruns wolves (2.4), which then leash. Deterministic; bounded.
+function fleeToSafety(sim: Sim): void {
+  for (let i = 0; i < 3000; i++) {
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    const enemies = sim.entities().filter((e) => e.kind === 'enemy');
+    if (enemies.length === 0) break;
+    let nearest = enemies[0];
+    let nd = Infinity;
+    for (const e of enemies) {
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      if (d < nd) { nd = d; nearest = e; }
+    }
+    if (nd > 20) break;
+    sim.sendCommand({ t: 'move', dx: p.x - nearest.x, dz: p.z - nearest.z });
+    sim.step();
+  }
+  sim.sendCommand({ t: 'stop' });
+}
+
+// Advance one tick while keeping the player out of harm's way: stride away from
+// the nearest enemy if it's getting close, else hold still. Lets time-based
+// tests (cooldowns) run without stray wolf damage skewing HP.
+function safeStep(sim: Sim): void {
+  const p = sim.entities().find((e) => e.kind === 'player')!;
+  const enemies = sim.entities().filter((e) => e.kind === 'enemy');
+  let nearest = enemies[0];
+  let nd = Infinity;
+  for (const e of enemies) {
+    const d = Math.hypot(e.x - p.x, e.z - p.z);
+    if (d < nd) { nd = d; nearest = e; }
+  }
+  if (nearest && nd < 14) sim.sendCommand({ t: 'move', dx: p.x - nearest.x, dz: p.z - nearest.z });
+  else sim.sendCommand({ t: 'stop' });
+  sim.step();
+}
+
+// Top the player up to full HP in safety: flee clear, drink a potion, wait the
+// cooldown, repeat. Combat during item grinds leaves the player hurt; this
+// resets to a known full-HP baseline (needs a few potions in the bag).
+function restoreToFull(sim: Sim): void {
+  const p = (): EntityViewHp => sim.entities().find((e) => e.kind === 'player')!;
+  for (let i = 0; i < 20; i++) {
+    fleeToSafety(sim);
+    if (p().hp >= p().maxHp) return; // full AND just fled clear
+    sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    for (let j = 0; j <= POTION_COOLDOWN_TICKS; j++) safeStep(sim); // wait, taking no damage
+  }
+}
+
+type EntityViewHp = { hp: number; maxHp: number };
+
+describe('enemy AI (aggro / chase / leash)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('a wolf in range aggros, chases, and bites the player for its melee damage', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId();
+    const wolfBite = meleeDamage(ENEMY_TEMPLATE.str, ENEMY_TEMPLATE.weaponDamage);
+    const hp0 = player(sim).hp; // starts at full
+    expect(hp0).toBe(player(sim).maxHp);
+    expect(approachUntilAggro(sim)).not.toBeNull();
+    sim.sendCommand({ t: 'stop' }); // stand still; the aggroed wolf closes in and bites
+    let bit = false;
+    let guard = 0;
+    while (!bit && guard++ < 1000) {
+      sim.step();
+      bit = sim
+        .recentEvents()
+        .some((ev) => ev.kind === 'damage' && ev.targetId === pid && ev.amount === wolfBite);
+    }
+    expect(bit).toBe(true); // a wolf bite (exactly its melee damage) landed on us
+    expect(player(sim).hp).toBeLessThan(hp0); // ...and our HP dropped
+  });
+
+  it('leashes: the chasing wolf gives up once the player flees beyond its leash range', () => {
+    const sim = new Sim(7);
+    const w0 = approachUntilAggro(sim);
+    expect(w0).not.toBeNull();
+    expect(sim.entities().find((e) => e.id === w0)!.hostile).toBe(true);
+    fleeToSafety(sim); // outrun it into the open field
+    for (let i = 0; i < 200; i++) sim.step(); // let it leash + amble home
+    const w = sim.entities().find((e) => e.id === w0);
+    expect(w && w.hostile).toBe(false); // de-aggroed (leashed)
+  });
+
+  it('the world boss hits much harder than a common wolf', () => {
+    const wolfBite = meleeDamage(ENEMY_TEMPLATE.str, ENEMY_TEMPLATE.weaponDamage);
+    const bossBite = meleeDamage(BOSS_TEMPLATE.str, BOSS_TEMPLATE.weaponDamage);
+    expect(bossBite).toBeGreaterThan(wolfBite);
+    expect(bossBite).toBeGreaterThanOrEqual(wolfBite * 3); // "bate mais forte" — provisional
+  });
+
+  it('the rooted boss bites the player in melee for its (heavier) damage', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId();
+    const bossBite = meleeDamage(BOSS_TEMPLATE.str, BOSS_TEMPLATE.weaponDamage);
+    // wait out the boss timer, staying alive (kite wolves) so the boss can aggro us
+    let g = 0;
+    while (!sim.entities().some((e) => e.boss) && g++ < 6000) safeStep(sim);
+    expect(sim.entities().some((e) => e.boss)).toBe(true);
+    // walk into the boss's melee and hold; a boss-sized bite must land on the player
+    let bit = false;
+    let g2 = 0;
+    while (!bit && g2++ < 3000) {
+      const p = player(sim);
+      const b = sim.entities().find((e) => e.boss);
+      if (!b) break;
+      const d = Math.hypot(b.x - p.x, b.z - p.z);
+      sim.sendCommand(d > 1.5 ? { t: 'move', dx: b.x - p.x, dz: b.z - p.z } : { t: 'stop' });
+      sim.step();
+      bit = sim
+        .recentEvents()
+        .some((ev) => ev.kind === 'damage' && ev.targetId === pid && ev.amount === bossBite);
+    }
+    expect(bit).toBe(true); // the rooted boss bit the player for its heavy melee damage
+  });
+
+  it('enemy AI is deterministic (same seed => identical hash after a chase)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      expect(approachUntilAggro(sim)).not.toBeNull(); // ensure the aggro/chase path actually ran
+      for (let i = 0; i < 120; i++) sim.step();
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
 describe('progression (XP & levels)', () => {
   it('the XP curve is gentle early and ramps up', () => {
     // pin the exact shape (25·L·(L+1)) at several points, not just L1/L2, so a
@@ -703,55 +852,60 @@ describe('consumables', () => {
   function setupHealGap(sim: Sim): void {
     expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
     expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
-    sim.sendCommand({ t: 'set-target', id: null });
-    sim.sendCommand({ t: 'stop' });
-    sim.step();
+    fleeToSafety(sim); // de-aggro so HP stays stable through the test's steps
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
     sim.step();
   }
 
   it('using a Health Potion heals HP (clamped to the max) and consumes one from the stack', () => {
     const sim = new Sim(7);
-    setupHealGap(sim);
+    expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
+    for (let i = 0; i < 800 && potionQty(sim) < 7; i++) killNearestEnemy(sim);
+    expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
+    restoreToFull(sim); // full HP, safe
+    // equip the Normal leather: +20 maxHp but HP isn't topped up -> gap EXACTLY 20,
+    // which is below the 50 heal, so the heal MUST clamp at the max.
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
+    safeStep(sim);
     const heal = ITEMS.health_potion.consumable!.healHp!;
     const hpBefore = player(sim).hp;
     const maxHp = player(sim).maxHp;
     const qtyBefore = potionQty(sim);
     expect(hpBefore).toBeLessThan(maxHp); // the leather opened a gap to heal into
-    expect(hpBefore + heal).toBeGreaterThan(maxHp); // ...and the heal WOULD overflow it
+    expect(hpBefore + heal).toBeGreaterThan(maxHp); // ...and the heal WOULD overflow -> clamp binds
 
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
-    sim.step();
+    safeStep(sim);
 
     expect(player(sim).hp).toBe(maxHp); // healed up to — and clamped at — the max
-    expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp); // never over the cap
     expect(potionQty(sim)).toBe(qtyBefore - 1); // exactly one potion spent
   });
 
   it('refuses at full HP — no potion consumed and no cooldown armed', () => {
     const sim = new Sim(7);
     expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
+    // grind a buffer of potions (to refill after combat) and a leather for the gap
+    for (let i = 0; i < 800 && potionQty(sim) < 7; i++) killNearestEnemy(sim);
     expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
-    sim.sendCommand({ t: 'set-target', id: null });
-    sim.sendCommand({ t: 'stop' });
-    sim.step();
-    expect(player(sim).hp).toBe(player(sim).maxHp); // full HP (nothing damages the player yet)
+    restoreToFull(sim); // flee + drink to full; player ends safe and topped up
+    expect(player(sim).hp).toBe(player(sim).maxHp);
+    const qtyFull = potionQty(sim);
+    expect(qtyFull).toBeGreaterThanOrEqual(1);
 
     // (1) at full HP the potion does nothing AND is not consumed
-    const qtyBefore = potionQty(sim);
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
-    sim.step();
-    expect(potionQty(sim)).toBe(qtyBefore);
+    safeStep(sim);
+    expect(potionQty(sim)).toBe(qtyFull);
+    expect(player(sim).hp).toBe(player(sim).maxHp);
 
     // (2) the no-op armed NO cooldown: open a gap and a drink works on the very
     // next tick (a wrongly-armed cooldown would block this and consume nothing).
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
-    sim.step();
+    safeStep(sim);
     expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
-    sim.step();
-    expect(potionQty(sim)).toBe(qtyBefore - 1); // healed immediately -> no lingering cooldown
-    expect(player(sim).hp).toBe(player(sim).maxHp);
+    safeStep(sim);
+    expect(potionQty(sim)).toBe(qtyFull - 1); // healed immediately -> no lingering cooldown
   });
 
   it('respects the shared potion cooldown before another can be used', () => {
@@ -759,39 +913,40 @@ describe('consumables', () => {
     // two real uses are needed, so make sure at least two potions are in the bag
     for (let i = 0; i < 800 && potionQty(sim) < 2; i++) killNearestEnemy(sim);
     expect(potionQty(sim)).toBeGreaterThanOrEqual(2);
-    setupHealGap(sim); // stops fighting, equips Normal leather (opens an HP gap)
+    setupHealGap(sim); // flees to safety + equips Normal leather (opens an HP gap)
     expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
 
-    // First drink: heals (to full here). Record the tick it applied so we can pin
-    // the cooldown's EXACT length (it ends at drinkTick + POTION_COOLDOWN_TICKS).
+    // First drink. Record the tick it applied so we can pin the cooldown's EXACT
+    // length (it ends at drinkTick + POTION_COOLDOWN_TICKS). safeStep keeps wolves
+    // off us so HP only moves from drinks, never from a stray bite.
     const qty0 = potionQty(sim);
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
-    sim.step();
+    safeStep(sim);
     const drinkTick = sim.tick;
     expect(potionQty(sim)).toBe(qty0 - 1);
 
     // Re-open the gap (unequip + re-equip the leather — equipping never tops HP
     // up) so every later refusal can ONLY be the cooldown, not a full-HP no-op.
     sim.sendCommand({ t: 'unequip', slot: 'armor' });
-    sim.step();
+    safeStep(sim);
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
-    sim.step();
+    safeStep(sim);
     expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
 
     // Step to ONE TICK before the cooldown elapses; a use there is STILL refused
     // (pins the lower edge — same both-sides rigor as the RESPAWN/EVENT_TTL tests).
-    while (sim.tick < drinkTick + POTION_COOLDOWN_TICKS - 2) sim.step();
+    while (sim.tick < drinkTick + POTION_COOLDOWN_TICKS - 2) safeStep(sim);
     const qtyEdge = potionQty(sim);
     const hpEdge = player(sim).hp;
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
-    sim.step(); // applied at drinkTick + POTION_COOLDOWN_TICKS - 1: one tick short
+    safeStep(sim); // applied at drinkTick + POTION_COOLDOWN_TICKS - 1: one tick short
     expect(sim.tick).toBe(drinkTick + POTION_COOLDOWN_TICKS - 1);
     expect(potionQty(sim)).toBe(qtyEdge); // blocked: nothing consumed
     expect(player(sim).hp).toBe(hpEdge);
 
     // Exactly at the boundary it works again (HP up, one more potion spent).
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
-    sim.step(); // applied at drinkTick + POTION_COOLDOWN_TICKS: cooldown elapsed
+    safeStep(sim); // applied at drinkTick + POTION_COOLDOWN_TICKS: cooldown elapsed
     expect(sim.tick).toBe(drinkTick + POTION_COOLDOWN_TICKS);
     expect(player(sim).hp).toBeGreaterThan(hpEdge);
     expect(potionQty(sim)).toBe(qtyEdge - 1);

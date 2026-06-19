@@ -23,6 +23,12 @@ export interface BossTemplate {
   minionCount: number;
   minionName: string;
   minionHp: number;
+  // Combat/AI: the boss holds its ground (never chases) but bites HARD in melee
+  // every `swingTime`s (str/weaponDamage above). aggro/leash mirror the enemy
+  // fields; leashRadius is large/inert since it never moves from its spawn.
+  swingTime: number;
+  aggroRadius: number;
+  leashRadius: number;
 }
 
 // Boss loot rolls on a much more generous rarity table than common mobs (see
@@ -56,6 +62,9 @@ export const BOSS_TEMPLATE: BossTemplate = {
   minionCount: 3,
   minionName: 'Lobo da Matilha',
   minionHp: 60, // a bit beefier than a common wolf (40)
+  swingTime: 2.5, // bites slower but for meleeDamage(60,30) = 60 — ~10x a common wolf
+  aggroRadius: 12,
+  leashRadius: 40,
 };
 
 // How far from the boss its summoned minions appear.

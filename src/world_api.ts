@@ -40,6 +40,7 @@ export interface EntityView {
   readonly weaponDamage: number;
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
+  readonly hostile: boolean; // an enemy currently aggroed on the player (chasing or, for the rooted boss, biting in melee)
 }
 
 // One stack in the player's bag, with the item's display name resolved.

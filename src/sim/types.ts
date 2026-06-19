@@ -63,6 +63,10 @@ export interface Entity {
   // a boss-summoned minion: ephemeral (when killed it does NOT enter the common
   // respawn queue, so summons don't permanently grow the wolf population).
   summoned: boolean;
+  // enemy AI: the leash anchor — where the CURRENT chase began. The enemy gives
+  // up if led `leashRadius` from here. Players carry zeros (unused).
+  homeX: number;
+  homeZ: number;
   // enemy wander state
   targetX: number;
   targetZ: number;

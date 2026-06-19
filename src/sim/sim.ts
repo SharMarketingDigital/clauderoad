@@ -105,6 +105,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
+      homeX: 0, homeZ: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -119,13 +120,14 @@ export class Sim implements IWorld {
       x, z, facing: 0,
       hp: ENEMY_TEMPLATE.hp, maxHp: ENEMY_TEMPLATE.hp,
       targetId: null,
-      str: 0, weaponDamage: 0,
+      str: ENEMY_TEMPLATE.str, weaponDamage: ENEMY_TEMPLATE.weaponDamage,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: ENEMY_TEMPLATE.hp, baseMaxMp: 0,
-      swingTicks: 0, nextSwingAt: 0,
+      swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
+      homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -142,11 +144,12 @@ export class Sim implements IWorld {
       targetId: null,
       str: t.str, weaponDamage: t.weaponDamage,
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
-      swingTicks: 0, nextSwingAt: 0,
+      swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: true, summoned: false,
+      homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
       targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
     });
     this.bossId = id;
@@ -209,13 +212,14 @@ export class Sim implements IWorld {
       x, z, facing: 0,
       hp: BOSS_TEMPLATE.minionHp, maxHp: BOSS_TEMPLATE.minionHp,
       targetId: null,
-      str: 0, weaponDamage: 0,
+      str: ENEMY_TEMPLATE.str, weaponDamage: ENEMY_TEMPLATE.weaponDamage,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: BOSS_TEMPLATE.minionHp, baseMaxMp: 0,
-      swingTicks: 0, nextSwingAt: 0,
+      swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: true,
+      homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -304,6 +308,7 @@ export class Sim implements IWorld {
         str: e.str, weaponDamage: e.weaponDamage,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         boss: e.boss,
+        hostile: e.kind === 'enemy' && e.targetId != null,
       });
     }
     return out;
@@ -320,7 +325,7 @@ export class Sim implements IWorld {
     this.pending.length = 0;
     if (player) this.stepPlayer(player);
     for (const e of this.ents.values()) {
-      if (e.kind === 'enemy') this.stepEnemy(e);
+      if (e.kind === 'enemy') this.stepEnemy(e, player);
     }
     // Combat runs on the post-movement positions, then deaths repopulate.
     if (player) this.autoAttack(player);
@@ -698,8 +703,77 @@ export class Sim implements IWorld {
     p.facing = Math.atan2(nx, nz);
   }
 
-  private stepEnemy(e: Entity): void {
-    if (e.boss) return; // the boss holds its ground at its spawn point (no wander)
+  // Enemy AI. An idle enemy pulls aggro when a living player comes within its
+  // aggro radius; once aggroed it chases and bites in melee every swingTicks,
+  // and leashes (drops aggro, heals to full, ambles back) if led past its leash
+  // radius from where the chase began. The world boss never chases — it holds
+  // its ground and only bites what steps into melee. Deterministic: movement is
+  // arithmetic; only the idle wander destination draws from the sim Rng.
+  private stepEnemy(e: Entity, player: Entity | undefined): void {
+    const tmpl = e.boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
+
+    // --- decide aggro / leash ---
+    if (e.targetId == null) {
+      // idle: pull aggro if a living player is within range
+      if (player && player.hp > 0) {
+        const dx = player.x - e.x;
+        const dz = player.z - e.z;
+        if (dx * dx + dz * dz <= tmpl.aggroRadius * tmpl.aggroRadius) {
+          e.targetId = player.id;
+          e.homeX = e.x; // anchor the chase here (leash origin)
+          e.homeZ = e.z;
+          e.nextSwingAt = this.tick + e.swingTicks; // a beat of wind-up before the first bite
+        }
+      }
+    } else {
+      const t = this.ents.get(e.targetId);
+      if (!t || t.hp <= 0) {
+        // target gone or dead -> just drop aggro. (Player death is handled by the
+        // death/respawn slice; we deliberately don't heal/reset here, so a boss
+        // mid-fight with a downed player stays killable rather than resetting.)
+        e.targetId = null;
+      } else {
+        // Leash if led past leashRadius from the anchor OR the (living) target
+        // outran us by more than leashRadius. The second covers the rooted boss,
+        // which never leaves its anchor — it disengages once the player walks off.
+        const hx = e.x - e.homeX;
+        const hz = e.z - e.homeZ;
+        const tx = e.x - t.x;
+        const tz = e.z - t.z;
+        const lr2 = tmpl.leashRadius * tmpl.leashRadius;
+        if (hx * hx + hz * hz > lr2 || tx * tx + tz * tz > lr2) {
+          e.targetId = null;
+          e.hp = e.maxHp; // reset to full, classic-MMO style (anti-kite)
+          e.targetX = e.homeX; // amble back toward the anchor...
+          e.targetZ = e.homeZ;
+          e.repickAt = this.tick + 60; // ...before resuming the random wander
+        }
+      }
+    }
+
+    // --- act on the current target (re-fetched, so a JUST-acquired aggro chases
+    // this very tick instead of wasting one on a stale lookup) ---
+    const target = e.targetId != null ? this.ents.get(e.targetId) : undefined;
+    if (target) {
+      const dx = target.x - e.x;
+      const dz = target.z - e.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist <= MELEE_RANGE && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
+        e.nextSwingAt = this.tick + e.swingTicks;
+        this.hitPlayer(target, meleeDamage(e.str, e.weaponDamage));
+      }
+      if (!e.boss && dist > CONTACT_DIST) {
+        // the boss is rooted, so it bites in melee but never chases
+        const len = dist < 1e-4 ? 1 : dist;
+        e.x = clamp(e.x + (dx / len) * ENEMY_SPEED * DT, -WORLD_HALF, WORLD_HALF);
+        e.z = clamp(e.z + (dz / len) * ENEMY_SPEED * DT, -WORLD_HALF, WORLD_HALF);
+        e.facing = Math.atan2(dx / len, dz / len);
+      }
+      return;
+    }
+
+    // Idle: the boss holds its ground; common enemies wander.
+    if (e.boss) return;
     if (this.tick >= e.repickAt) {
       e.targetX = this.rng.range(-WORLD_HALF, WORLD_HALF);
       e.targetZ = this.rng.range(-WORLD_HALF, WORLD_HALF);
@@ -712,6 +786,23 @@ export class Sim implements IWorld {
     e.x += (dx / len) * ENEMY_SPEED * DT;
     e.z += (dz / len) * ENEMY_SPEED * DT;
     e.facing = Math.atan2(dx / len, dz / len);
+  }
+
+  // Apply a melee hit to the player. Floors HP at 0 — death/respawn is a later
+  // slice. Emits the same 'damage' event the player's own swings use, so the
+  // renderer flashes the player and pops the number.
+  private hitPlayer(p: Entity, dmg: number): void {
+    if (dmg <= 0) return;
+    p.hp = Math.max(0, p.hp - dmg);
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'damage',
+      targetId: p.id,
+      amount: dmg,
+      x: p.x,
+      z: p.z,
+    });
   }
 
   // Deterministic fingerprint of world state — used by tests to prove that
@@ -731,6 +822,8 @@ export class Sim implements IWorld {
       mix(id); mix(e.x); mix(e.z); mix(e.facing); mix(e.hp);
       mix(e.targetId == null ? 0 : e.targetId);
       mix(e.nextSwingAt);
+      mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
+      mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
       mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt);
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);

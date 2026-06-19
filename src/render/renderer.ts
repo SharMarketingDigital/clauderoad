@@ -168,6 +168,7 @@ export class Renderer {
       m.position.set(e.x, 0, e.z);
       m.rotation.y = e.facing;
       updateGlow(m, e.weaponPlus);
+      updateHostileTint(m, e);
       if (e.id === targetId) targetView = e;
     }
     for (const [id, m] of this.meshes) {
@@ -237,6 +238,7 @@ function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
   );
   nose.position.set(0, 1.0, 0.55); // +Z is "forward" (matches facing math)
   g.add(body, head, nose);
+  g.userData.body = body; // so the per-frame hostile tint can recolor it
   if (kind === 'player') {
     // Enhancement glow aura — hidden until the equipped weapon hits +3. A
     // MeshBasicMaterial (no emissive) so the hit-flash never touches it.
@@ -272,6 +274,21 @@ function updateGlow(actor: THREE.Object3D, weaponPlus: number): void {
   glow.visible = true;
   (glow.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.4 * t;
   glow.scale.setScalar(1 + 0.25 * t);
+}
+
+const ENEMY_COLOR = 0xb23b3b; // calm red (idle wolf)
+const HOSTILE_COLOR = 0xff2a2a; // hotter red while aggroed on the player
+
+// Tint a common enemy's body by whether it's currently hostile (chasing us), so
+// you can see which wolves are on you. Recolors `color` (not emissive), so it
+// never fights the white hit-flash. Boss/player are left to their own color.
+function updateHostileTint(actor: THREE.Object3D, e: EntityView): void {
+  if (e.kind !== 'enemy' || e.boss) return;
+  const body = actor.userData.body as THREE.Mesh | undefined;
+  if (!body) return;
+  (body.material as THREE.MeshStandardMaterial).color.setHex(
+    e.hostile ? HOSTILE_COLOR : ENEMY_COLOR,
+  );
 }
 
 // Flat ground ring used as the "selected target" marker (classic WoW/Silkroad

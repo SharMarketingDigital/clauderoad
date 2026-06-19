@@ -32,7 +32,11 @@ function drawCombatFeedback(): void {
     if (ev.kind === 'damage') {
       renderer.flash(ev.targetId);
       const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
-      if (p.visible) combatText.spawn(p.x, p.y, String(ev.amount));
+      // Damage TO the player reads red ('hurt'); damage we deal stays the default.
+      if (p.visible) {
+        const incoming = ev.targetId === sim.localPlayerId();
+        combatText.spawn(p.x, p.y, String(ev.amount), incoming ? 'hurt' : 'damage');
+      }
     } else if (ev.kind === 'levelup') {
       renderer.flash(ev.targetId); // flash the player
       const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
