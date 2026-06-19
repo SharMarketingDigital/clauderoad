@@ -24,6 +24,13 @@ import { ABILITIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS } from '../src/sim/content/enhance';
+import { RARITIES } from '../src/sim/content/rarity';
+import {
+  BOSS_TEMPLATE,
+  BOSS_RARITIES,
+  BOSS_FIRST_SPAWN_TICK,
+  BOSS_RESPAWN_TICKS,
+} from '../src/sim/content/bosses';
 import type { Command } from '../src/world_api';
 import type { ItemStack } from '../src/sim/types';
 
@@ -210,7 +217,10 @@ describe('combat', () => {
 
   it('attacks until the target dies, clears the selection, then a same-type enemy respawns ~15s later', () => {
     const sim = new Sim(7);
-    const enemyCount = (): number => sim.entities().filter((e) => e.kind === 'enemy').length;
+    // common-mob count only (the world boss is also kind 'enemy' but respawns on
+    // its own timer, so it must not count toward the wolf-respawn check)
+    const enemyCount = (): number =>
+      sim.entities().filter((e) => e.kind === 'enemy' && !e.boss).length;
     expect(enemyCount()).toBe(ENEMY_COUNT);
 
     sim.sendCommand({ t: 'cycle-target' });
@@ -235,8 +245,8 @@ describe('combat', () => {
     expect(enemyCount()).toBe(ENEMY_COUNT - 1); // not yet
     sim.step(); // reaches deathTick + RESPAWN_TICKS
     expect(enemyCount()).toBe(ENEMY_COUNT); // respawned
-    // ...and it is the same type (only one template today).
-    const names = sim.entities().filter((e) => e.kind === 'enemy').map((e) => e.name);
+    // ...and the respawned common mobs are the same type (boss excluded).
+    const names = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss).map((e) => e.name);
     expect(names.every((n) => n === ENEMY_TEMPLATE.name)).toBe(true);
   });
 
@@ -854,6 +864,89 @@ describe('alchemy ("+N")', () => {
     };
     expect(run(7)).toBe(run(7));
     expect(run(7)).not.toBe(run(123));
+  });
+});
+
+describe('world boss', () => {
+  const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss);
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('spawns at its scheduled tick, with boss HP and an announcement', () => {
+    const sim = new Sim(7);
+    // not yet, one tick before the schedule
+    for (let i = 0; i < BOSS_FIRST_SPAWN_TICK - 1; i++) sim.step();
+    expect(findBoss(sim)).toBeUndefined();
+
+    sim.step(); // reaches BOSS_FIRST_SPAWN_TICK
+    const boss = findBoss(sim);
+    expect(boss).toBeDefined();
+    expect(boss!.name).toBe(BOSS_TEMPLATE.name);
+    expect(boss!.maxHp).toBe(BOSS_TEMPLATE.hp);
+    expect(boss!.maxHp).toBeGreaterThanOrEqual(ENEMY_TEMPLATE.hp * 15); // far tankier than a common mob
+    // an announcement event carrying the boss name was emitted
+    expect(
+      sim.recentEvents().some((e) => e.kind === 'boss-spawn' && e.text === BOSS_TEMPLATE.name),
+    ).toBe(true);
+  });
+
+  it('is tanky to kill, announces defeat, drops rich loot, and respawns on its timer', () => {
+    const sim = new Sim(7);
+    while (!findBoss(sim)) sim.step(); // advance to the boss spawn (player idle -> 0 gold)
+    const bossId = findBoss(sim)!.id;
+    expect(player(sim).gold).toBe(0);
+
+    // target the boss and beat it down (auto-attack + ability)
+    sim.sendCommand({ t: 'set-target', id: bossId });
+    const alive = (): boolean => sim.entities().some((e) => e.id === bossId);
+    let hits = 0;
+    while (alive() && hits++ < 8000) {
+      const b = sim.entities().find((e) => e.id === bossId);
+      const p = player(sim);
+      if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.step();
+    }
+    expect(alive()).toBe(false); // died within budget
+    expect(hits).toBeGreaterThan(40); // took MANY hits — not a common one-/few-shot mob
+    expect(sim.recentEvents().some((e) => e.kind === 'boss-defeat')).toBe(true);
+
+    // rich loot: gold gained dwarfs a common mob's max
+    const goldGained = player(sim).gold; // started at 0
+    expect(goldGained).toBeGreaterThanOrEqual(BOSS_TEMPLATE.goldMin);
+    expect(goldGained).toBeGreaterThan(ENEMY_TEMPLATE.goldMax);
+
+    // gone now; a new boss appears after the respawn delay
+    const deathTick = sim.tick;
+    expect(findBoss(sim)).toBeUndefined();
+    sim.sendCommand({ t: 'stop' });
+    while (sim.tick < deathTick + BOSS_RESPAWN_TICKS) sim.step();
+    expect(findBoss(sim)).toBeDefined();
+  });
+
+  it('has a more generous loot table than a common mob (gold + rarities)', () => {
+    // bigger gold floor than the common mob's ceiling
+    expect(BOSS_TEMPLATE.goldMin).toBeGreaterThan(ENEMY_TEMPLATE.goldMax);
+    // drops gear far more often (e.g. the sword)
+    const dropChance = (drops: typeof BOSS_TEMPLATE.drops, id: string): number =>
+      drops.find((d) => d.itemId === id)?.chance ?? 0;
+    expect(dropChance(BOSS_TEMPLATE.drops, 'old_sword')).toBeGreaterThan(
+      dropChance(ENEMY_TEMPLATE.drops, 'old_sword'),
+    );
+    // and the rarity table is far heavier on rares, lighter on Normal
+    const weight = (rs: typeof RARITIES, id: string): number => rs.find((r) => r.id === id)!.dropWeight;
+    expect(weight(BOSS_RARITIES, 'sun')).toBeGreaterThan(weight(RARITIES, 'sun'));
+    expect(weight(BOSS_RARITIES, 'som')).toBeGreaterThan(weight(RARITIES, 'som'));
+    expect(weight(BOSS_RARITIES, 'normal')).toBeLessThan(weight(RARITIES, 'normal'));
+
+    // statistical: rolling the boss table yields FAR more non-Normal results
+    const nonNormal = (rarities: typeof RARITIES, n: number): number => {
+      const rng = new Rng(7);
+      let c = 0;
+      for (let i = 0; i < n; i++) if (rollRarity(rng, rarities) !== 'normal') c++;
+      return c;
+    };
+    const N = 4000;
+    expect(nonNormal(BOSS_RARITIES, N)).toBeGreaterThan(nonNormal(RARITIES, N));
   });
 });
 

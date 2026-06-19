@@ -160,7 +160,7 @@ export class Renderer {
       seen.add(e.id);
       let m = this.meshes.get(e.id);
       if (!m) {
-        m = makeActor(e.kind);
+        m = makeActor(e.kind, e.boss);
         m.userData.entityId = e.id; // so pick() can map a hit back to the entity
         this.scene.add(m);
         this.meshes.set(e.id, m);
@@ -215,9 +215,10 @@ export class Renderer {
   }
 }
 
-// A simple capsule-ish humanoid with a "nose" so facing is visible.
-function makeActor(kind: EntityKind): THREE.Object3D {
-  const bodyColor = kind === 'player' ? 0x3b82f6 : 0xb23b3b;
+// A simple capsule-ish humanoid with a "nose" so facing is visible. A boss is
+// drawn bigger and in a distinct menacing color so it reads as a boss.
+function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
+  const bodyColor = boss ? 0xa030d0 : kind === 'player' ? 0x3b82f6 : 0xb23b3b;
   const g = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(0.5, 0.5, 1.7, 12),
@@ -253,6 +254,7 @@ function makeActor(kind: EntityKind): THREE.Object3D {
     g.userData.glow = glow;
     g.add(glow);
   }
+  if (boss) g.scale.setScalar(1.9); // visibly larger than a common mob
   return g;
 }
 

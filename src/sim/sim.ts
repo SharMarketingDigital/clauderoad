@@ -20,6 +20,9 @@ import { ABILITIES, type AbilityDef } from './content/abilities';
 import { ITEMS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
 import {
+  BOSS_TEMPLATE, BOSS_SPAWN_X, BOSS_SPAWN_Z, BOSS_FIRST_SPAWN_TICK, BOSS_RESPAWN_TICKS,
+} from './content/bosses';
+import {
   MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
 } from './content/enhance';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
@@ -65,6 +68,10 @@ export class Sim implements IWorld {
   private pending: Command[] = [];
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
   private respawnQueue: number[] = [];
+  // World boss: the live boss entity id (null when none) and the tick at which
+  // the next boss should spawn (Infinity while one is alive). Tick-driven only.
+  private bossId: number | null = null;
+  private bossSpawnAt = BOSS_FIRST_SPAWN_TICK;
   // Recent presentation events (damage numbers, hit flashes). Bounded by age
   // (EVENT_TTL_TICKS) so it never grows unbounded; `seq` is monotonic forever.
   private events: SimEvent[] = [];
@@ -92,6 +99,7 @@ export class Sim implements IWorld {
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      boss: false,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -112,7 +120,41 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      boss: false,
       targetX: x, targetZ: z, repickAt: 0,
+    });
+  }
+
+  // Spawn the world boss at its fixed point. No Rng (fixed position), so it
+  // doesn't perturb the loot stream. Announces via a 'boss-spawn' event.
+  private spawnBoss(): void {
+    const id = this.nextId++;
+    const t = BOSS_TEMPLATE;
+    this.ents.set(id, {
+      id, kind: 'enemy', name: t.name,
+      x: BOSS_SPAWN_X, z: BOSS_SPAWN_Z, facing: 0,
+      hp: t.hp, maxHp: t.hp,
+      targetId: null,
+      str: t.str, weaponDamage: t.weaponDamage,
+      baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {},
+      level: 1, xp: 0, attrPoints: 0,
+      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      boss: true,
+      targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
+    });
+    this.bossId = id;
+    this.bossSpawnAt = Infinity; // don't schedule another while this one lives
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'boss-spawn',
+      targetId: id,
+      amount: 0,
+      x: BOSS_SPAWN_X,
+      z: BOSS_SPAWN_Z,
+      text: t.name,
     });
   }
 
@@ -198,6 +240,7 @@ export class Sim implements IWorld {
         gold: e.gold,
         str: e.str, weaponDamage: e.weaponDamage,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
+        boss: e.boss,
       });
     }
     return out;
@@ -219,6 +262,7 @@ export class Sim implements IWorld {
     // Combat runs on the post-movement positions, then deaths repopulate.
     if (player) this.autoAttack(player);
     this.processRespawns();
+    this.updateBoss();
     this.pruneEvents();
     // A target that died or no longer exists clears the selection.
     if (player) this.validateTarget(player);
@@ -273,21 +317,37 @@ export class Sim implements IWorld {
 
   private killEnemy(dead: Entity, killer: Entity): void {
     this.ents.delete(dead.id);
-    // Respawn a same-type enemy after a delay. (One template today; pass the
-    // template id / xp reward per-entity once there are several.)
-    this.respawnQueue.push(this.tick + RESPAWN_TICKS);
+    if (dead.boss) {
+      // The boss reschedules on its OWN timer (not the common-mob queue) and
+      // announces its defeat.
+      this.bossId = null;
+      this.bossSpawnAt = this.tick + BOSS_RESPAWN_TICKS;
+      this.events.push({
+        seq: this.nextEventSeq++,
+        tick: this.tick,
+        kind: 'boss-defeat',
+        targetId: dead.id,
+        amount: 0,
+        x: dead.x,
+        z: dead.z,
+        text: BOSS_TEMPLATE.name,
+      });
+    } else {
+      // Respawn a same-type common enemy after a delay.
+      this.respawnQueue.push(this.tick + RESPAWN_TICKS);
+    }
     if (killer.kind === 'player') {
-      this.gainXp(killer, ENEMY_TEMPLATE.xp);
-      this.rollLoot(killer);
+      this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : ENEMY_TEMPLATE.xp);
+      this.rollLoot(killer, dead.boss);
     }
   }
 
   // Roll a kill's loot into the killer's bag. ALL randomness goes through the
   // sim Rng (never Math.random) so the same seed + commands drop the same loot.
-  // (Single enemy template today; read the reward from the dead entity's
-  // template once there are several.)
-  private rollLoot(p: Entity): void {
-    const t = ENEMY_TEMPLATE;
+  // The boss uses its own (bigger gold, generous drops, far better rarities) table.
+  private rollLoot(p: Entity, boss: boolean): void {
+    const t = boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
+    const rarities = boss ? BOSS_TEMPLATE.rarities : RARITIES;
     p.gold += this.rng.int(t.goldMin, t.goldMax + 1); // always a little gold
     for (const drop of t.drops) {
       // First decide if the item drops at all, then roll HOW rare it is.
@@ -295,7 +355,7 @@ export class Sim implements IWorld {
       // as plain Normal. Everything drops un-enhanced (+0).
       if (this.rng.next() < drop.chance) {
         const equippable = ITEMS[drop.itemId]?.slot != null;
-        const rarity = equippable ? rollRarity(this.rng) : 'normal';
+        const rarity = equippable ? rollRarity(this.rng, rarities) : 'normal';
         addToBag(p.bag, drop.itemId, rarity, 0, 1);
       }
     }
@@ -339,6 +399,11 @@ export class Sim implements IWorld {
       else remaining.push(at);
     }
     this.respawnQueue = remaining;
+  }
+
+  // Spawn the world boss once its scheduled tick arrives (and none is alive).
+  private updateBoss(): void {
+    if (this.bossId === null && this.tick >= this.bossSpawnAt) this.spawnBoss();
   }
 
   // ---------- target selection (tab-target) ----------
@@ -543,6 +608,7 @@ export class Sim implements IWorld {
   }
 
   private stepEnemy(e: Entity): void {
+    if (e.boss) return; // the boss holds its ground at its spawn point (no wander)
     if (this.tick >= e.repickAt) {
       e.targetX = this.rng.range(-WORLD_HALF, WORLD_HALF);
       e.targetZ = this.rng.range(-WORLD_HALF, WORLD_HALF);
@@ -593,6 +659,9 @@ export class Sim implements IWorld {
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
+    // Boss schedule (Infinity while alive -> sentinel).
+    mix(this.bossId ?? -1);
+    mix(Number.isFinite(this.bossSpawnAt) ? this.bossSpawnAt : -1);
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);
     mix(this.tick);
@@ -622,14 +691,14 @@ function rarityDef(id: Rarity): RarityDef {
 // Lucky drop roll: most results are the common tier; rarer tiers have very low
 // probability. Draws ONE value from the sim Rng (never Math.random). The last
 // tier absorbs the remaining probability mass so rounding can't bias the roll.
-export function rollRarity(rng: Rng): Rarity {
+export function rollRarity(rng: Rng, rarities: RarityDef[] = RARITIES): Rarity {
   const r = rng.next();
   let acc = 0;
-  for (let i = 0; i < RARITIES.length - 1; i++) {
-    acc += RARITIES[i].dropWeight;
-    if (r < acc) return RARITIES[i].id;
+  for (let i = 0; i < rarities.length - 1; i++) {
+    acc += rarities[i].dropWeight;
+    if (r < acc) return rarities[i].id;
   }
-  return RARITIES[RARITIES.length - 1].id;
+  return rarities[rarities.length - 1].id;
 }
 
 // Scale an equipped item's flat bonus by its rarity, so a rarer copy is

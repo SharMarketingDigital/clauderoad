@@ -10,6 +10,7 @@ export class Hud {
   private levelBadge: HTMLSpanElement;
   private xpFill: HTMLDivElement;
   private xpText: HTMLSpanElement;
+  private announceEl: HTMLDivElement; // center-screen boss announcements
   // target frame (shown only while an enemy is selected)
   private targetFrame: HTMLDivElement;
   private targetName: HTMLSpanElement;
@@ -73,6 +74,7 @@ export class Hud {
         <div class="bag-grid"></div>
       </div>
       <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; arrastar gira</div>
+      <div class="announce"></div>
     `;
     document.body.appendChild(this.root);
     this.hpFill = this.root.querySelector('.hp-fill') as HTMLDivElement;
@@ -87,6 +89,7 @@ export class Hud {
     this.targetHpFill = this.root.querySelector('.target-hp-fill') as HTMLDivElement;
     this.targetHpText = this.root.querySelector('.target-hp-text') as HTMLSpanElement;
     this.actionBar = this.root.querySelector('.action-bar') as HTMLDivElement;
+    this.announceEl = this.root.querySelector('.announce') as HTMLDivElement;
     this.goldAmt = this.root.querySelector('.gold-amt') as HTMLSpanElement;
     this.bag = this.root.querySelector('.bag') as HTMLDivElement;
     this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
@@ -113,6 +116,14 @@ export class Hud {
   private setBag(open: boolean): void {
     this.bagOpen = open;
     this.bag.hidden = !open;
+  }
+
+  // Show a brief center-screen announcement (e.g. a world boss appearing).
+  announce(text: string): void {
+    this.announceEl.textContent = text;
+    this.announceEl.classList.remove('show'); // restart the CSS fade...
+    void this.announceEl.offsetWidth; // ...by forcing a reflow
+    this.announceEl.classList.add('show');
   }
 
   update(world: IWorld): void {

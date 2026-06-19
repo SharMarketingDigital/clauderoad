@@ -55,6 +55,9 @@ export interface Entity {
   gold: number;
   bag: ItemStack[];
   equipment: Record<EquipSlot, EquippedItem | null>; // slot -> equipped item
+  // a world boss (special enemy): much more HP, boss loot, distinct visuals,
+  // and a separate spawn/respawn timer.
+  boss: boolean;
   // enemy wander state
   targetX: number;
   targetZ: number;

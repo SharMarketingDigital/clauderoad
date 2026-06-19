@@ -39,6 +39,7 @@ export interface EntityView {
   readonly str: number;
   readonly weaponDamage: number;
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
+  readonly boss: boolean; // a world boss — render draws it bigger / distinct
 }
 
 // One stack in the player's bag, with the item's display name resolved.
@@ -114,12 +115,14 @@ export type SimEvent = {
   readonly tick: number;
   // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
+  // 'boss-spawn'/'boss-defeat': `text` = the boss name, for the announcement.
   // targetId is the affected entity; x/z anchors the on-screen effect.
-  readonly kind: 'damage' | 'levelup' | 'enhance-success' | 'enhance-fail';
+  readonly kind: 'damage' | 'levelup' | 'enhance-success' | 'enhance-fail' | 'boss-spawn' | 'boss-defeat';
   readonly targetId: number;
   readonly amount: number;
   readonly x: number;
   readonly z: number;
+  readonly text?: string; // optional label (e.g. a boss name for announcements)
 };
 
 export interface IWorld {

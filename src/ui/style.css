@@ -269,6 +269,30 @@ html, body {
   text-shadow: 0 0 8px #5a1410, 0 1px 3px #000;
 }
 
+/* Center-screen boss announcement (fades in/out via the host clock). */
+.announce {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #e7b3ff;
+  text-shadow: 0 0 12px #7a1f8f, 0 2px 4px #000;
+  white-space: nowrap;
+  opacity: 0;
+}
+.announce.show {
+  animation: announce-fade 4s ease-out forwards;
+}
+@keyframes announce-fade {
+  0% { opacity: 0; transform: translate(-50%, 8px); }
+  10% { opacity: 1; transform: translate(-50%, 0); }
+  80% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -8px); }
+}
+
 /* Action bar — fixed row of ability slots, centered above the hint. */
 .action-bar {
   position: absolute;
