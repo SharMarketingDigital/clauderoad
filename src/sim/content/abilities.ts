@@ -128,11 +128,50 @@ const SPEAR_ABILITIES: AbilityDef[] = [
   },
 ];
 
+// ---- Arco: ranged single-target damage; survives by keeping its distance (GDD:
+// "Arco → slow (kiting) + tiro perfurante"; passivo: aumenta precisão). The long
+// reach makes the auto-attack ("auto-shot") and abilities fire from afar.
+const BOW_ABILITIES: AbilityDef[] = [
+  {
+    id: 'charged_shot',
+    name: 'Tiro Carregado',
+    slot: 1,
+    icon: '🏹', // bow — a heavy, piercing single-target shot
+    mpCost: 18,
+    cooldownSecs: 6,
+    kind: 'strike',
+    damageMultiplier: 3.0, // the bow's big single-target hit (GDD: "forte em alvo único")
+  },
+  {
+    id: 'multi_shot',
+    name: 'Tiro Múltiplo',
+    slot: 2,
+    icon: '🎯', // target — a volley that strikes everything in the firing arc
+    mpCost: 20,
+    cooldownSecs: 8,
+    kind: 'strike',
+    shape: 'cone',
+    damageMultiplier: 1.0, // per enemy in the volley
+  },
+  {
+    id: 'slowing_shot',
+    name: 'Tiro Lento',
+    slot: 3,
+    icon: '🥶', // frost — a crippling shot that slows, the bow's kiting tool
+    mpCost: 15,
+    cooldownSecs: 7,
+    kind: 'strike',
+    damageMultiplier: 1.5,
+    effects: [{ kind: 'slow', durationSecs: 3.0, magnitude: 0.5 }], // GDD: "Arco → slow (kiting)"
+  },
+];
+
 export interface MasteryDef {
   id: MasteryId;
   name: string;
-  ranged: boolean; // auto-attack reach style (melee today; the Bow tree will be ranged)
+  ranged: boolean; // ranged masteries shoot at distance (no frontal facing gate; pivot to fire)
   attackRange?: number; // units the auto-attack/abilities reach (undefined -> the sim's melee range)
+  baseCrit?: number; // always-on crit chance (0..1) — the Arco "precision" passive
   passive: ItemStats; // always-on bonus folded into stats while this mastery is active
   abilities: AbilityDef[];
 }
@@ -153,6 +192,15 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     attackRange: 3.0, // a reach weapon: a little longer than a sword
     passive: { maxHp: 30 }, // GDD: "Lança — passivo: aumenta vida"
     abilities: SPEAR_ABILITIES,
+  },
+  bow: {
+    id: 'bow',
+    name: 'Arco',
+    ranged: true,
+    attackRange: 14, // shoots from well outside a wolf's aggro radius — kite and pick targets
+    baseCrit: 0.15, // GDD: "Arco — passivo: aumenta precisão" (a steady chance to crit)
+    passive: {},
+    abilities: BOW_ABILITIES,
   },
 };
 

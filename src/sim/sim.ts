@@ -438,11 +438,16 @@ export class Sim implements IWorld {
     const dz = t.z - p.z;
     const dist = Math.hypot(dx, dz);
     if (dist > this.attackRange(p)) return; // out of range: hold the swing
-    // Require facing the target only while approaching. At contact the bodies
-    // overlap, the direction vector collapses to ~0, and the player constantly
-    // overshoots — requiring "in front" there would skip swings on the enemy
-    // we're standing on. (The frontal rule still applies on the approach.)
-    if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
+    if (this.activeMastery(p).ranged) {
+      // A ranged attacker pivots to shoot, so it can fire while kiting (facing away).
+      if (dist > CONTACT_DIST) p.facing = Math.atan2(dx, dz);
+    } else if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) {
+      // Melee: require facing the target while approaching. At contact the bodies
+      // overlap, the direction vector collapses to ~0, and the player constantly
+      // overshoots — requiring "in front" there would skip swings on the enemy
+      // we're standing on. (The frontal rule still applies on the approach.)
+      return;
+    }
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
     p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
     this.hitEnemy(t, this.rollCrit(p, meleeDamage(p.str, p.weaponDamage)), p);
@@ -912,7 +917,11 @@ export class Sim implements IWorld {
       // start-of-tick positions (auto-attack checks post-move). One-tick edge on
       // the exact range boundary; deterministic either way.
       if (dist > this.attackRange(p)) return; // out of reach
-      if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
+      if (this.activeMastery(p).ranged) {
+        if (dist > CONTACT_DIST) p.facing = Math.atan2(dx, dz); // pivot to shoot (kiting)
+      } else if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) {
+        return;
+      }
     }
     this.commitCast(p, def, slot);
     this.hitEnemy(t, this.rollCrit(p, abilityDamage(def, p.str, p.weaponDamage)), p);
@@ -1181,9 +1190,10 @@ export class Sim implements IWorld {
     }
     return f;
   }
-  // Active crit chance (0..1) from 'crit' buffs (Spear's Fúria), or 0 unbuffed.
+  // Active crit chance (0..1): the active mastery's always-on baseCrit (Arco's
+  // precision passive) plus any 'crit' buffs (Spear's Fúria), capped at 1.
   private critChance(e: Entity): number {
-    let c = 0;
+    let c = this.activeMastery(e).baseCrit ?? 0;
     for (const s of e.effects) if (s.kind === 'crit' && s.magnitude > 0) c += s.magnitude;
     return c > 1 ? 1 : c;
   }

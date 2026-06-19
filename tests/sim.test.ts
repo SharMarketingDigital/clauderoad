@@ -1096,6 +1096,176 @@ describe('spear mastery (Lança)', () => {
   });
 });
 
+// Buy the Arco Curto from the vendor and equip it, switching to the Bow mastery.
+function equipBow(sim: Sim): void {
+  const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
+  const price = VENDOR_STOCK.find((s) => s.itemId === 'short_bow')!.price;
+  let guard = 0;
+  while (playerOf().gold < price && guard++ < 400) killNearestEnemy(sim);
+  for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
+    const p = playerOf();
+    sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
+    sim.step();
+  }
+  sim.sendCommand({ t: 'set-target', id: null });
+  sim.sendCommand({ t: 'buy', itemId: 'short_bow' });
+  sim.sendCommand({ t: 'stop' });
+  sim.step();
+  const bow = sim.inventory().stacks.find((s) => s.itemId === 'short_bow');
+  if (bow) {
+    sim.sendCommand({ t: 'equip', itemId: 'short_bow', rarity: bow.rarity, plus: bow.plus });
+    sim.step();
+  }
+}
+
+// The Arco mastery: a ranged auto-attack ("auto-shot") that fires from afar, a
+// precision crit passive, and a kiting kit (Tiro Carregado / Múltiplo / Lento).
+describe('bow mastery (Arco)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const nearestWolf = (sim: Sim) => {
+    const p = player(sim);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    return wolves[0];
+  };
+
+  it('equipping a bow swaps the action bar to the Arco kit', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('short_bow');
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento']);
+  });
+
+  it('the auto-shot is ranged: it strikes from well beyond melee range', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    // approach a wolf into bow range but stay clear of melee
+    let wid = -1;
+    for (let i = 0; i < 800; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (!w) { sim.step(); continue; }
+      if (Math.hypot(w.x - p.x, w.z - p.z) <= 10) { wid = w.id; break; }
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+    }
+    expect(wid).not.toBe(-1);
+    // target it and stand: the auto-shot should land while still out of melee
+    let hitDist = -1;
+    for (let i = 0; i < 120 && hitDist < 0; i++) {
+      const w = sim.entities().find((e) => e.id === wid);
+      if (!w) break;
+      const before = sim.recentEvents();
+      const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+      sim.sendCommand({ t: 'set-target', id: wid });
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      const hit = sim.recentEvents().find((e) => e.seq > lastSeq && e.kind === 'damage' && e.targetId === wid);
+      if (hit) {
+        const p = player(sim);
+        const ww = sim.entities().find((e) => e.id === wid);
+        hitDist = ww ? Math.hypot(ww.x - p.x, ww.z - p.z) : 99;
+      }
+    }
+    expect(hitDist).toBeGreaterThan(MELEE_RANGE); // a shot, not a melee swing
+  });
+
+  it('Tiro Lento applies a slow to its target', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    // castWolf casts slot 3 (Tiro Lento here) and returns a wolf that survived
+    // carrying a status — it retries past any precision-crit that would kill it.
+    const wid = castWolf(sim, 3);
+    expect(wid).not.toBeNull();
+    expect(sim.entities().find((e) => e.id === wid)!.statuses).toContain('slow');
+  });
+
+  it('Tiro Múltiplo is a volley — one cast hits 2+ enemies at range', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    const range = MASTERIES.bow.attackRange!;
+    let hits = 0;
+    for (let i = 0; i < 1500 && hits === 0; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (!w) { sim.step(); continue; }
+      const facing = Math.atan2(w.x - p.x, w.z - p.z);
+      const inArc = sim.entities().filter((e) => {
+        if (e.kind !== 'enemy' || e.boss || e.hp <= 0) return false;
+        const dx = e.x - p.x;
+        const dz = e.z - p.z;
+        const d = Math.hypot(dx, dz);
+        return d <= range && (d <= 1.0 || inFrontOf(dx, dz, facing));
+      });
+      if (inArc.length >= 2) {
+        const before = sim.recentEvents();
+        const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+        sim.sendCommand({ t: 'set-target', id: w.id });
+        sim.sendCommand({ t: 'use-ability', slot: 2 }); // Tiro Múltiplo (volley)
+        sim.sendCommand({ t: 'stop' });
+        sim.step();
+        const dmg = sim.recentEvents().filter((e) => e.seq > lastSeq && e.kind === 'damage');
+        hits = new Set(dmg.map((e) => e.targetId)).size;
+      } else {
+        sim.sendCommand({ t: 'set-target', id: null });
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+      }
+    }
+    expect(hits).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the precision passive lands occasional critical auto-shots (mix of base + 2x hits)', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    const amounts = new Set<number>();
+    let lastSeq = 0;
+    // farm with auto-shots only (no abilities); record the damage the player deals
+    for (let i = 0; i < 4000 && amounts.size < 2; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (w) {
+        sim.sendCommand({ t: 'set-target', id: w.id });
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      }
+      sim.step();
+      const pid = player(sim).id;
+      for (const ev of sim.recentEvents()) {
+        if (ev.seq <= lastSeq) continue;
+        lastSeq = ev.seq;
+        if (ev.kind === 'damage' && ev.targetId !== pid) amounts.add(ev.amount);
+      }
+    }
+    const pp = player(sim);
+    const base = meleeDamage(pp.str, pp.weaponDamage);
+    expect(amounts.has(base)).toBe(true); // ordinary shots
+    expect(amounts.has(base * CRIT_MULT)).toBe(true); // and precision crits
+  });
+
+  it('an equipped-bow run is deterministic (same seed => identical world)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      equipBow(sim);
+      for (let i = 0; i < 200; i++) {
+        const p = player(sim);
+        const w = nearestWolf(sim);
+        if (w) {
+          sim.sendCommand({ t: 'set-target', id: w.id });
+          sim.sendCommand({ t: 'use-ability', slot: 1 }); // Tiro Carregado (crit rolls touch the Rng)
+          sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        }
+        sim.step();
+      }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
 describe('player death & respawn', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
 

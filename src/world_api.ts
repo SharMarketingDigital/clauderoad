@@ -20,7 +20,7 @@ export type Rarity = 'normal' | 'sos' | 'som' | 'sun';
 // Weapon mastery ("class") ids. The equipped weapon picks the active mastery
 // (its kit + passive + auto-attack reach); unarmed falls back to Sword. Defined
 // at the seam so weapon content, the sim, and the UI agree on the set.
-export type MasteryId = 'sword' | 'spear';
+export type MasteryId = 'sword' | 'spear' | 'bow';
 
 // Status effect kinds. Debuffs: stun/knockdown (can't act), root (can't move),
 // slow (moves/attacks slower), dot (damage over time). Buffs: defense (the caster
