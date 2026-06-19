@@ -58,6 +58,10 @@ function drawCombatFeedback(): void {
       hud.announce(`${ev.text ?? 'O chefe'} foi derrotado!`);
     } else if (ev.kind === 'boss-summon') {
       hud.announce(`${ev.text ?? 'O chefe'} chama a matilha!`);
+    } else if (ev.kind === 'death') {
+      hud.announce('Você morreu! Renascendo...');
+    } else if (ev.kind === 'respawn') {
+      hud.announce('Você renasceu.');
     }
   }
 }

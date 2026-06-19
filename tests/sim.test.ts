@@ -12,6 +12,7 @@ import {
   EVENT_TTL_TICKS,
   GCD_TICKS,
   POTION_COOLDOWN_TICKS,
+  DEATH_RESPAWN_TICKS,
   xpForLevel,
   HP_PER_LEVEL,
   MP_PER_LEVEL,
@@ -454,16 +455,29 @@ describe('abilities (Golpe Forte, slot 1)', () => {
 // Targets a specific wolf by id (not cycle-target) so grind helpers stay
 // isolated from the boss regardless of its spawn timer. Returns true if it died.
 function killNearestEnemy(sim: Sim): boolean {
-  const p = sim.entities().find((e) => e.kind === 'player')!;
-  const d2 = (e: { x: number; z: number }): number => (e.x - p.x) ** 2 + (e.z - p.z) ** 2;
-  const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
-  if (wolves.length === 0) return false;
-  wolves.sort((a, b) => d2(a) - d2(b));
-  const tid = wolves[0].id;
-  sim.sendCommand({ t: 'set-target', id: tid });
-  let guard = 0;
-  while (sim.entities().some((e) => e.id === tid) && guard++ < 3000) chaseTarget(sim, tid);
-  return guard < 3000;
+  const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
+  const gold0 = playerOf().gold;
+  // Re-acquire the nearest living wolf each tick and chase it. Robust to the
+  // player dying and respawning mid-grind (it just re-targets the nearest wolf
+  // near the safe point). A kill is detected by gold strictly rising — every
+  // kill drops gold — which works regardless of WHICH wolf died.
+  for (let guard = 0; guard < 6000; guard++) {
+    if (playerOf().gold > gold0) return true;
+    const me = playerOf();
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    if (wolves.length === 0) {
+      sim.step();
+      continue;
+    }
+    wolves.sort(
+      (a, b) => (a.x - me.x) ** 2 + (a.z - me.z) ** 2 - ((b.x - me.x) ** 2 + (b.z - me.z) ** 2),
+    );
+    const w = wolves[0];
+    sim.sendCommand({ t: 'set-target', id: w.id });
+    sim.sendCommand({ t: 'move', dx: w.x - me.x, dz: w.z - me.z });
+    sim.step();
+  }
+  return playerOf().gold > gold0;
 }
 
 // Run the player toward the nearest wolf until one aggros (hostile); returns
@@ -608,6 +622,103 @@ describe('enemy AI (aggro / chase / leash)', () => {
       const sim = new Sim(seed);
       expect(approachUntilAggro(sim)).not.toBeNull(); // ensure the aggro/chase path actually ran
       for (let i = 0; i < 120; i++) sim.step();
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
+// Walk the player into the nearest wolves WITHOUT attacking and let them bring
+// the player down to 0 HP (death). Deterministic; bounded.
+function driveIntoWolvesUntilDead(sim: Sim): void {
+  const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
+  let g = 0;
+  while (playerOf().hp > 0 && g++ < 5000) {
+    const p = playerOf();
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
+    if (wolves.length) {
+      wolves.sort(
+        (a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2),
+      );
+      const w = wolves[0];
+      const d = Math.hypot(w.x - p.x, w.z - p.z);
+      sim.sendCommand(d > 1.5 ? { t: 'move', dx: w.x - p.x, dz: w.z - p.z } : { t: 'stop' });
+    }
+    sim.step();
+  }
+}
+
+describe('player death & respawn', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('HP 0 -> spirit -> respawn at the safe point with HP/MP restored', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId();
+
+    // spend some MP first, so "MP restored" is observable (not vacuous): cast at a
+    // wolf until MP drops. The first kill is below the level-up XP, so no ding
+    // refills MP; then drop the target so we stop fighting.
+    let casted = false;
+    for (let i = 0; i < 1500 && !casted; i++) {
+      const p = player(sim);
+      const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+      if (wolves.length === 0) break;
+      wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+      const w = wolves[0];
+      sim.sendCommand({ t: 'set-target', id: w.id });
+      const d = Math.hypot(w.x - p.x, w.z - p.z);
+      sim.sendCommand(d > 2.0 ? { t: 'move', dx: w.x - p.x, dz: w.z - p.z } : { t: 'stop' });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.step();
+      casted = player(sim).mp < player(sim).maxMp;
+    }
+    expect(casted).toBe(true);
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.step();
+    expect(player(sim).mp).toBeLessThan(player(sim).maxMp); // MP strictly below max going into death
+
+    driveIntoWolvesUntilDead(sim);
+
+    // down: HP floored at 0, flagged a spirit, and a death announcement fired
+    expect(player(sim).hp).toBe(0);
+    expect(player(sim).dead).toBe(true);
+    expect(sim.recentEvents().some((e) => e.kind === 'death' && e.targetId === pid)).toBe(true);
+
+    // a spirit can't act: a move command is ignored (stays frozen at the death spot)
+    const x0 = player(sim).x;
+    const z0 = player(sim).z;
+    sim.sendCommand({ t: 'move', dx: 1, dz: 0 });
+    sim.step();
+    expect(player(sim).x).toBe(x0);
+    expect(player(sim).z).toBe(z0);
+
+    // wait out the respawn delay -> revive at the safe point with HP/MP restored
+    let g = 0;
+    while (player(sim).dead && g++ < 1000) sim.step();
+    const p = player(sim);
+    expect(p.dead).toBe(false);
+    expect(p.hp).toBe(p.maxHp); // HP restored
+    expect(p.mp).toBe(p.maxMp); // MP restored
+    expect(Math.hypot(p.x, p.z)).toBeLessThan(0.001); // back at the safe point (0,0)
+    expect(sim.recentEvents().some((e) => e.kind === 'respawn' && e.targetId === pid)).toBe(true);
+  });
+
+  it('respects the respawn delay (still a spirit one tick before, alive on it)', () => {
+    const sim = new Sim(7);
+    driveIntoWolvesUntilDead(sim);
+    const deathTick = sim.tick;
+    sim.sendCommand({ t: 'stop' });
+    while (sim.tick < deathTick + DEATH_RESPAWN_TICKS - 1) sim.step();
+    expect(player(sim).dead).toBe(true); // still down one tick before the deadline
+    sim.step();
+    expect(player(sim).dead).toBe(false); // revived exactly on schedule
+  });
+
+  it('the spirit state is part of the deterministic fingerprint (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      driveIntoWolvesUntilDead(sim); // hash WHILE a spirit, so the nonzero deadUntil is fingerprinted
       return sim.hash();
     };
     expect(run(7)).toBe(run(7));
@@ -1176,11 +1287,13 @@ describe('world boss', () => {
   // Beat the live boss to death (targets the boss by id; auto-attack + ability).
   const killBoss = (sim: Sim): void => {
     const id = findBoss(sim)!.id;
-    sim.sendCommand({ t: 'set-target', id });
     let guard = 0;
-    while (sim.entities().some((e) => e.id === id) && guard++ < 8000) {
+    // the boss bites hard enough to down the player, so re-acquire it each tick
+    // (a respawn clears our target) and allow a big budget for the death cycles.
+    while (sim.entities().some((e) => e.id === id) && guard++ < 16000) {
       const b = sim.entities().find((e) => e.id === id);
       const p = player(sim);
+      sim.sendCommand({ t: 'set-target', id });
       if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
       sim.sendCommand({ t: 'use-ability', slot: 1 });
       sim.step();
@@ -1212,14 +1325,14 @@ describe('world boss', () => {
     expect(player(sim).gold).toBe(0);
 
     // target the boss and beat it down, counting the hits that actually LAND on it
-    sim.sendCommand({ t: 'set-target', id: bossId });
     const alive = (): boolean => sim.entities().some((e) => e.id === bossId);
     let guard = 0;
     let lastSeq = 0;
     let landedHits = 0;
-    while (alive() && guard++ < 8000) {
+    while (alive() && guard++ < 16000) {
       const b = sim.entities().find((e) => e.id === bossId);
       const p = player(sim);
+      sim.sendCommand({ t: 'set-target', id: bossId }); // re-acquire after any death/respawn
       if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
       sim.sendCommand({ t: 'use-ability', slot: 1 });
       sim.step();
@@ -1292,12 +1405,13 @@ describe('world boss', () => {
       const sim = new Sim(seed);
       while (!sim.entities().some((e) => e.boss)) sim.step();
       const bossId = sim.entities().find((e) => e.boss)!.id;
-      sim.sendCommand({ t: 'set-target', id: bossId });
       let guard = 0;
-      while (sim.entities().some((e) => e.id === bossId) && guard++ < 8000) {
+      while (sim.entities().some((e) => e.id === bossId) && guard++ < 16000) {
         const b = sim.entities().find((e) => e.id === bossId);
         const p = sim.entities().find((e) => e.kind === 'player')!;
+        sim.sendCommand({ t: 'set-target', id: bossId }); // re-acquire after any death/respawn
         if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
+        sim.sendCommand({ t: 'use-ability', slot: 1 });
         sim.step();
       }
       const deathTick = sim.tick;
@@ -1314,14 +1428,14 @@ describe('world boss', () => {
     const bossId = findBoss(sim)!.id;
     expect(minionCount(sim)).toBe(0); // nothing summoned before any damage
 
-    sim.sendCommand({ t: 'set-target', id: bossId });
     const alive = (): boolean => sim.entities().some((e) => e.id === bossId);
     let lastSeq = 0;
     const summonFracs: number[] = []; // boss HP fraction captured at each summon
     let guard = 0;
-    while (alive() && guard++ < 8000) {
+    while (alive() && guard++ < 16000) {
       const b = sim.entities().find((e) => e.id === bossId);
       const p = player(sim);
+      sim.sendCommand({ t: 'set-target', id: bossId }); // re-acquire after any death/respawn
       if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
       sim.sendCommand({ t: 'use-ability', slot: 1 });
       sim.step();
@@ -1360,13 +1474,13 @@ describe('world boss', () => {
     // fight 2: killing the FRESH boss must fire the WHOLE set again (full reset,
     // not a partial one) — a stuck/partly-reset counter would summon fewer.
     const id2 = findBoss(sim)!.id;
-    sim.sendCommand({ t: 'set-target', id: id2 });
     let lastSeq = sim.recentEvents().reduce((m, e) => Math.max(m, e.seq), 0);
     let summons = 0;
     let guard = 0;
-    while (sim.entities().some((e) => e.id === id2) && guard++ < 8000) {
+    while (sim.entities().some((e) => e.id === id2) && guard++ < 16000) {
       const b = sim.entities().find((e) => e.id === id2);
       const p = player(sim);
+      sim.sendCommand({ t: 'set-target', id: id2 }); // re-acquire after any death/respawn
       if (b) sim.sendCommand({ t: 'move', dx: b.x - p.x, dz: b.z - p.z });
       sim.sendCommand({ t: 'use-ability', slot: 1 });
       sim.step();

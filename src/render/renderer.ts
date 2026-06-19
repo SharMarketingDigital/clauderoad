@@ -169,6 +169,7 @@ export class Renderer {
       m.rotation.y = e.facing;
       updateGlow(m, e.weaponPlus);
       updateHostileTint(m, e);
+      updateDeadFade(m, e);
       if (e.id === targetId) targetView = e;
     }
     for (const [id, m] of this.meshes) {
@@ -289,6 +290,19 @@ function updateHostileTint(actor: THREE.Object3D, e: EntityView): void {
   (body.material as THREE.MeshStandardMaterial).color.setHex(
     e.hostile ? HOSTILE_COLOR : ENEMY_COLOR,
   );
+}
+
+// Fade a downed player to a translucent "spirit". Only touches the body/head/
+// nose (MeshStandardMaterial); the glow aura (MeshBasicMaterial) is left alone.
+function updateDeadFade(actor: THREE.Object3D, e: EntityView): void {
+  if (e.kind !== 'player') return;
+  actor.traverse((o) => {
+    const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (mat && mat.isMeshStandardMaterial) {
+      mat.transparent = e.dead; // reset to opaque on revive (don't strand it in the transparent path)
+      mat.opacity = e.dead ? 0.3 : 1;
+    }
+  });
 }
 
 // Flat ground ring used as the "selected target" marker (classic WoW/Silkroad

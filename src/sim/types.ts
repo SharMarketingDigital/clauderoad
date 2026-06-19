@@ -49,6 +49,9 @@ export interface Entity {
   abilityReadyAt: Record<number, number>; // action-bar slot -> earliest usable tick
   // shared "potion cooldown": earliest tick a consumable may be used again.
   potionReadyAt: number;
+  // player death: tick at which a downed player respawns (0 = alive). The spirit
+  // can't act until then. Enemies always carry 0.
+  deadUntil: number;
   // progression. The player gains xp/levels; enemies just carry a level.
   level: number;
   xp: number; // XP accumulated into the current level

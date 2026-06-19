@@ -39,6 +39,12 @@ const ENEMY_SPEED = 2.4; // units/sec
 const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
 export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
+// ~5s as a spirit before respawn — the early-WoW "cheap death + corpse run" model.
+// PROVISIONAL: the GDD B8 penalty (gear-durability loss, a real graveyard revive) is
+// deliberately deferred; today the wait is the only cost (see respawnPlayer).
+export const DEATH_RESPAWN_TICKS = 5 * TICK_RATE;
+const PLAYER_SPAWN_X = 0; // the "graveyard"/safe point a downed player wakes up at
+const PLAYER_SPAWN_Z = 0;
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
@@ -101,7 +107,7 @@ export class Sim implements IWorld {
       baseStr: cls.baseStr, baseWeaponDamage: cls.weaponDamage,
       baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
+      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
@@ -123,7 +129,7 @@ export class Sim implements IWorld {
       str: ENEMY_TEMPLATE.str, weaponDamage: ENEMY_TEMPLATE.weaponDamage,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: ENEMY_TEMPLATE.hp, baseMaxMp: 0,
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
@@ -145,7 +151,7 @@ export class Sim implements IWorld {
       str: t.str, weaponDamage: t.weaponDamage,
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: true, summoned: false,
@@ -215,7 +221,7 @@ export class Sim implements IWorld {
       str: ENEMY_TEMPLATE.str, weaponDamage: ENEMY_TEMPLATE.weaponDamage,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: BOSS_TEMPLATE.minionHp, baseMaxMp: 0,
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: true,
@@ -309,6 +315,7 @@ export class Sim implements IWorld {
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         boss: e.boss,
         hostile: e.kind === 'enemy' && e.targetId != null,
+        dead: e.kind === 'player' && e.deadUntil !== 0,
       });
     }
     return out;
@@ -329,6 +336,7 @@ export class Sim implements IWorld {
     }
     // Combat runs on the post-movement positions, then deaths repopulate.
     if (player) this.autoAttack(player);
+    if (player) this.respawnPlayer(player); // revive a downed player once its timer elapses
     this.processRespawns();
     this.updateBoss();
     this.pruneEvents();
@@ -341,6 +349,7 @@ export class Sim implements IWorld {
   // swing every `swingTicks`. The timer is preserved while out of range, so a
   // ready swing fires the moment the target comes back into reach.
   private autoAttack(p: Entity): void {
+    if (p.deadUntil !== 0) return; // no swinging while downed
     if (p.targetId == null || p.swingTicks <= 0) return;
     const t = this.ents.get(p.targetId);
     if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // validateTarget clears it
@@ -485,6 +494,7 @@ export class Sim implements IWorld {
 
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
+    if (p.deadUntil !== 0) return; // a downed spirit can't act until it respawns
     switch (cmd.t) {
       case 'cycle-target':
         this.cycleTarget(p);
@@ -693,6 +703,7 @@ export class Sim implements IWorld {
   }
 
   private stepPlayer(p: Entity): void {
+    if (p.deadUntil !== 0) return; // frozen while a spirit
     if (this.moveIntent.t !== 'move') return;
     const len = Math.hypot(this.moveIntent.dx, this.moveIntent.dz);
     if (len < 1e-4) return;
@@ -788,11 +799,11 @@ export class Sim implements IWorld {
     e.facing = Math.atan2(dx / len, dz / len);
   }
 
-  // Apply a melee hit to the player. Floors HP at 0 — death/respawn is a later
-  // slice. Emits the same 'damage' event the player's own swings use, so the
-  // renderer flashes the player and pops the number.
+  // Apply a melee hit to the player. Emits the same 'damage' event the player's
+  // own swings use (so the renderer flashes the player and pops the number), and
+  // downs the player when HP hits 0.
   private hitPlayer(p: Entity, dmg: number): void {
-    if (dmg <= 0) return;
+    if (dmg <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
     p.hp = Math.max(0, p.hp - dmg);
     this.events.push({
       seq: this.nextEventSeq++,
@@ -802,6 +813,48 @@ export class Sim implements IWorld {
       amount: dmg,
       x: p.x,
       z: p.z,
+    });
+    if (p.hp <= 0) this.killPlayer(p);
+  }
+
+  // Down the player: enter the "spirit" state, schedule a respawn, and announce
+  // the death. Enemies drop the player as a target via their hp<=0 de-aggro.
+  private killPlayer(p: Entity): void {
+    p.deadUntil = this.tick + DEATH_RESPAWN_TICKS;
+    p.targetId = null;
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'death',
+      targetId: p.id,
+      amount: 0,
+      x: p.x,
+      z: p.z,
+      text: p.name,
+    });
+  }
+
+  // Once the respawn delay elapses, revive the player at the safe point with
+  // HP/MP restored. The wait is the (provisional) death penalty.
+  private respawnPlayer(p: Entity): void {
+    if (p.deadUntil === 0 || this.tick < p.deadUntil) return;
+    p.deadUntil = 0;
+    p.x = PLAYER_SPAWN_X;
+    p.z = PLAYER_SPAWN_Z;
+    this.recomputeStats(p); // keep effective maxHp/maxMp current, then top up
+    p.hp = p.maxHp;
+    p.mp = p.maxMp;
+    p.targetId = null;
+    this.moveIntent = { t: 'stop' }; // don't drift from a pre-death movement intent
+    this.events.push({
+      seq: this.nextEventSeq++,
+      tick: this.tick,
+      kind: 'respawn',
+      targetId: p.id,
+      amount: 0,
+      x: p.x,
+      z: p.z,
+      text: p.name,
     });
   }
 
@@ -824,7 +877,7 @@ export class Sim implements IWorld {
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
-      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt);
+      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil);
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
       // Progression (level implies maxHp/maxMp, so they need not be mixed too).

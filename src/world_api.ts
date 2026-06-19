@@ -41,6 +41,7 @@ export interface EntityView {
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly hostile: boolean; // an enemy currently aggroed on the player (chasing or, for the rooted boss, biting in melee)
+  readonly dead: boolean; // a downed player in the "spirit" state, awaiting respawn
 }
 
 // One stack in the player's bag, with the item's display name resolved.
@@ -119,6 +120,7 @@ export type SimEvent = {
   // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
+  // 'death'/'respawn': the player went down / came back; `text` = the player name.
   // 'boss-spawn'/'boss-defeat'/'boss-summon': `text` = the boss name, for the announcement.
   // targetId is the affected entity; x/z anchors the on-screen effect.
   readonly kind:
@@ -127,6 +129,8 @@ export type SimEvent = {
     | 'enhance-success'
     | 'enhance-fail'
     | 'heal'
+    | 'death'
+    | 'respawn'
     | 'boss-spawn'
     | 'boss-defeat'
     | 'boss-summon';
