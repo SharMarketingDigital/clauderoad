@@ -26,6 +26,10 @@ export class Hud {
   private bagGrid: HTMLDivElement;
   private bagSlots: HTMLDivElement[] = [];
   private bagStats: HTMLDivElement;
+  // attribute spending (inside the bag window)
+  private attrPointsEl: HTMLSpanElement;
+  private attrStrBtn: HTMLButtonElement;
+  private attrIntBtn: HTMLButtonElement;
   private equipRow: HTMLDivElement;
   private equipCells: HTMLDivElement[] = [];
   // alchemy ("+N") controls inside the bag window
@@ -66,6 +70,11 @@ export class Hud {
         <div class="bag-title">Bolsa</div>
         <div class="equip-row"></div>
         <div class="bag-stats"></div>
+        <div class="attrs">
+          <span class="attr-points"></span>
+          <button class="attr-btn attr-str">+ Força</button>
+          <button class="attr-btn attr-int">+ Inteligência</button>
+        </div>
         <div class="alchemy">
           <button class="lucky-toggle">Pó da Sorte: OFF</button>
           <div class="refine-row"></div>
@@ -95,6 +104,11 @@ export class Hud {
     this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
     this.bagGrid = this.root.querySelector('.bag-grid') as HTMLDivElement;
     this.bagStats = this.root.querySelector('.bag-stats') as HTMLDivElement;
+    this.attrPointsEl = this.root.querySelector('.attr-points') as HTMLSpanElement;
+    this.attrStrBtn = this.root.querySelector('.attr-str') as HTMLButtonElement;
+    this.attrIntBtn = this.root.querySelector('.attr-int') as HTMLButtonElement;
+    this.attrStrBtn.addEventListener('click', () => this.world?.sendCommand({ t: 'spend-attr', attr: 'str' }));
+    this.attrIntBtn.addEventListener('click', () => this.world?.sendCommand({ t: 'spend-attr', attr: 'int' }));
     this.equipRow = this.root.querySelector('.equip-row') as HTMLDivElement;
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
     this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
@@ -195,8 +209,14 @@ export class Hud {
       }
     }
 
-    // Tiny "ficha": the effective stats the equipment drives.
-    this.bagStats.textContent = `Força ${p.str} · Dano de arma ${p.weaponDamage}`;
+    // Tiny "ficha": the effective stats Strength/Intelligence + gear drive.
+    this.bagStats.textContent =
+      `Força ${p.str} · Int ${p.int} · Dano ${p.weaponDamage} · MP ${Math.round(p.mp)}/${p.maxMp}`;
+
+    // Attribute spending: show available points and gate the "+" buttons on them.
+    this.attrPointsEl.textContent = `Pontos: ${p.attrPoints}`;
+    this.attrStrBtn.disabled = p.attrPoints <= 0;
+    this.attrIntBtn.disabled = p.attrPoints <= 0;
 
     this.updateAlchemy(inv);
 

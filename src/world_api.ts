@@ -37,6 +37,7 @@ export interface EntityView {
   // EFFECTIVE combat stats (base + equipped gear). The character sheet shows
   // these and they drive damage, so equipping a weapon visibly raises them.
   readonly str: number;
+  readonly int: number; // Intelligence (spent points); raises max MP
   readonly weaponDamage: number;
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
@@ -94,7 +95,8 @@ export type Command =
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
   | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
-  | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number }; // consume a bag stack (potion, etc.)
+  | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
+  | { t: 'spend-attr'; attr: 'str' | 'int' }; // spend one attribute point on Strength or Intelligence
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

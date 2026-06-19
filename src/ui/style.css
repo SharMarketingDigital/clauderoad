@@ -264,6 +264,23 @@ html, body {
 .refine-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
 .mat-line { font-size: 10px; color: #9fd0ff; text-align: center; }
 
+/* Attribute spending row (inside the bag): points + the two "+" buttons. */
+.attrs { display: flex; gap: 6px; align-items: center; }
+.attr-points { font-size: 11px; color: var(--ink); white-space: nowrap; }
+.attr-btn {
+  flex: 1;
+  padding: 5px 6px;
+  font-size: 11px;
+  color: var(--ink);
+  background: #1c2533;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.attr-btn:hover:not(:disabled) { background: #26344a; }
+.attr-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+
 /* Failed-refine banner (floating text). */
 .fct-fail {
   font-size: 22px;

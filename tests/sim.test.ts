@@ -17,6 +17,8 @@ import {
   HP_PER_LEVEL,
   MP_PER_LEVEL,
   ATTR_POINTS_PER_LEVEL,
+  ATTR_STR_PER_POINT,
+  MP_PER_INT,
   inFrontOf,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
@@ -551,6 +553,27 @@ function restoreToFull(sim: Sim): void {
 
 type EntityViewHp = { hp: number; maxHp: number };
 
+// Cast the action-bar ability once at a wolf so MP drops strictly below max (so an
+// MP top-up/restore becomes observable), then drop the target. The post-level-up
+// kill is below the next level threshold, so no ding refills MP.
+function drainSomeMp(sim: Sim): void {
+  const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
+  for (let i = 0; i < 1500 && playerOf().mp >= playerOf().maxMp; i++) {
+    const p = playerOf();
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    if (wolves.length === 0) break;
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    const w = wolves[0];
+    sim.sendCommand({ t: 'set-target', id: w.id });
+    const d = Math.hypot(w.x - p.x, w.z - p.z);
+    sim.sendCommand(d > 2.0 ? { t: 'move', dx: w.x - p.x, dz: w.z - p.z } : { t: 'stop' });
+    sim.sendCommand({ t: 'use-ability', slot: 1 });
+    sim.step();
+  }
+  sim.sendCommand({ t: 'set-target', id: null });
+  sim.step();
+}
+
 describe('enemy AI (aggro / chase / leash)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
 
@@ -719,6 +742,80 @@ describe('player death & respawn', () => {
     const run = (seed: number): string => {
       const sim = new Sim(seed);
       driveIntoWolvesUntilDead(sim); // hash WHILE a spirit, so the nonzero deadUntil is fingerprinted
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
+
+describe('attribute points', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('spending a Força point raises Strength and melee damage; consumes one point', () => {
+    const sim = new Sim(7);
+    while (player(sim).attrPoints < 1) killNearestEnemy(sim); // level up to earn points
+    fleeToSafety(sim); // de-aggro so the spend step takes no stray wolf damage
+    const before = player(sim);
+    const dmgBefore = meleeDamage(before.str, before.weaponDamage);
+    const ptsBefore = before.attrPoints;
+    const strBefore = before.str;
+    const intBefore = before.int;
+    const maxMpBefore = before.maxMp;
+    const hpBefore = before.hp;
+    sim.sendCommand({ t: 'spend-attr', attr: 'str' });
+    sim.step();
+    const after = player(sim);
+    expect(after.attrPoints).toBe(ptsBefore - 1); // one point spent
+    expect(after.str).toBe(strBefore + ATTR_STR_PER_POINT); // Strength rose
+    expect(meleeDamage(after.str, after.weaponDamage)).toBe(dmgBefore + 1); // a clean, exact +1 damage
+    expect(after.int).toBe(intBefore); // didn't leak into Intelligence...
+    expect(after.maxMp).toBe(maxMpBefore); // ...or MP
+    expect(after.hp).toBe(hpBefore); // and did NOT wrongly heal/change HP
+  });
+
+  it('spending an Inteligência point raises Intelligence, max MP, and tops up current MP', () => {
+    const sim = new Sim(7);
+    while (player(sim).attrPoints < 1) killNearestEnemy(sim);
+    drainSomeMp(sim); // cast so MP is strictly below max -> the top-up is observable
+    fleeToSafety(sim); // de-aggro so the spend step is clean
+    const before = player(sim);
+    const maxMpBefore = before.maxMp;
+    const mpBefore = before.mp;
+    const intBefore = before.int;
+    const ptsBefore = before.attrPoints;
+    const strBefore = before.str;
+    const hpBefore = before.hp;
+    expect(mpBefore).toBeLessThan(maxMpBefore); // MP was actually drained
+    sim.sendCommand({ t: 'spend-attr', attr: 'int' });
+    sim.step();
+    const after = player(sim);
+    expect(after.attrPoints).toBe(ptsBefore - 1);
+    expect(after.int).toBe(intBefore + 1);
+    expect(after.maxMp).toBe(maxMpBefore + MP_PER_INT); // Intelligence adds max MP...
+    expect(after.mp).toBe(Math.min(after.maxMp, mpBefore + MP_PER_INT)); // ...and tops up current MP
+    expect(after.str).toBe(strBefore); // int point left Strength alone
+    expect(after.hp).toBe(hpBefore); // and did NOT wrongly heal/change HP
+  });
+
+  it('cannot spend a point when none are available', () => {
+    const sim = new Sim(7);
+    expect(player(sim).attrPoints).toBe(0); // fresh: level 1, no points yet
+    const strBefore = player(sim).str;
+    sim.sendCommand({ t: 'spend-attr', attr: 'str' });
+    sim.step();
+    expect(player(sim).attrPoints).toBe(0); // nothing spent
+    expect(player(sim).str).toBe(strBefore); // and no stat change
+  });
+
+  it('spending attribute points is part of the deterministic fingerprint', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      while (player(sim).attrPoints < 3) killNearestEnemy(sim);
+      sim.sendCommand({ t: 'spend-attr', attr: 'str' });
+      sim.step();
+      sim.sendCommand({ t: 'spend-attr', attr: 'int' });
+      sim.step();
       return sim.hash();
     };
     expect(run(7)).toBe(run(7));

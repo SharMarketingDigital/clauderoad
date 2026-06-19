@@ -54,6 +54,11 @@ export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE
 export const HP_PER_LEVEL = 20;
 export const MP_PER_LEVEL = 15;
 export const ATTR_POINTS_PER_LEVEL = 5;
+// Spending one attribute point: Strength moves by 2 (a clean +1 melee damage,
+// since meleeDamage floors str*0.5), Intelligence by 1 for +MP_PER_INT max MP.
+export const ATTR_STR_PER_POINT = 2;
+export const ATTR_INT_PER_POINT = 1;
+export const MP_PER_INT = 5;
 // XP needed to go from `level` to level+1. Integer curve (no Math.pow, so it's
 // bit-exact across engines): 25·L·(L+1) => L1:50, L2:150, L3:300, L4:500...
 // With a 25-XP wolf that's ~2 kills for level 2, ramping gently after.
@@ -108,7 +113,7 @@ export class Sim implements IWorld {
       baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
-      level: 1, xp: 0, attrPoints: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
       homeX: 0, homeZ: 0,
@@ -130,7 +135,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: ENEMY_TEMPLATE.hp, baseMaxMp: 0,
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
-      level: 1, xp: 0, attrPoints: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: false,
       homeX: x, homeZ: z,
@@ -152,7 +157,7 @@ export class Sim implements IWorld {
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
-      level: 1, xp: 0, attrPoints: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: true, summoned: false,
       homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
@@ -222,7 +227,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: BOSS_TEMPLATE.minionHp, baseMaxMp: 0,
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
-      level: 1, xp: 0, attrPoints: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       gold: 0, bag: [], equipment: { weapon: null, armor: null },
       boss: false, summoned: true,
       homeX: x, homeZ: z,
@@ -312,6 +317,7 @@ export class Sim implements IWorld {
         level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
         gold: e.gold,
         str: e.str, weaponDamage: e.weaponDamage,
+        int: e.baseInt,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         boss: e.boss,
         hostile: e.kind === 'enemy' && e.targetId != null,
@@ -517,6 +523,9 @@ export class Sim implements IWorld {
       case 'use-item':
         this.useItem(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
+      case 'spend-attr':
+        this.spendAttr(p, cmd.attr);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
@@ -604,6 +613,19 @@ export class Sim implements IWorld {
     });
   }
 
+  // ---------- attributes ----------
+  // Spend one unspent attribute point on Strength (more melee damage) or
+  // Intelligence (more max MP). Refuses when no points are available. The freshly
+  // granted MP is made usable immediately (there's no passive MP regen yet).
+  private spendAttr(p: Entity, attr: 'str' | 'int'): void {
+    if (p.attrPoints <= 0) return;
+    p.attrPoints -= 1;
+    if (attr === 'str') p.baseStr += ATTR_STR_PER_POINT;
+    else p.baseInt += ATTR_INT_PER_POINT;
+    this.recomputeStats(p);
+    if (attr === 'int') p.mp = Math.min(p.maxMp, p.mp + MP_PER_INT);
+  }
+
   // Recompute EFFECTIVE stats = base (class + level) + sum of equipped gear.
   // Combat reads p.str/p.weaponDamage/p.maxHp/p.maxMp, so this is what makes a
   // weapon actually change auto-attack and ability damage. Current HP/MP are
@@ -628,7 +650,7 @@ export class Sim implements IWorld {
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
     p.maxHp = p.baseMaxHp + bonusMaxHp;
-    p.maxMp = p.baseMaxMp + bonusMaxMp;
+    p.maxMp = p.baseMaxMp + p.baseInt * MP_PER_INT + bonusMaxMp; // Intelligence adds max MP
     if (p.hp > p.maxHp) p.hp = p.maxHp;
     if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
@@ -882,6 +904,7 @@ export class Sim implements IWorld {
       for (const def of ABILITIES) mix(e.abilityReadyAt[def.slot] ?? 0);
       // Progression (level implies maxHp/maxMp, so they need not be mixed too).
       mix(e.level); mix(e.xp); mix(e.attrPoints);
+      mix(e.baseStr); mix(e.baseInt); // spent attribute points (str/int)
       // Economy & bag (stacks are in deterministic insertion order).
       mix(e.gold);
       for (const s of e.bag) {

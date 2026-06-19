@@ -40,6 +40,9 @@ export interface Entity {
   baseWeaponDamage: number;
   baseMaxHp: number;
   baseMaxMp: number;
+  // Intelligence (spent attribute points). Drives max MP. No "effective" gear
+  // bonus today, so the view's `int` equals this. Enemies carry 0.
+  baseInt: number;
   swingTicks: number; // ticks between melee swings (0 = cannot auto-attack)
   nextSwingAt: number; // earliest tick the next swing may land
   // resources & abilities (player). Enemies carry zeros / empty.
