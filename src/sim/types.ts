@@ -1,4 +1,14 @@
-import type { EntityKind, EquipSlot, Rarity } from '../world_api';
+import type { EntityKind, EquipSlot, Rarity, StatusKind } from '../world_api';
+
+// One active status effect on an entity (see the sim's status system).
+export interface StatusEffect {
+  kind: StatusKind;
+  expiresAt: number; // tick the effect ends (active while tick < expiresAt)
+  magnitude: number; // slow: speed factor in (0,1]; dot: damage per application; else 0
+  period: number; // dot: ticks between damage applications; else 0
+  nextAt: number; // dot: next tick to apply damage; else 0
+  source: number; // entity id that applied it (DoT kill credit), or 0
+}
 
 // One stack of items in a bag (the sim's internal shape; the view is
 // ItemStackView in world_api.ts). Stacks key on item id, rarity AND enhancement
@@ -73,6 +83,8 @@ export interface Entity {
   // up if led `leashRadius` from here. Players carry zeros (unused).
   homeX: number;
   homeZ: number;
+  // active status effects (stun/slow/root/knockdown/dot). Empty when none.
+  effects: StatusEffect[];
   // enemy wander state
   targetX: number;
   targetZ: number;

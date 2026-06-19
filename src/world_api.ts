@@ -17,6 +17,11 @@ export type EquipSlot = 'weapon' | 'armor';
 // seam so content, sim, and UI agree; the UI maps these to colors.
 export type Rarity = 'normal' | 'sos' | 'som' | 'sun';
 
+// Status effect kinds: stun/knockdown (can't act), root (can't move), slow
+// (moves/attacks slower), dot (damage over time). Defined at the seam so the sim,
+// content and renderer agree; render shows a marker by kind.
+export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot';
+
 export interface EntityView {
   readonly id: number;
   readonly kind: EntityKind;
@@ -43,6 +48,7 @@ export interface EntityView {
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly hostile: boolean; // an enemy currently aggroed on the player (chasing or, for the rooted boss, biting in melee)
   readonly dead: boolean; // a downed player in the "spirit" state, awaiting respawn
+  readonly statuses: ReadonlyArray<StatusKind>; // active status-effect kinds (for the on-target indicator)
 }
 
 // One stack in the player's bag, with the item's display name resolved.

@@ -13,6 +13,7 @@ import { Rng } from './rng';
 import type { Entity } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
+  StatusKind,
 } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT } from './content/enemies';
@@ -38,8 +39,8 @@ export const DT = 1 / TICK_RATE; // seconds per tick
 export const WORLD_HALF = 60; // world spans -WORLD_HALF..WORLD_HALF on X and Z
 
 const PLAYER_SPEED = 6; // units/sec
-const ENEMY_SPEED = 2.4; // units/sec
-const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
+export const ENEMY_SPEED = 2.4; // units/sec
+export const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
 export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type enemy respawns
 // ~5s as a spirit before respawn — the early-WoW "cheap death + corpse run" model.
@@ -121,7 +122,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
       boss: false, summoned: false,
       homeX: 0, homeZ: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
@@ -143,7 +144,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
       boss: false, summoned: false,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -164,7 +165,7 @@ export class Sim implements IWorld {
       swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
       boss: false, summoned: false,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
@@ -187,7 +188,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
       boss: true, summoned: false,
       homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
       targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
@@ -257,7 +258,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
-      gold: 0, bag: [], equipment: { weapon: null, armor: null },
+      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [],
       boss: false, summoned: true,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -365,6 +366,7 @@ export class Sim implements IWorld {
         boss: e.boss,
         hostile: e.kind === 'enemy' && e.targetId != null,
         dead: e.kind === 'player' && e.deadUntil !== 0,
+        statuses: e.effects.map((s) => s.kind),
       });
     }
     return out;
@@ -373,6 +375,9 @@ export class Sim implements IWorld {
   // ---------- simulation ----------
   step(): void {
     this.tick++;
+    // Tick status effects (DoT damage + expiry) for everyone first, so a just-
+    // expired stun lets the entity act this tick. Snapshot: a DoT may remove an entity.
+    for (const e of [...this.ents.values()]) this.stepStatuses(e);
     const player = this.ents.get(this.localId);
     // Drain one-shot actions first, then movement, then enemies.
     if (player) {
@@ -398,7 +403,7 @@ export class Sim implements IWorld {
   // swing every `swingTicks`. The timer is preserved while out of range, so a
   // ready swing fires the moment the target comes back into reach.
   private autoAttack(p: Entity): void {
-    if (p.deadUntil !== 0) return; // no swinging while downed
+    if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // no swinging while downed or stunned
     if (p.targetId == null || p.swingTicks <= 0) return;
     const t = this.ents.get(p.targetId);
     if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // validateTarget clears it
@@ -412,7 +417,7 @@ export class Sim implements IWorld {
     // we're standing on. (The frontal rule still applies on the approach.)
     if (dist > CONTACT_DIST && !inFrontOf(dx, dz, p.facing)) return;
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
-    p.nextSwingAt = this.tick + p.swingTicks;
+    p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
     this.hitEnemy(t, meleeDamage(p.str, p.weaponDamage), p);
   }
 
@@ -543,7 +548,7 @@ export class Sim implements IWorld {
 
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
-    if (p.deadUntil !== 0) return; // a downed spirit can't act until it respawns
+    if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {
       case 'cycle-target':
         this.cycleTarget(p);
@@ -760,6 +765,15 @@ export class Sim implements IWorld {
     p.gcdUntil = this.tick + GCD_TICKS;
     p.abilityReadyAt[slot] = this.tick + Math.round(def.cooldownSecs * TICK_RATE);
     this.hitEnemy(t, abilityDamage(def, p.str, p.weaponDamage), p);
+    // Apply the ability's status effects to the target — only if it survived the hit.
+    if (def.effects && t.hp > 0) {
+      for (const ef of def.effects) {
+        this.applyStatus(
+          t, ef.kind, Math.round(ef.durationSecs * TICK_RATE),
+          ef.magnitude ?? 0, ef.periodSecs ? Math.round(ef.periodSecs * TICK_RATE) : 0, p.id,
+        );
+      }
+    }
   }
 
   // Tab: select the nearest living enemy in front; repeated presses cycle
@@ -805,13 +819,15 @@ export class Sim implements IWorld {
 
   private stepPlayer(p: Entity): void {
     if (p.deadUntil !== 0) return; // frozen while a spirit
+    if (this.isIncapacitated(p) || this.isRooted(p)) return; // can't move while stunned or rooted
     if (this.moveIntent.t !== 'move') return;
     const len = Math.hypot(this.moveIntent.dx, this.moveIntent.dz);
     if (len < 1e-4) return;
     const nx = this.moveIntent.dx / len;
     const nz = this.moveIntent.dz / len;
-    p.x = clamp(p.x + nx * PLAYER_SPEED * DT, -WORLD_HALF, WORLD_HALF);
-    p.z = clamp(p.z + nz * PLAYER_SPEED * DT, -WORLD_HALF, WORLD_HALF);
+    const speed = PLAYER_SPEED * this.slowFactor(p); // slow -> slower movement
+    p.x = clamp(p.x + nx * speed * DT, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(p.z + nz * speed * DT, -WORLD_HALF, WORLD_HALF);
     p.facing = Math.atan2(nx, nz);
   }
 
@@ -822,6 +838,7 @@ export class Sim implements IWorld {
   // its ground and only bites what steps into melee. Deterministic: movement is
   // arithmetic; only the idle wander destination draws from the sim Rng.
   private stepEnemy(e: Entity, player: Entity | undefined): void {
+    if (this.isIncapacitated(e)) return; // stunned / knocked down -> does nothing this tick
     const tmpl = e.boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
 
     // --- decide aggro / leash ---
@@ -871,14 +888,15 @@ export class Sim implements IWorld {
       const dz = target.z - e.z;
       const dist = Math.hypot(dx, dz);
       if (dist <= MELEE_RANGE && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
-        e.nextSwingAt = this.tick + e.swingTicks;
+        e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         this.hitPlayer(target, meleeDamage(e.str, e.weaponDamage));
       }
-      if (!e.boss && dist > CONTACT_DIST) {
-        // the boss is rooted, so it bites in melee but never chases
+      if (!e.boss && !this.isRooted(e) && dist > CONTACT_DIST) {
+        // the boss is rooted, so it bites in melee but never chases; a rooted enemy can't move either
         const len = dist < 1e-4 ? 1 : dist;
-        e.x = clamp(e.x + (dx / len) * ENEMY_SPEED * DT, -WORLD_HALF, WORLD_HALF);
-        e.z = clamp(e.z + (dz / len) * ENEMY_SPEED * DT, -WORLD_HALF, WORLD_HALF);
+        const speed = ENEMY_SPEED * this.slowFactor(e); // slow -> slower chase
+        e.x = clamp(e.x + (dx / len) * speed * DT, -WORLD_HALF, WORLD_HALF);
+        e.z = clamp(e.z + (dz / len) * speed * DT, -WORLD_HALF, WORLD_HALF);
         e.facing = Math.atan2(dx / len, dz / len);
       }
       return;
@@ -891,12 +909,14 @@ export class Sim implements IWorld {
       e.targetZ = this.rng.range(-WORLD_HALF, WORLD_HALF);
       e.repickAt = this.tick + this.rng.int(40, 120); // re-pick every 2..6s
     }
+    if (this.isRooted(e)) return; // rooted -> may pick a wander target but can't move to it
     const dx = e.targetX - e.x;
     const dz = e.targetZ - e.z;
     const len = Math.hypot(dx, dz);
     if (len < 0.1) return;
-    e.x += (dx / len) * ENEMY_SPEED * DT;
-    e.z += (dz / len) * ENEMY_SPEED * DT;
+    const speed = ENEMY_SPEED * this.slowFactor(e);
+    e.x += (dx / len) * speed * DT;
+    e.z += (dz / len) * speed * DT;
     e.facing = Math.atan2(dx / len, dz / len);
   }
 
@@ -918,11 +938,82 @@ export class Sim implements IWorld {
     if (p.hp <= 0) this.killPlayer(p);
   }
 
+  // ---------- status effects ----------
+  // Apply (or refresh) a status effect on an entity. One effect per kind: a fresh
+  // application of the same kind replaces the existing one.
+  private applyStatus(
+    e: Entity, kind: StatusKind, durTicks: number, magnitude = 0, periodTicks = 0, source = 0,
+  ): void {
+    if (durTicks <= 0) return;
+    if (e.effects.length > 0) e.effects = e.effects.filter((s) => s.kind !== kind);
+    e.effects.push({
+      kind,
+      expiresAt: this.tick + durTicks,
+      magnitude,
+      period: periodTicks,
+      nextAt: kind === 'dot' ? this.tick + Math.max(1, periodTicks) : 0,
+      source,
+    });
+  }
+
+  // Stun and knockdown both prevent ALL action (move + attack + cast).
+  private isIncapacitated(e: Entity): boolean {
+    return e.effects.some((s) => s.kind === 'stun' || s.kind === 'knockdown');
+  }
+  private isRooted(e: Entity): boolean {
+    return e.effects.some((s) => s.kind === 'root');
+  }
+  // The strongest active slow (smallest factor), or 1 when not slowed. Only honors
+  // a valid slow factor in (0,1): magnitude<=0 (or a malformed/missing one) is
+  // ignored, so it can never produce a 0/negative factor that divides into the
+  // swing interval (Infinity / past-tick) or reverses movement.
+  private slowFactor(e: Entity): number {
+    let f = 1;
+    for (const s of e.effects) {
+      if (s.kind === 'slow' && s.magnitude > 0 && s.magnitude < f) f = s.magnitude;
+    }
+    return f;
+  }
+
+  // Tick an entity's status effects: apply any DoT damage due this tick, then drop
+  // expired effects. Called for every entity at the start of each tick.
+  private stepStatuses(e: Entity): void {
+    if (e.effects.length === 0) return;
+    for (const s of e.effects) {
+      if (s.kind !== 'dot') continue;
+      const period = Math.max(1, s.period);
+      while (this.tick >= s.nextAt && this.tick < s.expiresAt && e.hp > 0) {
+        this.applyDotDamage(e, s.magnitude, s.source);
+        s.nextAt += period;
+      }
+      if (e.hp <= 0) break; // died to the DoT — it may have been removed
+    }
+    if (e.effects.some((s) => this.tick >= s.expiresAt)) {
+      e.effects = e.effects.filter((s) => this.tick < s.expiresAt);
+    }
+  }
+
+  // Route DoT damage through the normal damage path (so it can kill, credit the
+  // source for XP/loot, and trigger boss summons on HP thresholds).
+  private applyDotDamage(e: Entity, dmg: number, source: number): void {
+    if (dmg <= 0) return;
+    if (e.kind === 'player') {
+      this.hitPlayer(e, dmg);
+    } else if (e.kind === 'enemy') {
+      // Credit the source if it still exists; otherwise credit no one (use the
+      // victim as a non-player "killer" so killEnemy grants no XP/loot) rather
+      // than handing the local player free credit for a kill it didn't cause.
+      const killer = this.ents.get(source) ?? e;
+      this.hitEnemy(e, dmg, killer);
+    }
+  }
+
   // Down the player: enter the "spirit" state, schedule a respawn, and announce
   // the death. Enemies drop the player as a target via their hp<=0 de-aggro.
   private killPlayer(p: Entity): void {
     p.deadUntil = this.tick + DEATH_RESPAWN_TICKS;
     p.targetId = null;
+    p.effects.length = 0; // death clears debuffs (no DoT/stun carrying into the spirit/respawn)
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
@@ -994,6 +1085,11 @@ export class Sim implements IWorld {
         const eq = e.equipment[slot];
         mix(strHash(eq ? `${eq.itemId}:${eq.rarity}` : ''));
         mix(eq ? eq.plus : -1);
+      }
+      // Active status effects (kind + timing/magnitude/source all drive future behavior).
+      for (const s of e.effects) {
+        mix(strHash(s.kind)); mix(s.expiresAt); mix(s.magnitude);
+        mix(s.period); mix(s.nextAt); mix(s.source);
       }
     }
     // Pending respawns are deterministic state too (FIFO order is stable).

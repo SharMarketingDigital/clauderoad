@@ -170,6 +170,7 @@ export class Renderer {
       updateGlow(m, e.weaponPlus);
       updateHostileTint(m, e);
       updateDeadFade(m, e);
+      updateStatusMarker(m, e);
       if (e.id === targetId) targetView = e;
     }
     for (const [id, m] of this.meshes) {
@@ -241,6 +242,16 @@ function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
   nose.position.set(0, 1.0, 0.55); // +Z is "forward" (matches facing math)
   g.add(body, head, nose);
   g.userData.body = body; // so the per-frame hostile tint can recolor it
+  // Status-effect marker: a small bead above the head, shown + colored by the
+  // active status (basic material, so the hit-flash never touches it).
+  const statusMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }),
+  );
+  statusMarker.position.y = 2.55;
+  statusMarker.visible = false;
+  g.userData.statusMarker = statusMarker;
+  g.add(statusMarker);
   if (kind === 'player') {
     // Enhancement glow aura — hidden until the equipped weapon hits +3. A
     // MeshBasicMaterial (no emissive) so the hit-flash never touches it.
@@ -291,6 +302,36 @@ function updateHostileTint(actor: THREE.Object3D, e: EntityView): void {
   (body.material as THREE.MeshStandardMaterial).color.setHex(
     e.hostile ? HOSTILE_COLOR : ENEMY_COLOR,
   );
+}
+
+// Status-effect indicator colors (matches the StatusKind union).
+const STATUS_COLORS: Record<string, number> = {
+  stun: 0xffe14d, // yellow
+  knockdown: 0xff8c00, // orange
+  root: 0x8b5a2b, // brown
+  slow: 0x4aa3ff, // blue
+  dot: 0xff3030, // red (bleed)
+};
+
+// Status display priority: the bead shows the most "important" active effect
+// (a stun/knockdown should always win over a slow/dot), not whichever happens to
+// sit at index 0 — so the colour doesn't depend on application/expiry order.
+const STATUS_PRIORITY: Record<string, number> = { stun: 0, knockdown: 0, root: 1, slow: 2, dot: 3 };
+
+// Show/hide + color the per-entity status bead by its highest-priority status.
+function updateStatusMarker(actor: THREE.Object3D, e: EntityView): void {
+  const marker = actor.userData.statusMarker as THREE.Mesh | undefined;
+  if (!marker) return;
+  if (e.statuses.length === 0) {
+    marker.visible = false;
+    return;
+  }
+  let top = e.statuses[0];
+  for (const k of e.statuses) {
+    if ((STATUS_PRIORITY[k] ?? 9) < (STATUS_PRIORITY[top] ?? 9)) top = k;
+  }
+  marker.visible = true;
+  (marker.material as THREE.MeshBasicMaterial).color.setHex(STATUS_COLORS[top] ?? 0xffffff);
 }
 
 // Fade a downed player to a translucent "spirit". Only touches the body/head/

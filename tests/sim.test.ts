@@ -9,6 +9,9 @@ import {
   enhanceStat,
   STR_TO_DAMAGE,
   WORLD_HALF,
+  ENEMY_SPEED,
+  MELEE_RANGE,
+  DT,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
   GCD_TICKS,
@@ -678,6 +681,151 @@ function driveIntoWolvesUntilDead(sim: Sim): void {
     sim.step();
   }
 }
+
+// Approach the nearest wolf and cast Golpe Forte (slot 1) on it, dropping the
+// target the SAME tick so the follow-up auto-attack doesn't finish it off — the
+// wolf survives with the ability's status effects on it. Returns the wolf id.
+// Casting on the FIRST in-melee tick (d <= MELEE_RANGE) guarantees no prior
+// auto-attack landed, so this is robust to player-speed / damage retuning.
+function stunWolf(sim: Sim): number | null {
+  for (let i = 0; i < 2000; i++) {
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    if (wolves.length === 0) return null;
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    const w = wolves[0];
+    const d = Math.hypot(w.x - p.x, w.z - p.z);
+    if (d > MELEE_RANGE) {
+      // approach WITHOUT a target so no auto-attack lands en route (would pre-damage the wolf)
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+    } else {
+      // in melee: set target + cast + drop the target the SAME tick, so ONLY the cast hits
+      sim.sendCommand({ t: 'set-target', id: w.id });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      const cw = sim.entities().find((e) => e.id === w.id);
+      if (cw && cw.statuses.length > 0) return w.id;
+    }
+  }
+  return null;
+}
+
+describe('status effects', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const wolfById = (sim: Sim, id: number) => sim.entities().find((e) => e.id === id);
+  // Golpe Forte effect durations (data-as-code, 20Hz): stun 1.0s, slow 3.0s, dot 2.0s @0.5s.
+  const STUN_TICKS = 20;
+  const DOT_MAG = 2;
+  const DOT_PERIOD = 10;
+
+  it('stun: a wolf is frozen for exactly the stun duration, then resumes acting', () => {
+    const sim = new Sim(7);
+    const wid = stunWolf(sim);
+    expect(wid).not.toBeNull();
+    const castTick = sim.tick; // the stun landed on this tick
+    const w0 = wolfById(sim, wid!)!;
+    expect(w0.statuses).toContain('stun');
+    const x0 = w0.x;
+    const z0 = w0.z;
+
+    // frozen: no movement while stunned
+    for (let i = 0; i < 10; i++) sim.step();
+    const wMid = wolfById(sim, wid!)!;
+    expect(wMid.statuses).toContain('stun');
+    expect(wMid.x).toBe(x0);
+    expect(wMid.z).toBe(z0);
+
+    // pin the duration on both edges: still stunned at cast+19, gone at cast+20
+    while (sim.tick < castTick + STUN_TICKS - 1) sim.step();
+    expect(wolfById(sim, wid!)!.statuses).toContain('stun');
+    sim.step(); // -> cast + STUN_TICKS
+    expect(wolfById(sim, wid!)!.statuses).not.toContain('stun');
+
+    // resumes: with the player fleeing nearby, the freed wolf acts again (chases -> moves)
+    const r0 = wolfById(sim, wid!)!;
+    const rx = r0.x;
+    const rz = r0.z;
+    for (let i = 0; i < 20; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: WORLD_HALF - p.x, dz: WORLD_HALF - p.z });
+      sim.step();
+    }
+    const r1 = wolfById(sim, wid!)!;
+    expect(Math.hypot(r1.x - rx, r1.z - rz)).toBeGreaterThan(0); // it moved -> resumed acting
+  });
+
+  it('dot: a bleed drains HP by its magnitude on each period tick, then stops at expiry', () => {
+    const sim = new Sim(7);
+    const wid = stunWolf(sim);
+    expect(wid).not.toBeNull();
+    const castTick = sim.tick;
+    expect(wolfById(sim, wid!)!.statuses).toContain('dot');
+    const hp0 = wolfById(sim, wid!)!.hp;
+
+    // HP flat until just before the first period tick (player idle + wolf stunned)
+    while (sim.tick < castTick + DOT_PERIOD - 1) sim.step();
+    expect(wolfById(sim, wid!)!.hp).toBe(hp0);
+    sim.step(); // first period tick (cast + period)
+    expect(wolfById(sim, wid!)!.hp).toBe(hp0 - DOT_MAG);
+    // second period tick removes exactly another magnitude
+    while (sim.tick < castTick + 2 * DOT_PERIOD) sim.step();
+    expect(wolfById(sim, wid!)!.hp).toBe(hp0 - 2 * DOT_MAG);
+    // exactly 3 ticks total (+10/+20/+30 over the 40-tick window), then flat after expiry
+    while (sim.tick < castTick + 45) sim.step();
+    const hpAfter = wolfById(sim, wid!)!.hp;
+    expect(hpAfter).toBe(hp0 - 3 * DOT_MAG);
+    for (let i = 0; i < 20; i++) sim.step();
+    expect(wolfById(sim, wid!)!.hp).toBe(hpAfter); // bleed ended -> HP no longer falling from it
+  });
+
+  it('slow: a slowed wolf chases at ~half speed (not full, and it does move)', () => {
+    const sim = new Sim(7);
+    const wid = stunWolf(sim);
+    expect(wid).not.toBeNull();
+    // wait out the stun (the longer slow is still active)
+    let guard = 0;
+    while (wolfById(sim, wid!)?.statuses.includes('stun') && guard++ < 100) sim.step();
+    expect(wolfById(sim, wid!)!.statuses).toContain('slow');
+
+    // open a real gap so the wolf must chase the whole window (player outruns it)
+    for (let i = 0; i < 12; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: WORLD_HALF - p.x, dz: WORLD_HALF - p.z });
+      sim.step();
+    }
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    const before = wolfById(sim, wid!)!;
+    expect(before.statuses).toContain('slow');
+    const bx = before.x;
+    const bz = before.z;
+    const p = player(sim);
+    expect(Math.hypot(p.x - bx, p.z - bz)).toBeGreaterThan(2); // gap > CONTACT_DIST for the window
+    const K = 8;
+    for (let i = 0; i < K; i++) sim.step();
+    const after = wolfById(sim, wid!)!;
+    const moved = Math.hypot(after.x - bx, after.z - bz);
+    const fullSpeedDist = ENEMY_SPEED * DT * K; // distance an UN-slowed wolf would cover
+    // slow factor is 0.5 -> pin BOTH sides around ~0.5x (not just "less than full")
+    expect(moved).toBeGreaterThan(fullSpeedDist * 0.4);
+    expect(moved).toBeLessThan(fullSpeedDist * 0.65);
+  });
+
+  it('the status lifecycle (apply -> expire -> cleanup) is deterministic (same seed => same hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      const wid = stunWolf(sim);
+      expect(wid).not.toBeNull();
+      for (let i = 0; i < 80; i++) sim.step(); // past all effects (slow 60t) -> cleanup fingerprinted
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});
 
 describe('player death & respawn', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
