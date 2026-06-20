@@ -10,6 +10,7 @@
 // server runs ONE Sim for everyone and the client mirrors snapshots.
 
 import { Rng } from './rng';
+import { applyMove } from './movement';
 import type { Entity, ItemStack } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
@@ -44,7 +45,7 @@ export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
 export const WORLD_HALF = 60; // world spans -WORLD_HALF..WORLD_HALF on X and Z
 
-const PLAYER_SPEED = 6; // units/sec
+export const PLAYER_SPEED = 6; // units/sec (also reused by the authoritative server)
 export const ENEMY_SPEED = 2.4; // units/sec
 export const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
@@ -1379,14 +1380,12 @@ export class Sim implements IWorld {
     if (p.deadUntil !== 0) return; // frozen while a spirit
     if (this.isIncapacitated(p) || this.isRooted(p)) return; // can't move while stunned or rooted
     if (this.moveIntent.t !== 'move') return;
-    const len = Math.hypot(this.moveIntent.dx, this.moveIntent.dz);
-    if (len < 1e-4) return;
-    const nx = this.moveIntent.dx / len;
-    const nz = this.moveIntent.dz / len;
-    const speed = PLAYER_SPEED * this.slowFactor(p); // slow -> slower movement
-    p.x = clamp(p.x + nx * speed * DT, -WORLD_HALF, WORLD_HALF);
-    p.z = clamp(p.z + nz * speed * DT, -WORLD_HALF, WORLD_HALF);
-    p.facing = Math.atan2(nx, nz);
+    // Same integration the server runs (src/sim/movement.ts); slow debuffs cut speed.
+    const m = applyMove(p.x, p.z, this.moveIntent.dx, this.moveIntent.dz, PLAYER_SPEED * this.slowFactor(p), DT, WORLD_HALF);
+    if (!m) return;
+    p.x = m.x;
+    p.z = m.z;
+    p.facing = m.facing;
   }
 
   // Enemy AI. An idle enemy pulls aggro when a living player comes within its

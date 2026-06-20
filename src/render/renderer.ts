@@ -287,8 +287,10 @@ export class Renderer {
 
   // The 3D model that should represent an entity, once loaded: the Knight for the
   // player, a skeleton for enemies/boss. Null => not ready yet (use the capsule).
-  private desiredRoot(e: EntityView): THREE.Object3D | null {
-    if (e.kind === 'player') return this.playerAvatar.ready ? this.playerAvatar.root : null;
+  private desiredRoot(e: EntityView, localId: number | null): THREE.Object3D | null {
+    // The single Knight avatar is the LOCAL player's. Other players (multiplayer)
+    // fall back to the capsule — one mesh per id — so they don't share the one avatar.
+    if (e.kind === 'player') return e.id === localId && this.playerAvatar.ready ? this.playerAvatar.root : null;
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
     if (e.kind === 'npc') return this.vendorAvatar.ready ? this.vendorAvatar.root : null; // the vendor
     return null;
@@ -297,6 +299,7 @@ export class Renderer {
   private sync(world: IWorld): void {
     const seen = new Set<number>();
     const targetId = world.localTargetId();
+    const localId = world.localPlayerId();
     let targetView: EntityView | undefined;
     for (const e of world.entities()) {
       seen.add(e.id);
@@ -304,7 +307,7 @@ export class Renderer {
       // Player -> Knight avatar, common enemy/boss -> skeleton avatar, once each
       // model has loaded; until then (and for NPCs) the capsule is the fallback.
       // Swap on the first frame the model is ready.
-      const root = this.desiredRoot(e);
+      const root = this.desiredRoot(e, localId);
       if (root) {
         if (m !== root) {
           if (m) this.scene.remove(m);

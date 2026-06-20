@@ -6,16 +6,22 @@
   "description": "Open-world online RPG, built in the spirit of World of ClaudeCraft.",
   "scripts": {
     "dev": "vite",
+    "server": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p server/tsconfig.json",
+    "typecheck:server": "tsc --noEmit -p server/tsconfig.json"
   },
   "dependencies": {
-    "three": "^0.169.0"
+    "three": "^0.169.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.0",
     "@types/three": "^0.169.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.4"
