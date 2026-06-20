@@ -8,6 +8,7 @@ import { Renderer } from './render/renderer';
 import { Input } from './game/input';
 import { Hud } from './ui/hud';
 import { CombatText } from './ui/combat_text';
+import { Recorder, ClipRecorder } from './ui/recorder';
 
 const WORLD_SEED = 1337; // fixed seed -> the world is the same place every load
 const FCT_WORLD_Y = 2.2; // height (just above the head) where damage numbers pop
@@ -18,6 +19,17 @@ const renderer = new Renderer(canvas);
 const input = new Input(canvas, renderer);
 const hud = new Hud();
 const combatText = new CombatText();
+new Recorder(canvas); // in-game ● REC button (captures the 3D canvas to .webm)
+// 🎬 Clipe: one-click 15s auto-clip in two files (clean + with-HUD) for the "Dia N"
+// evolution series. Decoupled via small hooks — it never imports Sim/Renderer directly.
+new ClipRecorder(canvas, {
+  isBotOn: () => sim.botActive(),
+  setBot: (on) => sim.sendCommand({ t: 'set-bot', on }),
+  getTarget: () => sim.localTargetId(),
+  setTarget: (id) => sim.sendCommand({ t: 'set-target', id }),
+  setClipTime: (t) => renderer.setClipTime(t),
+  setClipCamera: (on) => renderer.setClipCamera(on),
+});
 
 let last = performance.now() / 1000;
 let acc = 0;

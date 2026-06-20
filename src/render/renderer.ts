@@ -11,6 +11,14 @@ import { setupEnvironment, terrainHeight, type Environment } from './environment
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
+// "Clipe do Commit" framing. IMPORTANT: a clip changes ONLY pitch + distance,
+// NEVER the camera yaw. `yaw` is the reference input.ts uses to map WASD to world
+// space, and it's what decides how world-space motion reads on screen — so rotating
+// it to a cinematic angle made the (world-correct) bot look like it was walking the
+// wrong way and jittering. Keeping the player's own yaw makes the clip purely visual.
+const CLIP_CAM_PITCH = 0.55; // a touch higher than the default for nicer framing
+const CLIP_CAM_DIST = 15; // pulled back slightly so more of the scene is in frame
+
 export class Renderer {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
@@ -50,6 +58,9 @@ export class Renderer {
   private camYaw = 0;
   private camPitch = 0.5;
   private camDist = 14;
+  // saved player framing (pitch + distance) while a clip applies its own; the YAW
+  // is deliberately left untouched so the movement reference never changes.
+  private clipCamSaved: { pitch: number; dist: number } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -102,6 +113,32 @@ export class Renderer {
     this.camDist = clamp(this.camDist + d, 6, 32);
   }
 
+  // ---- "Clipe do Commit" hooks (presentation only; never touch the sim) ----
+  // Freeze/restore the day/night cycle so every clip in the series shares one light.
+  setClipTime(t: number | null): void {
+    this.env.setTimeOverride(t);
+  }
+
+  // Apply / restore the clip framing. Only PITCH + DISTANCE change — never yaw —
+  // because input.ts derives movement direction from yaw and the on-screen reading
+  // of motion follows it; changing it mid-clip would make the bot/player look like
+  // they're walking the wrong way. So the clip camera stays purely visual.
+  setClipCamera(on: boolean): void {
+    if (on) {
+      if (this.clipCamSaved) return;
+      this.clipCamSaved = { pitch: this.camPitch, dist: this.camDist };
+      this.camPitch = CLIP_CAM_PITCH;
+      this.camDist = CLIP_CAM_DIST;
+    } else if (this.clipCamSaved) {
+      this.camPitch = this.clipCamSaved.pitch;
+      this.camDist = this.clipCamSaved.dist;
+      this.clipCamSaved = null;
+    }
+  }
+
+  // The camera orbit angle AND the reference input.ts uses to map WASD to world
+  // space. A clip never overrides yaw (see setClipCamera), so movement direction is
+  // always independent of clip framing — the bot/player keep their normal heading.
   get yaw(): number {
     return this.camYaw;
   }
