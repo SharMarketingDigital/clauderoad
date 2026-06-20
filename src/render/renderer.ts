@@ -2,6 +2,9 @@
 // It must NEVER mutate the world or decide gameplay outcomes.
 import * as THREE from 'three';
 import type { IWorld, EntityKind, EntityView } from '../world_api';
+import { PlayerAvatar } from './player_avatar';
+import { EnemyAvatars } from './enemy_avatars';
+import { populateForest } from './forest';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -18,6 +21,21 @@ export class Renderer {
   private flashes = new Map<number, number>();
   private lastRenderMs = 0;
   private projV = new THREE.Vector3(); // scratch for project()
+
+  // The local player's animated 3D avatar (KayKit Knight). Loads async; until it's
+  // ready the player stays a capsule. All state below is presentation-derived from
+  // IWorld each frame — the sim is never touched.
+  private playerAvatar = new PlayerAvatar();
+  private lastCd = new Map<number, number>(); // per ability slot: last cooldown — a jump up means it was just cast
+  private lastSeenSeq = 0; // cursor over sim events, to spot NEW hits we dealt (own, separate from main.ts)
+  private playerPrevX = 0;
+  private playerPrevZ = 0;
+  private playerLastMoveMs = 0; // host time of the player's last position change (for idle vs walk)
+
+  // Enemies/boss as animated 3D skeletons (one mixer each). Loads async; capsule
+  // is the fallback until ready. Read-only consumer of IWorld, like everything here.
+  private enemyAvatars = new EnemyAvatars();
+  private lastEnemyHitSeq = 0; // cursor: spot NEW damage events on the player (to lunge the attacker)
 
   // third-person orbit camera state
   private camYaw = 0;
@@ -48,7 +66,9 @@ export class Renderer {
     this.selectionRing = makeSelectionRing();
     this.scene.add(this.selectionRing);
 
-    this.scatterTrees();
+    // Decorative scenery: real KayKit forest models, loaded async and scattered.
+    // Fire-and-forget — the game runs while it loads; failure just leaves it bare.
+    populateForest(this.scene).catch((err) => console.error('[forest] failed to load', err));
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -71,31 +91,6 @@ export class Renderer {
       }
     }
     return null;
-  }
-
-  // Purely decorative scenery (visual only, outside the sim). A tiny local
-  // PRNG keeps it stable per load without touching the sim's Rng.
-  private scatterTrees(): void {
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5b3a21 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f5d2f });
-    let s = 0x1234;
-    const rnd = (): number => {
-      s = (s * 1103515245 + 12345) & 0x7fffffff;
-      return s / 0x7fffffff;
-    };
-    for (let i = 0; i < 90; i++) {
-      const x = (rnd() * 2 - 1) * 68;
-      const z = (rnd() * 2 - 1) * 68;
-      if (Math.hypot(x, z) < 6) continue; // keep spawn clear
-      const g = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.45, 2, 6), trunkMat);
-      trunk.position.y = 1;
-      const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.7, 3.6, 7), leafMat);
-      leaves.position.y = 3.5;
-      g.add(trunk, leaves);
-      g.position.set(x, 0, z);
-      this.scene.add(g);
-    }
   }
 
   orbit(dYaw: number, dPitch: number): void {
@@ -134,8 +129,100 @@ export class Renderer {
 
     this.sync(world);
     this.applyFlashes(dt);
+    this.updatePlayerAvatar(world, dt);
+    this.updateEnemyAvatars(world, dt);
     this.updateCamera(world);
     this.gl.render(this.scene, this.camera);
+  }
+
+  // Drive each enemy skeleton: idle vs walk by movement, and a short lunge when it
+  // hits the player. Read-only — derives everything from IWorld.
+  private updateEnemyAvatars(world: IWorld, dt: number): void {
+    if (!this.enemyAvatars.ready) return;
+    const nowMs = this.lastRenderMs;
+    const ents = world.entities();
+
+    // Attack read: a NEW damage event on the player -> lunge the nearest hostile
+    // enemy in melee (the sim doesn't say which one hit, so pick the likeliest).
+    const playerId = world.localPlayerId();
+    let playerHit = false;
+    let maxSeq = this.lastEnemyHitSeq;
+    for (const ev of world.recentEvents()) {
+      if (ev.seq > maxSeq) maxSeq = ev.seq;
+      if (ev.seq <= this.lastEnemyHitSeq) continue;
+      if (ev.kind === 'damage' && playerId != null && ev.targetId === playerId) playerHit = true;
+    }
+    this.lastEnemyHitSeq = maxSeq;
+    if (playerHit && playerId != null) {
+      const p = ents.find((e) => e.id === playerId);
+      if (p) {
+        let best = -1;
+        let bestD = 16; // (~4 units)^2 — only melee-range attackers lunge
+        for (const e of ents) {
+          if (e.kind !== 'enemy' || !e.hostile || !this.enemyAvatars.has(e.id)) continue;
+          const d = (e.x - p.x) ** 2 + (e.z - p.z) ** 2;
+          if (d < bestD) { bestD = d; best = e.id; }
+        }
+        if (best !== -1) this.enemyAvatars.triggerAttack(best);
+      }
+    }
+
+    for (const e of ents) {
+      if (e.kind === 'enemy' && this.enemyAvatars.has(e.id)) {
+        this.enemyAvatars.update(e.id, dt, e.x, e.z, nowMs);
+      }
+    }
+  }
+
+  // Drive the player's animated avatar from world state (presentation only):
+  // idle vs walk by movement, and a one-shot attack swing on auto-attack / Golpe
+  // Forte. Everything here READS IWorld; it never mutates the sim.
+  private updatePlayerAvatar(world: IWorld, dt: number): void {
+    if (!this.playerAvatar.ready) return;
+    const id = world.localPlayerId();
+    if (id == null) return;
+    const p = world.entities().find((e) => e.id === id);
+    if (!p) return;
+
+    // The sim only moves the player on a 20Hz tick, so position is static between
+    // ticks; smooth over ~180ms so walking doesn't flicker back to idle.
+    if (Math.hypot(p.x - this.playerPrevX, p.z - this.playerPrevZ) > 1e-3) {
+      this.playerLastMoveMs = this.lastRenderMs;
+      this.playerPrevX = p.x;
+      this.playerPrevZ = p.z;
+    }
+    const moving = !p.dead && this.lastRenderMs - this.playerLastMoveMs < 180;
+
+    // Abilities: a slot's cooldown jumping UP means it was just cast this frame.
+    let castSlot = 0;
+    for (const a of world.abilities()) {
+      const prev = this.lastCd.get(a.slot) ?? 0;
+      if (a.cooldownRemaining > prev + 0.05) castSlot = a.slot;
+      this.lastCd.set(a.slot, a.cooldownRemaining);
+    }
+
+    // Did we deal damage to our target this frame? (auto-attack OR an attack ability).
+    const targetId = world.localTargetId();
+    let dealt = false;
+    let maxSeq = this.lastSeenSeq;
+    for (const ev of world.recentEvents()) {
+      if (ev.seq > maxSeq) maxSeq = ev.seq;
+      if (ev.seq <= this.lastSeenSeq) continue;
+      if (ev.kind === 'damage' && targetId != null && ev.targetId === targetId) dealt = true;
+    }
+    this.lastSeenSeq = maxSeq;
+
+    // A cast that also dealt damage = an attack ability (Golpe Forte, Atordoamento) ->
+    // always swing, heavier for Golpe Forte (slot 1). A cast with NO damage is a buff
+    // (Postura) -> no swing for now. Otherwise a plain auto-attack swings (gated so a
+    // bleed tick can't spam it mid-swing).
+    if (castSlot !== 0 && dealt) {
+      this.playerAvatar.triggerAttack(castSlot === 1);
+    } else if (dealt && !this.playerAvatar.isSwinging()) {
+      this.playerAvatar.triggerAttack(false);
+    }
+
+    this.playerAvatar.update(dt, moving);
   }
 
   private applyFlashes(dt: number): void {
@@ -152,6 +239,14 @@ export class Renderer {
     }
   }
 
+  // The 3D model that should represent an entity, once loaded: the Knight for the
+  // player, a skeleton for enemies/boss. Null => not ready yet (use the capsule).
+  private desiredRoot(e: EntityView): THREE.Object3D | null {
+    if (e.kind === 'player') return this.playerAvatar.ready ? this.playerAvatar.root : null;
+    if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
+    return null; // NPCs (the vendor) stay capsules
+  }
+
   private sync(world: IWorld): void {
     const seen = new Set<number>();
     const targetId = world.localTargetId();
@@ -159,7 +254,19 @@ export class Renderer {
     for (const e of world.entities()) {
       seen.add(e.id);
       let m = this.meshes.get(e.id);
-      if (!m) {
+      // Player -> Knight avatar, common enemy/boss -> skeleton avatar, once each
+      // model has loaded; until then (and for NPCs) the capsule is the fallback.
+      // Swap on the first frame the model is ready.
+      const root = this.desiredRoot(e);
+      if (root) {
+        if (m !== root) {
+          if (m) this.scene.remove(m);
+          m = root;
+          m.userData.entityId = e.id;
+          this.scene.add(m);
+          this.meshes.set(e.id, m);
+        }
+      } else if (!m) {
         m = makeActor(e.kind, e.boss);
         // Champion/Elite wolves are drawn larger so the tier reads at a glance.
         if (e.kind === 'enemy' && !e.boss) m.scale.setScalar(TIER_SCALE[e.tier] ?? 1);
@@ -179,6 +286,7 @@ export class Renderer {
       if (!seen.has(id)) {
         this.scene.remove(m);
         this.meshes.delete(id);
+        this.enemyAvatars.release(id); // dispose a skeleton avatar if this id was one
       }
     }
     // Park the selection ring under the current target (if any).
