@@ -24,6 +24,8 @@ import {
   ATTR_POINTS_PER_LEVEL,
   ATTR_STR_PER_POINT,
   MP_PER_INT,
+  BOT_HEAL_FRAC,
+  BOT_MATERIAL_RESERVE,
   inFrontOf,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
@@ -2454,6 +2456,158 @@ describe('bot (auto-play)', () => {
     };
     expect(botRun(7)).toBe(botRun(7));
     expect(botRun(7)).not.toBe(botRun(123));
+  });
+});
+
+// --- helpers for the smarter-bot (self-sufficiency) tests ---
+const bagQty = (sim: Sim, itemId: string): number =>
+  sim.inventory().stacks.filter((s) => s.itemId === itemId).reduce((a, s) => a + s.qty, 0);
+
+// Walk the player INTO the nearest wolves with NO target (takes bites, never swings
+// back) until HP drops below `frac` of max — bounded, and without dying. Bot OFF.
+function hurtBelow(sim: Sim, frac: number): void {
+  for (let i = 0; i < 4000; i++) {
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    if (!p.dead && p.hp < p.maxHp * frac) break;
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    if (wolves.length) {
+      wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+      const w = wolves[0];
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+    }
+    sim.step();
+  }
+  sim.sendCommand({ t: 'stop' });
+  sim.step();
+}
+
+// Walk the player to the vendor until in trading range (bot OFF).
+function goToVendor(sim: Sim): void {
+  for (let i = 0; i < 1500 && !sim.shop().inRange; i++) {
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
+    sim.step();
+  }
+  sim.sendCommand({ t: 'stop' });
+  sim.sendCommand({ t: 'set-target', id: null });
+  sim.step();
+}
+
+// At the vendor: sell off every equippable item in the bag (frees slots + funds buys).
+function sellAllGear(sim: Sim): void {
+  for (let pass = 0; pass < 60; pass++) {
+    const gear = sim.inventory().stacks.find((s) => s.equipSlot != null);
+    if (!gear) break;
+    sim.sendCommand({ t: 'sell', itemId: gear.itemId, rarity: gear.rarity, plus: gear.plus });
+    sim.step();
+  }
+}
+
+// Buy one of a vendor item (bot OFF; must already be in range and able to afford it).
+function buyOne(sim: Sim, itemId: string): void {
+  sim.sendCommand({ t: 'buy', itemId });
+  sim.step();
+}
+
+// At the vendor: sell an item down to exactly `target` held (to neutralize drops).
+function sellDownTo(sim: Sim, itemId: string, target: number): void {
+  for (let pass = 0; pass < 40 && bagQty(sim, itemId) > target; pass++) {
+    const s = sim.inventory().stacks.find((x) => x.itemId === itemId)!;
+    sim.sendCommand({ t: 'sell', itemId, rarity: s.rarity, plus: s.plus });
+    sim.step();
+  }
+}
+
+// The smarter bot looks after itself: heals, gears up, sells junk, and refines its
+// equipment with spare materials while always keeping a reserve. Each test sets the
+// stage with plain commands (bot OFF), then flips the bot on and pins the decision.
+describe('bot (auto-play): self-sufficiency', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('survival: below the heal threshold it drinks a Health Potion', () => {
+    const sim = new Sim(7);
+    // stock a couple of potions from drops, hands-on (bot OFF — nothing is drunk yet)
+    let g = 0;
+    while (bagQty(sim, 'health_potion') < 2 && g++ < 400) killNearestEnemy(sim);
+    expect(bagQty(sim, 'health_potion')).toBeGreaterThanOrEqual(2);
+    // take bites until below the heal threshold, without dying
+    hurtBelow(sim, BOT_HEAL_FRAC);
+    expect(player(sim).hp).toBeLessThan(player(sim).maxHp * BOT_HEAL_FRAC);
+    expect(player(sim).hp).toBeGreaterThan(0);
+    const hp0 = player(sim).hp;
+
+    // top survival priority: it quaffs a potion -> a heal event fires and HP jumps up
+    // (assert the heal, not the bag count: the same tick it may also loot a potion)
+    sim.sendCommand({ t: 'set-bot', on: true });
+    sim.step();
+    expect(sim.recentEvents().some((e) => e.kind === 'heal')).toBe(true);
+    expect(player(sim).hp).toBeGreaterThan(hp0);
+  });
+
+  it('inventory: it auto-equips a looted upgrade (empty armor slot -> Couro de Lobo, raising max HP)', () => {
+    const sim = new Sim(7);
+    let g = 0;
+    while (bagQty(sim, 'wolf_leather') < 1 && g++ < 400) killNearestEnemy(sim);
+    expect(bagQty(sim, 'wolf_leather')).toBeGreaterThanOrEqual(1);
+    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBeNull();
+    const maxHp0 = player(sim).maxHp;
+
+    sim.sendCommand({ t: 'set-bot', on: true });
+    for (let i = 0; i < 12; i++) sim.step();
+
+    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
+    expect(player(sim).maxHp).toBeGreaterThan(maxHp0); // the +HP armor is now folded in
+  });
+
+  it('evolution: with spare materials in a safe lull, it enhances its equipped gear (keeping a reserve)', () => {
+    const sim = new Sim(7);
+    // farm a piece of armor + a purse, equip the armor (bot OFF)
+    let g = 0;
+    while ((bagQty(sim, 'wolf_leather') < 1 || player(sim).gold < 250) && g++ < 1200) killNearestEnemy(sim);
+    const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
+    expect(lea).toBeDefined();
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
+    sim.step();
+    // sell the rest of the gear for room + gold, then stock SPARE Armor Elixirs (above
+    // the reserve) + a few potions so it won't make a vendor run instead of enhancing
+    goToVendor(sim);
+    sellAllGear(sim);
+    for (let i = 0; i < BOT_MATERIAL_RESERVE + 2; i++) buyOne(sim, 'elixir_armor');
+    for (let i = 0; i < 3; i++) buyOne(sim, 'health_potion');
+    expect(bagQty(sim, 'elixir_armor')).toBeGreaterThan(BOT_MATERIAL_RESERVE);
+
+    // step away to a lull and let the bot run: it attempts a refine (an enhance event)
+    fleeToSafety(sim);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    let enhanced = false;
+    for (let i = 0; i < 24 && !enhanced; i++) {
+      sim.step();
+      enhanced = sim.recentEvents().some((e) => e.kind === 'enhance-success' || e.kind === 'enhance-fail');
+    }
+    expect(enhanced).toBe(true); // it spent a surplus Elixir on an enhance attempt
+    expect(bagQty(sim, 'elixir_armor')).toBeGreaterThanOrEqual(BOT_MATERIAL_RESERVE); // reserve kept
+  });
+
+  it('evolution: it never enhances down past the material reserve', () => {
+    const sim = new Sim(7);
+    let g = 0;
+    while ((bagQty(sim, 'wolf_leather') < 1 || player(sim).gold < 160) && g++ < 1200) killNearestEnemy(sim);
+    const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
+    sim.step();
+    goToVendor(sim);
+    sellAllGear(sim);
+    sellDownTo(sim, 'elixir_armor', 0); // dump any Elixirs that dropped while farming
+    for (let i = 0; i < BOT_MATERIAL_RESERVE; i++) buyOne(sim, 'elixir_armor'); // hold EXACTLY the reserve
+    for (let i = 0; i < 3; i++) buyOne(sim, 'health_potion');
+    expect(bagQty(sim, 'elixir_armor')).toBe(BOT_MATERIAL_RESERVE);
+
+    // a safe lull holding only the reserve: it's IN the enhance path but must not spend
+    fleeToSafety(sim);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    for (let i = 0; i < 12; i++) sim.step();
+    expect(bagQty(sim, 'elixir_armor')).toBe(BOT_MATERIAL_RESERVE); // reserve untouched
+    expect(sim.recentEvents().some((e) => e.kind === 'enhance-success' || e.kind === 'enhance-fail')).toBe(false);
   });
 });
 

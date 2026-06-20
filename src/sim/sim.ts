@@ -53,7 +53,29 @@ export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type ene
 export const DEATH_RESPAWN_TICKS = 5 * TICK_RATE;
 const PLAYER_SPAWN_X = 0; // the "graveyard"/safe point a downed player wakes up at
 const PLAYER_SPAWN_Z = 0;
-const BOT_LOW_HP_FRAC = 0.35; // auto-play drinks/retreats below this fraction of max HP
+// ---------- auto-play bot tuning (all deterministic; priority: SURVIVE > EVOLVE) ----------
+// Survival
+export const BOT_HEAL_FRAC = 0.4; // drink a Health Potion below this fraction of max HP
+const BOT_CAUTION_FRAC = 0.6; // below this, play safe: normal mobs only, avoid pulling a pack
+const BOT_FLEE_RADIUS = 11; // with no usable potion, back away from threats this close
+// Build (attribute spend): Força-first, with a little Intelligence for a usable MP pool
+const BOT_INT_TARGET_MP = 130; // invest INT until maxMp reaches this, then pour into STR
+const BOT_SPEND_MP_FRAC = 0.5; // on trivial foes, only spend MP on abilities while above this
+// Inventory & vendor
+const BOT_BAG_HEADROOM = 3; // make a vendor run to sell once free bag slots drop to this
+const BOT_POTION_STOCK = 5; // restock Health Potions up to this many
+const BOT_GOLD_RESERVE = 80; // keep at least this much gold for non-essential (material) buys
+// Alchemy (enhance): refine equipped gear with spare materials, always keep a reserve
+export const BOT_MATERIAL_RESERVE = 2; // never spend an Elixir / Lucky Powder below this count
+const BOT_ENHANCE_SAFE_RADIUS = 11; // only enhance during a lull (nearest enemy beyond this)
+const BOT_LUCKY_BELOW_CHANCE = 0.7; // spend a Lucky Powder only when base success dips under this
+// Target selection: braver as it levels up
+const BOT_CHAMPION_MIN_LEVEL = 3;
+const BOT_ELITE_MIN_LEVEL = 5;
+const BOT_BOSS_MIN_LEVEL = 8;
+const BOT_BOSS_MIN_POTIONS = 3; // attempt the world boss only with a stock of potions
+const BOT_CLUSTER_RADIUS = 6; // other enemies within this of a candidate form a "cluster"
+const BOT_CLUSTER_PENALTY = 100; // when cautious, bias away from clustered targets (units²)
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
@@ -715,39 +737,59 @@ export class Sim implements IWorld {
   }
 
   // ---------- bot (auto-play) ----------
-  // Decide the player's actions for this tick when auto-play is on. ALL decisions
-  // are deterministic functions of world state (no Rng/clock), and every action
-  // goes through the SAME applyAction path a human's commands use — the bot never
-  // bypasses the simulation (it respects range, cooldowns, MP, swing timers).
+  // Decide the player's actions for this tick when auto-play is on. The goal is a
+  // hands-off run that SUSTAINS itself and keeps evolving. Decisions run in strict
+  // priority order — SURVIVE > TEND THE BAG > EVOLVE GEAR > HUNT — and every action
+  // goes through the SAME applyAction path a human's commands use, so the bot never
+  // bypasses the sim (it respects range, cooldowns, MP, gold, the bag). ALL of it is
+  // a deterministic function of world state (no Rng/clock in the decisions), so the
+  // same seed + commands still produce an identical world.
   private botStep(p: Entity): void {
-    // a spirit or a stunned actor can't act — just hold (respawn / stun-end is automatic)
+    // a spirit or a stunned/knocked actor can't act — hold (revive/stun-end is automatic)
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) {
       this.moveIntent = { t: 'stop' };
       return;
     }
-    // spend any earned attribute points (pump Strength for faster kills)
-    while (p.attrPoints > 0) this.applyAction(p, { t: 'spend-attr', attr: 'str' });
 
-    const target = this.nearestEnemy(p);
-    const lowHp = p.hp < p.maxHp * BOT_LOW_HP_FRAC;
-    const potion = this.bagStack(p, 'health_potion'); // an actual held stack, exact rarity/plus
+    // Always cheap & safe: bank attribute points, and wear the best gear we own.
+    this.botSpendAttrs(p);
+    this.botEquipBest(p);
 
-    // low HP: drink a potion if we hold one (the no-op is harmless if it's on cooldown)
-    if (lowHp && potion) {
-      this.applyAction(p, { t: 'use-item', itemId: potion.itemId, rarity: potion.rarity, plus: potion.plus });
-    }
-    // low HP, no potion, and an enemy in our face -> back off to disengage and survive
-    if (lowHp && !potion && target) {
-      const dxe = target.x - p.x;
-      const dze = target.z - p.z;
-      const dangerR = ENEMY_TEMPLATE.aggroRadius + 1;
-      if (dxe * dxe + dze * dze <= dangerR * dangerR) {
-        this.moveIntent = { t: 'move', dx: p.x - target.x, dz: p.z - target.z }; // away
-        return;
+    const hpFrac = p.hp / p.maxHp;
+
+    // === PRIORITY 1 — SURVIVE =============================================
+    if (hpFrac < BOT_HEAL_FRAC) {
+      const drank = this.botDrinkPotion(p);
+      if (!drank) {
+        // can't heal now (none held, or potion still on cooldown): break off from danger
+        const threat = this.nearestEnemyWithin(p, BOT_FLEE_RADIUS);
+        if (threat) {
+          this.moveIntent = { t: 'move', dx: p.x - threat.x, dz: p.z - threat.z };
+          return;
+        }
       }
     }
 
-    // hunt: pick the nearest enemy, close to range, and attack it
+    // === PRIORITY 2 — TEND THE BAG (sell junk / restock at the vendor) =====
+    if (this.botWantsVendor(p)) {
+      if (this.nearVendor(p)) {
+        this.botTrade(p); // sell surplus gear, top up potions, buy spare materials
+      } else {
+        const v = this.ents.get(this.vendorId);
+        if (v) {
+          this.moveIntent = { t: 'move', dx: v.x - p.x, dz: v.z - p.z };
+          return; // walk to the shop
+        }
+      }
+    }
+
+    // === PRIORITY 3 — EVOLVE GEAR (enhance during a lull, keep a reserve) ==
+    if (!this.nearestEnemyWithin(p, BOT_ENHANCE_SAFE_RADIUS)) {
+      this.botEnhance(p);
+    }
+
+    // === PRIORITY 4 — HUNT ================================================
+    const target = this.botChooseTarget(p);
     if (!target) {
       this.moveIntent = { t: 'stop' };
       return;
@@ -756,27 +798,223 @@ export class Sim implements IWorld {
     const dx = target.x - p.x;
     const dz = target.z - p.z;
     const reach = this.attackRange(p) - 0.4;
-    this.moveIntent =
-      dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' };
-    // fire every ready ability of the active kit (useAbility gates GCD / cooldown / MP / range)
-    for (const def of this.activeMastery(p).abilities) {
-      this.applyAction(p, { t: 'use-ability', slot: def.slot });
+    this.moveIntent = dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' };
+    this.botUseAbilities(p, target);
+  }
+
+  // Força-first build: invest a little Intelligence until the MP pool can sustain a
+  // few ability casts, then pour everything into Strength (more damage). Spends ALL
+  // banked points each tick, so none ever sit idle.
+  private botSpendAttrs(p: Entity): void {
+    while (p.attrPoints > 0) {
+      this.applyAction(p, { t: 'spend-attr', attr: p.maxMp < BOT_INT_TARGET_MP ? 'int' : 'str' });
     }
   }
 
-  // The nearest living enemy by squared distance (id breaks ties -> deterministic).
-  private nearestEnemy(p: Entity): Entity | undefined {
+  // Wear the strictly-best item we own in each slot. Weapons are only swapped for a
+  // better one of the SAME mastery, so the bot upgrades within its style and never
+  // flip-flops its whole kit. The displaced piece drops to the bag (later sold).
+  private botEquipBest(p: Entity): void {
+    const activeId = this.activeMastery(p).id;
+    for (const slot of EQUIP_SLOTS) {
+      const eq = p.equipment[slot];
+      let bestScore = eq ? botGearScore(eq.itemId, eq.rarity, eq.plus) : -1;
+      let best: ItemStack | undefined;
+      for (const s of p.bag) {
+        const def = ITEMS[s.itemId];
+        if (!def || def.slot !== slot) continue;
+        if (slot === 'weapon' && (def.mastery ?? DEFAULT_MASTERY) !== activeId) continue;
+        const score = botGearScore(s.itemId, s.rarity, s.plus);
+        if (score > bestScore) { bestScore = score; best = s; }
+      }
+      if (best) this.applyAction(p, { t: 'equip', itemId: best.itemId, rarity: best.rarity, plus: best.plus });
+    }
+  }
+
+  // Drink a Health Potion if we hold one and it's off the shared cooldown. Returns
+  // whether a drink actually happened (so the caller can fall back to fleeing).
+  private botDrinkPotion(p: Entity): boolean {
+    const potion = this.bagStack(p, 'health_potion');
+    if (!potion || this.tick < p.potionReadyAt) return false; // none held, or potion sickness
+    this.applyAction(p, { t: 'use-item', itemId: potion.itemId, rarity: potion.rarity, plus: potion.plus });
+    return true;
+  }
+
+  // Worth a trip to the vendor? When the bag is nearly full of sellable surplus, or
+  // we've run dry on Health Potions and can afford to restock at least one.
+  private botWantsVendor(p: Entity): boolean {
+    const bagPressure = BAG_SLOTS - p.bag.length <= BOT_BAG_HEADROOM && this.botJunkCount(p) > 0;
+    const potionPrice = botPrice('health_potion');
+    const outOfPotions = !this.bagStack(p, 'health_potion') && potionPrice > 0 && p.gold >= potionPrice;
+    return bagPressure || outOfPotions;
+  }
+
+  // At the vendor: sell every surplus piece of gear, restock potions (survival comes
+  // first, so this may spend down to the last gold), then put any gold above the
+  // reserve into alchemy materials so it can keep enhancing.
+  private botTrade(p: Entity): void {
+    for (const s of p.bag.filter((b) => this.botIsJunk(b)).map((b) => ({ ...b }))) {
+      for (let i = 0; i < s.qty; i++) {
+        this.applyAction(p, { t: 'sell', itemId: s.itemId, rarity: s.rarity, plus: s.plus });
+      }
+    }
+    const potionPrice = botPrice('health_potion');
+    while (potionPrice > 0 && this.botCount(p, 'health_potion') < BOT_POTION_STOCK
+      && p.gold >= potionPrice && this.botCanStock(p, 'health_potion')) {
+      this.applyAction(p, { t: 'buy', itemId: 'health_potion' });
+    }
+    for (const mat of ['elixir_weapon', 'elixir_armor', 'lucky_powder'] as const) {
+      const price = botPrice(mat);
+      while (price > 0 && this.botCount(p, mat) < BOT_MATERIAL_RESERVE + 2
+        && p.gold - price >= BOT_GOLD_RESERVE && this.botCanStock(p, mat)) {
+        this.applyAction(p, { t: 'buy', itemId: mat });
+      }
+    }
+  }
+
+  // True when buying one more (Normal, +0) of `itemId` is guaranteed to land — there
+  // is a free bag slot, or a matching stack to grow — so a buy-loop can never spin
+  // forever refusing the purchase on a full bag.
+  private botCanStock(p: Entity, itemId: string): boolean {
+    if (p.bag.length < BAG_SLOTS) return true;
+    return p.bag.some((s) => s.itemId === itemId && s.rarity === 'normal' && s.plus === 0);
+  }
+
+  // Refine the equipped gear when we hold materials ABOVE the reserve (never spend
+  // the last ones — "deixar uma reserva"). Weapon first (damage), then armor. One
+  // attempt per tick; a failed roll dips the "+", which is the mechanic — it just
+  // keeps trying as more materials accumulate. Lucky Powder only when the odds drop.
+  private botEnhance(p: Entity): void {
+    for (const slot of EQUIP_SLOTS) {
+      const eq = p.equipment[slot];
+      if (!eq || eq.plus >= MAX_PLUS) continue;
+      const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
+      if (this.botCount(p, elixirId) <= BOT_MATERIAL_RESERVE) continue; // keep a reserve
+      const useLucky = enhanceChance(eq.plus, false) < BOT_LUCKY_BELOW_CHANCE
+        && this.botCount(p, 'lucky_powder') > BOT_MATERIAL_RESERVE;
+      this.applyAction(p, { t: 'enhance', slot, useLuckyPowder: useLucky });
+      return; // at most one enhance attempt per tick
+    }
+  }
+
+  // Pick the best enemy to engage. Braver as it levels (champions, then elites, then
+  // the boss — and the boss only with the levels AND a potion stock). When hurt it
+  // plays safe: normal mobs only, biased toward isolated ones (avoid pulling a pack).
+  private botChooseTarget(p: Entity): Entity | undefined {
+    const cautious = p.hp < p.maxHp * BOT_CAUTION_FRAC;
+    const canBoss = !cautious && p.level >= BOT_BOSS_MIN_LEVEL
+      && this.botCount(p, 'health_potion') >= BOT_BOSS_MIN_POTIONS;
+    let best: Entity | undefined;
+    let bestScore = Infinity;
+    for (const e of this.ents.values()) {
+      if (e.kind !== 'enemy' || e.hp <= 0) continue;
+      if (e.boss) {
+        if (!canBoss) continue;
+      } else if (cautious && e.tier !== 'normal') {
+        continue; // hurt -> leave the tough ones alone
+      } else if (e.tier === 'elite' && p.level < BOT_ELITE_MIN_LEVEL) {
+        continue;
+      } else if (e.tier === 'champion' && p.level < BOT_CHAMPION_MIN_LEVEL) {
+        continue;
+      }
+      let score = dist2(p, e);
+      if (cautious) score += this.botClusterCount(e) * BOT_CLUSTER_PENALTY;
+      if (best === undefined || score < bestScore || (score === bestScore && e.id < best.id)) {
+        bestScore = score;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  // Fire the active kit smartly (not just spam): always land plain damage strikes in
+  // reach (conserving MP on trivial foes), pop control (stun/knockdown) and the
+  // mitigation/burst buffs only when they matter, and area sweeps only into a crowd.
+  // useAbility still gates GCD / cooldown / MP / range, so this only decides INTENT.
+  private botUseAbilities(p: Entity, target: Entity): void {
+    const inReach = dist2(p, target) <= this.attackRange(p) ** 2;
+    const tough = target.boss || target.tier !== 'normal';
+    const hurt = p.hp < p.maxHp * BOT_CAUTION_FRAC;
+    const targetControlled = target.effects.some((s) => s.kind === 'stun' || s.kind === 'knockdown');
+    for (const def of this.activeMastery(p).abilities) {
+      const fx = (k: StatusKind): boolean => def.effects?.some((e) => e.kind === k) ?? false;
+      let want = false;
+      if (def.kind === 'buff') {
+        if (fx('defense')) want = tough || hurt; // brace only for a real fight / when low
+        else if (fx('crit')) want = inReach && tough; // pop the burst only on a tough target
+      } else if (fx('stun') || fx('knockdown')) {
+        want = inReach && !targetControlled && (tough || hurt); // control when it counts
+      } else if (def.shape === 'cone') {
+        want = inReach && !hurt && this.botEnemiesInRange(p) >= 2; // sweep only a crowd
+      } else if (def.charge) {
+        want = dist2(p, target) <= (def.castRange ?? this.attackRange(p)) ** 2; // close the gap
+      } else {
+        // plain damage strike (main rotation): spend MP freely on tough foes; on trivial
+        // ones only while MP is plentiful (no MP regen — save some for when it matters)
+        want = inReach && (tough || p.mp > p.maxMp * BOT_SPEND_MP_FRAC);
+      }
+      if (want) this.applyAction(p, { t: 'use-ability', slot: def.slot });
+    }
+  }
+
+  // ---------- bot helpers ----------
+  // The nearest living enemy within `radius` (squared distance; id breaks ties).
+  private nearestEnemyWithin(p: Entity, radius: number): Entity | undefined {
+    const r2 = radius * radius;
     let best: Entity | undefined;
     let bestD2 = Infinity;
     for (const e of this.ents.values()) {
       if (e.kind !== 'enemy' || e.hp <= 0) continue;
-      const d2 = (e.x - p.x) ** 2 + (e.z - p.z) ** 2;
-      if (d2 < bestD2 || (d2 === bestD2 && best !== undefined && e.id < best.id)) {
+      const d2 = dist2(p, e);
+      if (d2 > r2) continue;
+      if (best === undefined || d2 < bestD2 || (d2 === bestD2 && e.id < best.id)) {
         bestD2 = d2;
         best = e;
       }
     }
     return best;
+  }
+
+  // How many OTHER living enemies sit within a cluster radius of `e` (so the bot can
+  // avoid pulling a whole pack when it's hurt).
+  private botClusterCount(e: Entity): number {
+    const r2 = BOT_CLUSTER_RADIUS * BOT_CLUSTER_RADIUS;
+    let n = 0;
+    for (const o of this.ents.values()) {
+      if (o.kind !== 'enemy' || o.hp <= 0 || o.id === e.id) continue;
+      if (dist2(e, o) <= r2) n++;
+    }
+    return n;
+  }
+
+  // Count of living enemies within the player's attack range (gates area abilities).
+  private botEnemiesInRange(p: Entity): number {
+    const r2 = this.attackRange(p) ** 2;
+    let n = 0;
+    for (const e of this.ents.values()) {
+      if (e.kind === 'enemy' && e.hp > 0 && dist2(p, e) <= r2) n++;
+    }
+    return n;
+  }
+
+  // Total quantity of an item id across the bag (stacks may split by rarity/plus).
+  private botCount(p: Entity, itemId: string): number {
+    let n = 0;
+    for (const s of p.bag) if (s.itemId === itemId) n += s.qty;
+    return n;
+  }
+
+  // Surplus gear the bot would sell: any equippable item still in the bag (the best
+  // is already worn, so a bag piece is spare) that's worth gold. Consumables and
+  // alchemy materials are NOT junk — those are kept for survival/evolution.
+  private botIsJunk(s: ItemStack): boolean {
+    const def = ITEMS[s.itemId];
+    return def?.slot != null && rarityStat(def.value ?? 0, s.rarity) > 0;
+  }
+  private botJunkCount(p: Entity): number {
+    let n = 0;
+    for (const s of p.bag) if (this.botIsJunk(s)) n += s.qty;
+    return n;
   }
 
   // The first held stack of an item (so the bot uses the exact rarity/plus the
@@ -1419,6 +1657,21 @@ function dist2(a: { x: number; z: number }, b: { x: number; z: number }): number
   const dx = a.x - b.x;
   const dz = a.z - b.z;
   return dx * dx + dz * dz;
+}
+
+// A deterministic score for ranking gear the auto-play bot might wear: damage-
+// weighted, with HP worth less and MP least. Folds in rarity and "+N" using the
+// same scaling combat applies, so a rarer / more-enhanced piece ranks higher.
+function botGearScore(itemId: string, rarity: Rarity, plus: number): number {
+  const stats = ITEMS[itemId]?.stats;
+  if (!stats) return -1;
+  const v = (base?: number): number => enhanceStat(rarityStat(base ?? 0, rarity), plus);
+  return v(stats.weaponDamage) * 2 + v(stats.str) * 2 + v(stats.maxHp) + v(stats.maxMp) * 0.5;
+}
+
+// The vendor's BUY price for an item id, or 0 if the vendor doesn't stock it.
+function botPrice(itemId: string): number {
+  return VENDOR_STOCK.find((s) => s.itemId === itemId)?.price ?? 0;
 }
 
 // Stable 32-bit hash of a string, for folding item ids into the world hash().
