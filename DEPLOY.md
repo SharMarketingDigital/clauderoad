@@ -6,9 +6,11 @@ long-running Node process on a **VPS** (Contabo). They talk over the internet vi
 
 ```
   Browser (Vercel, https://<your-vercel-domain>)
-        │  wss://<your-server-domain>            (secure WebSocket)
+        │  wss://clauderoad.shar.com.br           (secure WebSocket)
         ▼
-  Reverse proxy (Caddy/nginx, TLS)  ──►  Node server (ws on 127.0.0.1:8080, under PM2)
+  Reverse proxy + TLS  ──►  ClaudeRoad server (ws on :8080)
+   • EasyPanel + Traefik (Docker container)  ← recommended; see "Deploy via EasyPanel"
+   • or bare VPS: Caddy/nginx + PM2          ← only if Traefik isn't already on the box
 ```
 
 > Replace every `<...>` placeholder with your real domain/IP.
@@ -29,7 +31,53 @@ long-running Node process on a **VPS** (Contabo). They talk over the internet vi
 
 ---
 
-## (a) Server on the VPS with PM2
+## Deploy via EasyPanel (Docker) — recommended
+
+If your VPS already runs **EasyPanel + Traefik** (alongside n8n, Supabase, Evolution API),
+deploy the ClaudeRoad server as an isolated **Docker container** using the `Dockerfile` in the
+repo root. Traefik already owns ports 80/443 and provisions TLS for every app, so you do **NOT**
+install Caddy/nginx and do **NOT** touch the host's 80/443. The container only exposes its
+internal port; Traefik routes the domain to it over the internal Docker network.
+
+**Client:** unchanged — goes on Vercel (see section (c)) with `VITE_SERVER_URL=wss://clauderoad.shar.com.br`.
+
+**Server — as an EasyPanel App:**
+1. **Create the App.** EasyPanel → your project → **+ Service → App**. Source: **GitHub** (this
+   repo, branch `main`). Build method: **Dockerfile** (EasyPanel auto-detects the root
+   `Dockerfile`). No build/start command needed — the Dockerfile builds the bundle and runs it.
+2. **Environment** (App → Environment):
+   ```
+   ALLOWED_ORIGINS=https://<your-vercel-domain>
+   # PORT=8080 and HOST=0.0.0.0 are already baked into the Dockerfile; override only if needed.
+   # SNAPSHOT_HZ=10   (optional)
+   ```
+   `ALLOWED_ORIGINS` must be your EXACT Vercel URL (scheme + host, no trailing slash), e.g.
+   `https://clauderoad.vercel.app` — the server rejects any other browser Origin.
+3. **Internal port.** Set the container's exposed/app port to **`8080`** (what the server
+   listens on). EasyPanel/Traefik reach it over the Docker network — **no host port is published**.
+4. **Domain.** App → Domains → add **`clauderoad.shar.com.br`** → container port `8080`. EasyPanel
+   provisions TLS automatically via Traefik (Let's Encrypt), so `https://`/`wss://` on that domain
+   just work. (Point the `clauderoad.shar.com.br` DNS A record at the VPS first.)
+5. **Deploy.** EasyPanel builds the image and starts the container. The Docker `HEALTHCHECK` hits
+   `/health`, so EasyPanel shows it healthy. Verify:
+   ```
+   curl https://clauderoad.shar.com.br/health      # -> ok
+   ```
+6. **Redeploy** on new commits: push to `main`, then hit **Deploy/Rebuild** in EasyPanel (or
+   enable auto-deploy on push).
+
+> The container is fully isolated: it depends on nothing from the host except the internal port
+> Traefik routes to. Inside the container it binds `0.0.0.0:8080` (so Traefik can reach it), runs
+> as a non-root user, and never binds a host port. Nothing about n8n/Supabase/Evolution/Traefik
+> is touched.
+
+---
+
+## (a) Alternative — bare VPS with PM2 + Caddy
+
+> ⚠️ Use this ONLY on a plain VPS where **no** reverse proxy already owns 80/443. If your box runs
+> **Traefik/EasyPanel**, skip this whole section (don't install Caddy, don't touch 80/443) — use
+> **Deploy via EasyPanel** above instead.
 
 Assumes a fresh Ubuntu/Debian VPS with a domain (e.g. `<your-server-domain>`) pointing at it.
 

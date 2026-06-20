@@ -1,0 +1,43 @@
+# Keep the Docker build context small + the image clean. The server build only needs
+# package files, tsconfig, server/, and the shared src/sim + src/net + world_api — the
+# Dockerfile copies those explicitly, so everything else can be excluded here.
+
+# deps + VCS + build outputs (re-created/installed in the build stage)
+node_modules
+**/node_modules
+.git
+.gitignore
+.github
+dist
+dist-server
+
+# secrets & deploy-local config — NEVER copy into the image
+.env
+.env.*
+ecosystem.config.cjs
+
+# 3D assets + raw asset packs (client-only, large — not needed by the server)
+public
+KayKit*
+KayKit_*
+Medieval*
+
+# client-only sources the server doesn't build
+index.html
+vite.config.ts
+src/main.ts
+src/vite-env.d.ts
+src/render
+src/ui
+src/game
+tests
+
+# docs / editor / OS cruft
+*.md
+.vscode
+.idea
+.DS_Store
+tmp
+*.local
+Dockerfile
+.dockerignore
