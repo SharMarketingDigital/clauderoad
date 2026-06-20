@@ -58,6 +58,17 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'use-ability', slot: cmd.slot });
         }
         return;
+      // --- Layer 2: personal progression (XP/level-up flow via `self`; spending here) ---
+      case 'spend-attr':
+        if (cmd.attr === 'str' || cmd.attr === 'int') {
+          this.sim.sendCommandFor(id, { t: 'spend-attr', attr: cmd.attr });
+        }
+        return;
+      case 'rank-up':
+        if (Number.isInteger(cmd.slot) && cmd.slot >= 1 && cmd.slot <= 9) {
+          this.sim.sendCommandFor(id, { t: 'rank-up', slot: cmd.slot });
+        }
+        return;
       default:
         return; // not accepted yet (a later layer wires it)
     }
