@@ -353,6 +353,55 @@ html, body {
 .shop-btn:hover:not(:disabled) { background: #26344a; }
 .shop-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
 
+/* SP wallet — sits under the bot toggle on the left rail. */
+.sp-line {
+  position: absolute;
+  top: 156px;
+  left: 16px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: #b9a6ff;
+  background: var(--panel);
+  border: 1px solid rgba(150, 130, 220, 0.5);
+  border-radius: 6px;
+}
+.sp-amt { font-weight: 700; color: var(--ink); }
+
+/* Skills panel (K): rank up abilities by spending SP. A centered "skill book". */
+.skills {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 340px;
+  padding: 12px;
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skills[hidden] { display: none; } /* the [hidden] attribute must beat display:flex */
+.skills-title { font-weight: 700; color: var(--gold); }
+.skills-list { display: flex; flex-direction: column; gap: 6px; }
+.skill-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.skill-info { font-size: 12px; color: var(--ink); }
+.skill-up-btn {
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--ink);
+  background: #241c33;
+  border: 1px solid #9682dc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.skill-up-btn:hover:not(:disabled) { background: #322747; }
+.skill-up-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+
 /* Failed-refine banner (floating text). */
 .fct-fail {
   font-size: 22px;

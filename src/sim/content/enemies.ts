@@ -11,6 +11,7 @@ export interface EnemyTemplate {
   name: string;
   hp: number;
   xp: number; // XP awarded to the killer (provisional; tune with the curve)
+  sp: number; // SP (skill points) awarded to the killer (provisional; GDD B4). Scales by tier (xpMult).
   // Loot (provisional): a little gold every kill + a per-item drop table.
   goldMin: number;
   goldMax: number;
@@ -31,6 +32,8 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
   name: 'Lobo Cinzento',
   hp: 40,
   xp: 25,
+  sp: 4, // ~3 kills to rank up an ability the first time (cost 10); ramps with the cost curve
+
   goldMin: 2,
   goldMax: 8,
   str: 8, // meleeDamage(8,2) = 6 per bite — a real but gentle nibble vs the 120-HP starter

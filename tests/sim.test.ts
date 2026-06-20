@@ -35,6 +35,7 @@ import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS } from '../src/sim/content/enhance';
+import { SKILL_SP_COST, SKILL_MAX_RANK } from '../src/sim/content/skill_ranks';
 import { RARITIES } from '../src/sim/content/rarity';
 import {
   BOSS_TEMPLATE,
@@ -2608,6 +2609,122 @@ describe('bot (auto-play): self-sufficiency', () => {
     for (let i = 0; i < 12; i++) sim.step();
     expect(bagQty(sim, 'elixir_armor')).toBe(BOT_MATERIAL_RESERVE); // reserve untouched
     expect(sim.recentEvents().some((e) => e.kind === 'enhance-success' || e.kind === 'enhance-fail')).toBe(false);
+  });
+});
+
+// Approach the nearest wolf WITHOUT a target (so no auto-attack pre-damages it),
+// then cast the slot-1 ability and return the damage it dealt (its damage event).
+function castSlot1Damage(sim: Sim): number {
+  for (let i = 0; i < 2000; i++) {
+    const p = sim.entities().find((e) => e.kind === 'player')!;
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    if (wolves.length === 0) { sim.step(); continue; }
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    const w = wolves[0];
+    if (Math.hypot(w.x - p.x, w.z - p.z) > MELEE_RANGE) {
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+    } else {
+      const lastSeq = sim.recentEvents().reduce((m, e) => Math.max(m, e.seq), 0);
+      sim.sendCommand({ t: 'set-target', id: w.id });
+      sim.sendCommand({ t: 'use-ability', slot: 1 });
+      sim.sendCommand({ t: 'set-target', id: null }); // drop so no auto-attack confounds the hit
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      const dmg = sim
+        .recentEvents()
+        .filter((e) => e.seq > lastSeq && e.kind === 'damage' && e.targetId === w.id);
+      if (dmg.length) return Math.max(...dmg.map((e) => e.amount));
+    }
+  }
+  return -1;
+}
+
+// SP / skill ranks (GDD B4): mobs grant a second currency the player spends to raise
+// an ability's rank, which makes it hit harder and its effects last longer.
+describe('SP and skill ranks', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const slot1 = (sim: Sim) => sim.abilities().find((a) => a.slot === 1)!;
+
+  it('killing a mob grants SP', () => {
+    const sim = new Sim(7);
+    expect(player(sim).sp).toBe(0);
+    expect(killNearestEnemy(sim)).toBe(true);
+    expect(player(sim).sp).toBeGreaterThanOrEqual(ENEMY_TEMPLATE.sp); // at least a normal wolf's SP
+  });
+
+  it('ranking up an ability spends the exact SP and raises its rank', () => {
+    const sim = new Sim(7);
+    let g = 0;
+    while (player(sim).sp < SKILL_SP_COST[0] && g++ < 200) killNearestEnemy(sim);
+    expect(player(sim).sp).toBeGreaterThanOrEqual(SKILL_SP_COST[0]);
+    expect(slot1(sim).rank).toBe(1);
+    expect(slot1(sim).rankCost).toBe(SKILL_SP_COST[0]);
+    const sp0 = player(sim).sp;
+
+    sim.sendCommand({ t: 'rank-up', slot: 1 });
+    sim.step();
+
+    expect(player(sim).sp).toBe(sp0 - SKILL_SP_COST[0]); // spent exactly the cost
+    expect(slot1(sim).rank).toBe(2); // rank rose
+  });
+
+  it('a higher-rank ability hits harder (rank 2 Golpe Forte > rank 1)', () => {
+    // Same seed + same farming (no manual equip/attr spend, so str/weapon are equal in
+    // both runs); the ONLY difference is the rank, so any damage gap IS the rank.
+    const measure = (rankUp: boolean): number => {
+      const sim = new Sim(7);
+      let g = 0;
+      while (player(sim).sp < SKILL_SP_COST[0] && g++ < 200) killNearestEnemy(sim);
+      if (rankUp) {
+        sim.sendCommand({ t: 'rank-up', slot: 1 });
+        sim.step();
+      }
+      return castSlot1Damage(sim);
+    };
+    const r1 = measure(false);
+    const r2 = measure(true);
+    expect(r1).toBeGreaterThan(0);
+    expect(r2).toBeGreaterThan(r1); // ranking up increased the ability's damage
+  });
+
+  it('refuses to rank up without enough SP (nothing spent, rank unchanged)', () => {
+    const sim = new Sim(7);
+    expect(player(sim).sp).toBe(0); // fresh — no SP yet
+    expect(slot1(sim).rank).toBe(1);
+    sim.sendCommand({ t: 'rank-up', slot: 1 });
+    sim.step();
+    expect(player(sim).sp).toBe(0); // not charged
+    expect(slot1(sim).rank).toBe(1); // still rank 1
+  });
+
+  it('rank stops at the cap (no further cost or spend)', () => {
+    const sim = new Sim(7);
+    const total = SKILL_SP_COST.reduce((a, c) => a + c, 0); // SP to max one ability
+    let g = 0;
+    while (player(sim).sp < total && g++ < 800) killNearestEnemy(sim);
+    expect(player(sim).sp).toBeGreaterThanOrEqual(total);
+    fleeToSafety(sim); // rank up from safety (not dead/stunned)
+
+    for (let i = 0; i < SKILL_MAX_RANK + 2; i++) {
+      sim.sendCommand({ t: 'rank-up', slot: 1 });
+      sim.step();
+    }
+    expect(slot1(sim).rank).toBe(SKILL_MAX_RANK); // capped, not beyond
+    expect(slot1(sim).rankCost).toBe(0); // no cost at the cap
+
+    const spAtCap = player(sim).sp;
+    sim.sendCommand({ t: 'rank-up', slot: 1 });
+    sim.step();
+    expect(player(sim).sp).toBe(spAtCap); // a press at the cap spends nothing
+  });
+
+  it('the auto-play bot raises its ability ranks as it earns SP', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    for (let i = 0; i < 4000; i++) sim.step();
+    const maxRank = Math.max(...sim.abilities().map((a) => a.rank));
+    expect(maxRank).toBeGreaterThan(1); // it spent SP to rank up on its own
   });
 });
 

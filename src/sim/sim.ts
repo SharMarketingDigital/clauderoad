@@ -27,6 +27,9 @@ import {
 import {
   MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
 } from './content/enhance';
+import {
+  SKILL_MAX_RANK, skillUpgradeCost, rankDamageMult, rankEffectMult,
+} from './content/skill_ranks';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
@@ -155,6 +158,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: false, summoned: false,
       homeX: 0, homeZ: 0,
@@ -185,6 +189,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: tier.id,
       boss: false, summoned: false,
       homeX: x, homeZ: z,
@@ -206,6 +211,7 @@ export class Sim implements IWorld {
       swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: false, summoned: false,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
@@ -229,6 +235,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: true, summoned: false,
       homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
@@ -299,6 +306,7 @@ export class Sim implements IWorld {
       swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       boss: false, summoned: true,
       homeX: x, homeZ: z,
@@ -329,6 +337,7 @@ export class Sim implements IWorld {
       const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
       const gcdLeft = p ? Math.max(0, p.gcdUntil - this.tick) : 0;
       const ready = !!p && cdLeft === 0 && gcdLeft === 0 && p.mp >= def.mpCost;
+      const rank = p ? this.skillRank(p, def) : 1;
       return {
         slot: def.slot,
         name: def.name,
@@ -337,6 +346,9 @@ export class Sim implements IWorld {
         ready,
         cooldownRemaining: cdLeft * DT, // ticks -> seconds
         cooldownTotal: def.cooldownSecs,
+        rank,
+        maxRank: SKILL_MAX_RANK,
+        rankCost: skillUpgradeCost(rank),
       };
     });
   }
@@ -406,6 +418,7 @@ export class Sim implements IWorld {
         mp: e.mp, maxMp: e.maxMp,
         level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
         gold: e.gold,
+        sp: e.sp,
         str: e.str, weaponDamage: e.weaponDamage,
         int: e.baseInt,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
@@ -546,6 +559,9 @@ export class Sim implements IWorld {
     if (killer.kind === 'player') {
       const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
       this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : Math.round(ENEMY_TEMPLATE.xp * tier.xpMult));
+      // SP (skill points) — the second currency. Scales with the tier like XP; the
+      // boss pays a big lump. Spent later to rank up the mastery's abilities (GDD B4).
+      killer.sp += dead.boss ? BOSS_TEMPLATE.sp : Math.round(ENEMY_TEMPLATE.sp * tier.xpMult);
       this.rollLoot(killer, dead.boss, dead.boss ? 1 : tier.goldMult);
     }
   }
@@ -642,6 +658,9 @@ export class Sim implements IWorld {
         break;
       case 'spend-attr':
         this.spendAttr(p, cmd.attr);
+        break;
+      case 'rank-up':
+        this.rankUp(p, cmd.slot);
         break;
       case 'buy':
         this.buy(p, cmd.itemId);
@@ -751,8 +770,9 @@ export class Sim implements IWorld {
       return;
     }
 
-    // Always cheap & safe: bank attribute points, and wear the best gear we own.
+    // Always cheap & safe: bank attribute points + SP, and wear the best gear we own.
     this.botSpendAttrs(p);
+    this.botRankUp(p);
     this.botEquipBest(p);
 
     const hpFrac = p.hp / p.maxHp;
@@ -808,6 +828,22 @@ export class Sim implements IWorld {
   private botSpendAttrs(p: Entity): void {
     while (p.attrPoints > 0) {
       this.applyAction(p, { t: 'spend-attr', attr: p.maxMp < BOT_INT_TARGET_MP ? 'int' : 'str' });
+    }
+  }
+
+  // Spend SP to rank up the active kit — cheapest upgrade first, so it banks the most
+  // ranks per point as SP accrues. Pure progression (no movement / risk), so it runs
+  // alongside the other always-cheap actions and never competes with survival.
+  private botRankUp(p: Entity): void {
+    for (;;) {
+      let best: AbilityDef | undefined;
+      let bestCost = Infinity;
+      for (const def of this.activeMastery(p).abilities) {
+        const cost = skillUpgradeCost(this.skillRank(p, def));
+        if (cost > 0 && cost <= p.sp && cost < bestCost) { best = def; bestCost = cost; }
+      }
+      if (!best) break;
+      this.applyAction(p, { t: 'rank-up', slot: best.slot });
     }
   }
 
@@ -1036,6 +1072,32 @@ export class Sim implements IWorld {
     if (attr === 'int') p.mp = Math.min(p.maxMp, p.mp + MP_PER_INT);
   }
 
+  // ---------- skill ranks (SP) ----------
+  // Current rank of an ability for this entity (absent in the map => rank 1).
+  private skillRank(p: Entity, def: AbilityDef): number {
+    return p.skillRanks[def.id] ?? 1;
+  }
+
+  // Spend SP to raise the rank of the ability in `slot` of the ACTIVE kit. Refuses
+  // (no cost) at the cap or without enough SP. Deterministic (no Rng). A higher rank
+  // makes the ability hit harder and its effects last longer (see useAbility).
+  private rankUp(p: Entity, slot: number): void {
+    const def = this.activeMastery(p).abilities.find((a) => a.slot === slot);
+    if (!def) return;
+    const rank = this.skillRank(p, def);
+    if (rank >= SKILL_MAX_RANK) return; // already maxed
+    const cost = skillUpgradeCost(rank);
+    if (cost <= 0 || p.sp < cost) return; // can't afford
+    p.sp -= cost;
+    p.skillRanks[def.id] = rank + 1;
+  }
+
+  // An ability's hit, scaled by its current rank (rank 1 == the base value, so this
+  // is a no-op for an un-ranked ability). Higher ranks hit harder.
+  private rankedAbilityDamage(p: Entity, def: AbilityDef): number {
+    return Math.round(abilityDamage(def, p.str, p.weaponDamage) * rankDamageMult(this.skillRank(p, def)));
+  }
+
   // ---------- vendor (shop) ----------
   // Buy one of a vendor stock item. Requires being near the vendor and enough
   // gold; the item is added Normal/+0. Refuses (no charge) if the bag is full.
@@ -1144,7 +1206,7 @@ export class Sim implements IWorld {
       p.facing = Math.atan2(t.x - p.x, t.z - p.z); // face the target so the cone is predictable
       this.commitCast(p, def, slot);
       for (const e of this.enemiesInCone(p)) {
-        this.hitEnemy(e, this.rollCrit(p, abilityDamage(def, p.str, p.weaponDamage)), p);
+        this.hitEnemy(e, this.rollCrit(p, this.rankedAbilityDamage(p, def)), p);
         if (e.hp > 0) this.applyCastEffects(e, def, p);
       }
       return;
@@ -1177,7 +1239,7 @@ export class Sim implements IWorld {
       }
     }
     this.commitCast(p, def, slot);
-    this.hitEnemy(t, this.rollCrit(p, abilityDamage(def, p.str, p.weaponDamage)), p);
+    this.hitEnemy(t, this.rollCrit(p, this.rankedAbilityDamage(p, def)), p);
     // Debuff the target — only if it survived the hit.
     if (t.hp > 0) this.applyCastEffects(t, def, p);
   }
@@ -1224,9 +1286,12 @@ export class Sim implements IWorld {
   // credits any DoT damage back to the player.
   private applyCastEffects(target: Entity, def: AbilityDef, caster: Entity): void {
     if (!def.effects) return;
+    // A higher ability rank lengthens its effects (stun/slow/bleed/buff). We never
+    // touch the magnitude (a slow/defense FACTOR), so rank can only make it stronger.
+    const durMult = rankEffectMult(this.skillRank(caster, def));
     for (const ef of def.effects) {
       this.applyStatus(
-        target, ef.kind, Math.round(ef.durationSecs * TICK_RATE),
+        target, ef.kind, Math.round(ef.durationSecs * durMult * TICK_RATE),
         ef.magnitude ?? 0, ef.periodSecs ? Math.round(ef.periodSecs * TICK_RATE) : 0, caster.id,
       );
     }
@@ -1559,6 +1624,9 @@ export class Sim implements IWorld {
       // Progression (level implies maxHp/maxMp, so they need not be mixed too).
       mix(e.level); mix(e.xp); mix(e.attrPoints);
       mix(e.baseStr); mix(e.baseInt); // spent attribute points (str/int)
+      // Skill progression: the SP wallet + each ability's rank (sorted keys -> stable).
+      mix(e.sp);
+      for (const sid of Object.keys(e.skillRanks).sort()) { mix(strHash(sid)); mix(e.skillRanks[sid]); }
       // Economy & bag (stacks are in deterministic insertion order).
       mix(e.gold);
       for (const s of e.bag) {

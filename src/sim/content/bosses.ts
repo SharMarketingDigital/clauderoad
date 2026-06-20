@@ -9,6 +9,7 @@ export interface BossTemplate {
   name: string;
   hp: number;
   xp: number;
+  sp: number; // SP awarded to the killer (GDD B4) — a big lump, like its XP/gold
   // "Hits harder" — stored now, but inert until enemies can damage the player
   // (a later slice). Kept as data so that slice just wires it up.
   str: number;
@@ -46,6 +47,8 @@ export const BOSS_TEMPLATE: BossTemplate = {
   name: 'Alfa da Matilha',
   hp: 800, // ~20x a common wolf (40)
   xp: 500,
+  sp: 60, // a big skill-point payout — beating the boss noticeably advances a kit
+
   str: 60,
   weaponDamage: 30,
   goldMin: 50,

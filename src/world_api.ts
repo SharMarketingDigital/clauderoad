@@ -51,6 +51,7 @@ export interface EntityView {
   readonly xpToNext: number; // XP needed to reach the next level
   readonly attrPoints: number; // unspent attribute points ("pontos disponíveis")
   readonly gold: number; // currency (0 for entities that don't carry gold)
+  readonly sp: number; // skill points: the second currency, spent to rank up abilities (GDD B4)
   // EFFECTIVE combat stats (base + equipped gear). The character sheet shows
   // these and they drive damage, so equipping a weapon visibly raises them.
   readonly str: number;
@@ -132,6 +133,7 @@ export type Command =
   | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
+  | { t: 'rank-up'; slot: number } // spend SP to raise the rank of the ability in this action-bar slot
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
   | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
   | { t: 'set-bot'; on: boolean }; // toggle auto-play (the sim drives the player; manual input ignored)
@@ -146,6 +148,11 @@ export interface AbilityView {
   readonly ready: boolean; // off cooldown, off the global cooldown, and enough MP
   readonly cooldownRemaining: number; // seconds left on the ability's own cooldown
   readonly cooldownTotal: number; // seconds, for drawing the sweep fraction
+  // Skill rank (GDD B4): current rank, the cap, and the SP cost to raise it one more
+  // (0 when already at the cap). The skills panel shows these and gates the button.
+  readonly rank: number;
+  readonly maxRank: number;
+  readonly rankCost: number;
 }
 
 // Transient things that happened inside a tick, for presentation only (floating

@@ -69,6 +69,10 @@ export interface Entity {
   level: number;
   xp: number; // XP accumulated into the current level
   attrPoints: number; // unspent attribute points
+  // skill ranks (GDD B4): SP is a second currency spent to raise an ability's rank
+  // (stronger hit + longer effects). Enemies carry 0 / an empty map.
+  sp: number; // unspent skill points
+  skillRanks: Record<string, number>; // ability id -> current rank (absent = rank 1)
   // economy & inventory (player; enemies carry 0 / empty)
   gold: number;
   bag: ItemStack[];

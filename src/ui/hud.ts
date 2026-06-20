@@ -48,6 +48,13 @@ export class Hud {
   private shopSell: HTMLDivElement;
   private shopOpen = false;
   private lastShopSig = ''; // skip rebuilding the buy/sell buttons when nothing changed
+  // SP wallet + skills panel (toggled with K): spend SP to rank up abilities (GDD B4)
+  private spAmt: HTMLSpanElement;
+  private skillsEl: HTMLDivElement;
+  private skillsSp: HTMLSpanElement;
+  private skillsList: HTMLDivElement;
+  private skillsOpen = false;
+  private lastSkillsSig = '';
   // auto-play (bot) toggle + indicator
   private botToggleBtn: HTMLButtonElement;
   private botIndicator: HTMLDivElement;
@@ -77,6 +84,7 @@ export class Hud {
         </div>
       </div>
       <div class="gold">&#9679; <span class="gold-amt">0</span></div>
+      <div class="sp-line">SP <span class="sp-amt">0</span></div>
       <button class="bot-toggle">Bot: OFF (B)</button>
       <div class="bot-indicator" hidden>&#9679; AUTO-PLAY</div>
       <div class="action-bar"></div>
@@ -102,7 +110,11 @@ export class Hud {
         <div class="shop-buy"></div>
         <div class="shop-sell"></div>
       </div>
-      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; V loja &middot; arrastar gira</div>
+      <div class="skills" hidden>
+        <div class="skills-title">Habilidades — SP: <span class="skills-sp">0</span></div>
+        <div class="skills-list"></div>
+      </div>
+      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; K habilidades &middot; V loja &middot; arrastar gira</div>
       <div class="announce"></div>
     `;
     document.body.appendChild(this.root);
@@ -120,6 +132,10 @@ export class Hud {
     this.actionBar = this.root.querySelector('.action-bar') as HTMLDivElement;
     this.announceEl = this.root.querySelector('.announce') as HTMLDivElement;
     this.goldAmt = this.root.querySelector('.gold-amt') as HTMLSpanElement;
+    this.spAmt = this.root.querySelector('.sp-amt') as HTMLSpanElement;
+    this.skillsEl = this.root.querySelector('.skills') as HTMLDivElement;
+    this.skillsSp = this.root.querySelector('.skills-sp') as HTMLSpanElement;
+    this.skillsList = this.root.querySelector('.skills-list') as HTMLDivElement;
     this.bag = this.root.querySelector('.bag') as HTMLDivElement;
     this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
     this.bagGrid = this.root.querySelector('.bag-grid') as HTMLDivElement;
@@ -152,10 +168,12 @@ export class Hud {
       if (e.repeat) return;
       if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
       else if (e.key.toLowerCase() === 'v') this.setShop(!this.shopOpen);
+      else if (e.key.toLowerCase() === 'k') this.setSkills(!this.skillsOpen);
       else if (e.key.toLowerCase() === 'b') this.toggleBot();
       else if (e.key === 'Escape') {
         this.setBag(false);
         this.setShop(false);
+        this.setSkills(false);
       }
     });
   }
@@ -174,6 +192,12 @@ export class Hud {
     this.shopOpen = open;
     this.shopEl.hidden = !open;
     if (open) this.lastShopSig = ''; // force a rebuild on (re)open
+  }
+
+  private setSkills(open: boolean): void {
+    this.skillsOpen = open;
+    this.skillsEl.hidden = !open;
+    if (open) this.lastSkillsSig = ''; // force a rebuild on (re)open
   }
 
   // Show a brief center-screen announcement (e.g. a world boss appearing).
@@ -223,10 +247,42 @@ export class Hud {
     }
 
     this.goldAmt.textContent = String(p.gold);
+    this.spAmt.textContent = String(p.sp);
 
     this.updateActionBar(world.abilities());
     if (this.bagOpen) this.updateBag(world.inventory(), p);
     if (this.shopOpen) this.updateShop(world, p);
+    if (this.skillsOpen) this.updateSkills(world, p);
+  }
+
+  // Skills panel (GDD B4): each ability's rank + the SP cost to raise it, with a
+  // "Subir" button gated on SP and the rank cap. Rebuilt only when something changed.
+  private updateSkills(world: IWorld, p: EntityView): void {
+    const abilities = world.abilities();
+    this.skillsSp.textContent = String(p.sp);
+    const sig =
+      `${p.sp}|` + abilities.map((a) => `${a.slot}:${a.name}:${a.rank}:${a.maxRank}:${a.rankCost}`).join(',');
+    if (sig === this.lastSkillsSig) return; // nothing changed -> don't thrash the DOM
+    this.lastSkillsSig = sig;
+
+    this.skillsList.textContent = '';
+    for (const a of abilities) {
+      const row = document.createElement('div');
+      row.className = 'skill-row';
+      const info = makeSpan('skill-info', `${a.name} — Rank ${a.rank}/${a.maxRank}`);
+      const btn = document.createElement('button');
+      btn.className = 'skill-up-btn';
+      if (a.rank >= a.maxRank) {
+        btn.textContent = 'MÁX';
+        btn.disabled = true;
+      } else {
+        btn.textContent = `Subir (${a.rankCost} SP)`;
+        btn.disabled = p.sp < a.rankCost;
+        btn.addEventListener('click', () => world.sendCommand({ t: 'rank-up', slot: a.slot }));
+      }
+      row.append(info, btn);
+      this.skillsList.appendChild(row);
+    }
   }
 
   // Vendor shop: lists what the vendor sells (buy buttons, gated on gold) and the
