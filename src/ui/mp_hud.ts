@@ -115,7 +115,7 @@ function injectStyle(): void {
   const s = document.createElement('style');
   s.id = 'mp-hud-style';
   s.textContent = `
-    .mp-status { position: fixed; top: 12px; left: 16px; z-index: 40; padding: 5px 12px;
+    .mp-status { position: fixed; top: 12px; right: 16px; z-index: 40; padding: 5px 12px;
       font: 600 13px/1 system-ui, sans-serif; color: #cfe0ff; background: rgba(20,26,36,0.8);
       border: 1px solid rgba(120,160,220,0.5); border-radius: 6px; pointer-events: none; }
     .mp-announce { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 41;

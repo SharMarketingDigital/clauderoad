@@ -8,7 +8,8 @@
 // it adds on join. Movement, mob AI, damage, death and respawn are identical online
 // and offline because it's literally the same simulation.
 import { Sim } from '../src/sim/sim';
-import type { EntitySnap, NetEvent } from '../src/net/protocol';
+import type { Command } from '../src/world_api';
+import type { EntitySnap, NetEvent, SelfSnap } from '../src/net/protocol';
 
 export class ServerWorld {
   private sim: Sim;
@@ -35,23 +36,60 @@ export class ServerWorld {
     this.sim.sendCommandFor(id, fx === 0 && fz === 0 ? { t: 'stop' } : { t: 'move', dx: fx, dz: fz });
   }
 
-  // Combat intents. The sim VALIDATES every one (target must be a living enemy; range,
-  // cooldown/GCD and MP gate the cast) — the client decides nothing, it only asks.
-  setTarget(id: number, targetId: number | null): void {
-    this.sim.sendCommandFor(id, { t: 'set-target', id: targetId });
-  }
-  cycleTarget(id: number): void {
-    this.sim.sendCommandFor(id, { t: 'cycle-target' });
-  }
-  useAbility(id: number, slot: number): void {
-    if (Number.isInteger(slot) && slot >= 1 && slot <= 9) {
-      this.sim.sendCommandFor(id, { t: 'use-ability', slot });
+  // A gameplay command from a client. This is the SECURITY BOUNDARY: we accept only a
+  // whitelist (expanded layer by layer) and REBUILD a clean command from validated
+  // fields — a raw untrusted object never reaches the sim. The Sim then validates the
+  // rest (target must be a living enemy; range/cooldown/GCD/MP gate casts; etc.). The
+  // client decides nothing — it only asks.
+  command(id: number, cmd: Command): void {
+    if (!cmd || typeof cmd !== 'object') return;
+    switch (cmd.t) {
+      // --- Layer 1: combat ---
+      case 'set-target':
+        if (cmd.id === null || Number.isInteger(cmd.id)) {
+          this.sim.sendCommandFor(id, { t: 'set-target', id: cmd.id });
+        }
+        return;
+      case 'cycle-target':
+        this.sim.sendCommandFor(id, { t: 'cycle-target' });
+        return;
+      case 'use-ability':
+        if (Number.isInteger(cmd.slot) && cmd.slot >= 1 && cmd.slot <= 9) {
+          this.sim.sendCommandFor(id, { t: 'use-ability', slot: cmd.slot });
+        }
+        return;
+      default:
+        return; // not accepted yet (a later layer wires it)
     }
   }
 
   // Advance the shared world one fixed tick (players + mobs + combat).
   step(): void {
     this.sim.step();
+  }
+
+  // A player's OWN state (HUD + action bar). The server sends this to that one client
+  // each snapshot — personal data never spams everyone. Combat HUD + bar for now;
+  // inventory/shop join in a later layer.
+  selfState(id: number): SelfSnap {
+    const abilities = [...this.sim.abilitiesFor(id)];
+    const e = this.sim.entities().find((v) => v.id === id);
+    if (!e) {
+      return {
+        targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
+        attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
+        botActive: false, abilities,
+      };
+    }
+    return {
+      targetId: this.sim.targetOf(id),
+      hp: e.hp, maxHp: e.maxHp, mp: e.mp, maxMp: e.maxMp,
+      level: e.level, xp: e.xp, xpToNext: e.xpToNext, attrPoints: e.attrPoints,
+      gold: e.gold, sp: e.sp, str: e.str, int: e.int,
+      weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
+      botActive: this.sim.botActive(),
+      abilities,
+    };
   }
 
   // The shared world (players + mobs + the town NPC), plus the combat events the sim

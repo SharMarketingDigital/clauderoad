@@ -78,11 +78,12 @@ function startOnline(url: string, name: string): void {
   const renderer = new Renderer(canvas);
   const input = new Input(canvas, renderer);
   const world = new ClientWorld(url, name); // a network-backed IWorld
-  const mpHud = new MpHud();
+  const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
+  const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,
-  // flash the hit, and banner deaths/boss spawns — identically on every client.
-  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, mpHud);
+  // flash the hit, and the Hud banners deaths/boss spawns — identically on every client.
+  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, hud);
 
   let last = performance.now() / 1000;
   function frame(): void {
@@ -95,6 +96,7 @@ function startOnline(url: string, name: string): void {
     world.update(dt); // advance snapshot interpolation
     renderer.render(world); // local player = Knight, other players = capsules, mobs = avatars
     drawCombatFeedback(world); // after render: damage numbers from the server's events
+    hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     requestAnimationFrame(frame);
   }

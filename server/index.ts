@@ -77,15 +77,9 @@ function handleMessage(ws: WebSocket, data: RawData): void {
   } else if (msg.t === 'move-intent') {
     const id = clientIds.get(ws);
     if (id != null) world.setIntent(id, msg.dx, msg.dz);
-  } else if (msg.t === 'set-target') {
+  } else if (msg.t === 'cmd') {
     const id = clientIds.get(ws);
-    if (id != null) world.setTarget(id, typeof msg.id === 'number' ? msg.id : null);
-  } else if (msg.t === 'cycle-target') {
-    const id = clientIds.get(ws);
-    if (id != null) world.cycleTarget(id);
-  } else if (msg.t === 'use-ability') {
-    const id = clientIds.get(ws);
-    if (id != null) world.useAbility(id, msg.slot);
+    if (id != null) world.command(id, msg.cmd); // server whitelists + the sim validates
   }
 }
 
@@ -104,13 +98,16 @@ function send(ws: WebSocket, msg: ServerMessage): void {
 // Fixed-timestep simulation tick (the server is the clock).
 setInterval(() => world.step(), DT * 1000);
 
-// Snapshot broadcast — one shared message to every connected client (the SAME world +
-// the SAME combat events for everyone, so the fight is identical across clients).
+// Snapshot broadcast. Two parts: the SHARED world + combat events (built ONCE and sent
+// to everyone, so the fight is identical across clients), and each client's PERSONAL
+// state (its own HUD/bag — sent only to its owner, so personal data never spams others).
 setInterval(() => {
   if (clientIds.size === 0) return;
-  const payload = JSON.stringify({ t: 'snapshot', ...world.snapshot() } satisfies ServerMessage);
-  for (const ws of clientIds.keys()) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+  const shared = JSON.stringify({ t: 'snapshot', ...world.snapshot() } satisfies ServerMessage);
+  for (const [ws, id] of clientIds) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    ws.send(shared);
+    ws.send(JSON.stringify({ t: 'self', self: world.selfState(id) } satisfies ServerMessage));
   }
 }, 1000 / SNAPSHOT_HZ);
 

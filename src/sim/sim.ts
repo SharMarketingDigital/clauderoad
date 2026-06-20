@@ -380,7 +380,13 @@ export class Sim implements IWorld {
   }
 
   localTargetId(): number | null {
-    const p = this.ents.get(this.localId);
+    return this.targetOf(this.localId);
+  }
+
+  // The current target (an enemy id) of a SPECIFIC player, or null. The server reads
+  // this per client for that player's HUD; the IWorld localTargetId() uses the local one.
+  targetOf(id: number): number | null {
+    const p = this.ents.get(id);
     return p ? p.targetId : null;
   }
 
@@ -391,7 +397,13 @@ export class Sim implements IWorld {
   }
 
   abilities(): ReadonlyArray<AbilityView> {
-    const p = this.ents.get(this.localId);
+    return this.abilitiesFor(this.localId);
+  }
+
+  // The action bar for a SPECIFIC player (live cooldown/GCD/MP/rank state). The server
+  // queries this per client to build that player's bar; IWorld abilities() uses the local one.
+  abilitiesFor(id: number): ReadonlyArray<AbilityView> {
+    const p = this.ents.get(id);
     const kit = p ? this.activeMastery(p).abilities : MASTERIES[DEFAULT_MASTERY].abilities;
     return kit.map((def) => {
       const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;

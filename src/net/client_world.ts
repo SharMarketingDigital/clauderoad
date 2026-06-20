@@ -1,19 +1,17 @@
 // The online world: an IWorld backed by server snapshots instead of a local Sim.
 // The renderer and HUD don't know the difference — they already talk to IWorld.
 //
-// It owns the WebSocket, sends the player's INTENT (never a position or a damage
-// number), and exposes the latest server state, INTERPOLATED between the last two
-// snapshots so movement looks smooth at any framerate. The server is authoritative
-// for everything — positions, mobs, AND combat; this only mirrors and renders.
-//
-// This slice mirrors SHARED MOBS + COMBAT: the snapshot carries players, mobs and the
-// town NPC; combat events (damage/death/…) flow through too, so the renderer pops the
-// same damage numbers both clients see. Target selection is PREDICTED locally (snappy
-// UI) and confirmed by the server, which is the only thing that actually deals damage.
+// It owns the WebSocket and sends only INTENT (never a position, a hit, loot or XP).
+// It exposes:
+//   • the SHARED world (players + mobs + NPC), interpolated between snapshots, and the
+//     server's combat events — the same for everyone;
+//   • the LOCAL player's PERSONAL state (HUD: hp/mp/xp/level, action bar, target, and
+//     later bag/shop), streamed by the server to this client only.
+// The server is authoritative for everything; this only mirrors and renders.
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView,
 } from '../world_api';
-import type { ClientMessage, ServerMessage, EntitySnap } from './protocol';
+import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap } from './protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'offline';
 
@@ -23,7 +21,7 @@ export class ClientWorld implements IWorld {
 
   private ws: WebSocket;
   private myId: number | null = null;
-  private myTarget: number | null = null; // locally-predicted selection (the server validates)
+  private self: SelfSnap | null = null; // this client's own HUD/bag state (from the server)
   private snapIntervalMs = 100; // updated from the server's snapshotHz on welcome
   // the two most recent snapshots, keyed by entity id, that we interpolate between
   private from = new Map<number, EntitySnap>();
@@ -60,33 +58,34 @@ export class ClientWorld implements IWorld {
   }
 
   localTargetId(): number | null {
-    return this.myTarget;
+    return this.self ? this.self.targetId : null; // authoritative (the server picks it)
   }
 
-  // Every entity (players, mobs, the town NPC) at its interpolated position. The
-  // renderer draws these straight from IWorld — local player as the Knight, others as
-  // capsules, enemies as their avatars, all tinted/scaled by tier/hostile as usual.
+  // Every entity (players, mobs, the town NPC) at its interpolated position. The LOCAL
+  // player additionally gets its full personal stats merged in (mp/xp/level/…) so the
+  // HUD shows the right values; other players carry only their public snapshot fields.
   entities(): ReadonlyArray<EntityView> {
     const t = this.snapIntervalMs > 0 ? clamp01((this.nowMs - this.lastSnapMs) / this.snapIntervalMs) : 1;
     const out: EntityView[] = [];
     for (const [id, cur] of this.to) {
       const prev = this.from.get(id) ?? cur; // a brand-new entity has no "from" -> sit still
-      out.push(entityView(cur, lerp(prev.x, cur.x, t), lerp(prev.z, cur.z, t), lerpAngle(prev.facing, cur.facing, t)));
+      const view = entityView(cur, lerp(prev.x, cur.x, t), lerp(prev.z, cur.z, t), lerpAngle(prev.facing, cur.facing, t));
+      out.push(id === this.myId && this.self ? mergeSelf(view, this.self) : view);
     }
     return out;
   }
 
-  // Combat events from the latest snapshot. The host's feedback loop reads these every
-  // frame and de-dups by `seq`, so each damage number / death is drawn exactly once.
+  // Combat events from the latest snapshot (drawn once, de-duped by `seq`).
   recentEvents(): ReadonlyArray<SimEvent> {
     return this.events;
   }
 
-  // No action bar / inventory / shop synced in this slice (loot/XP is the next one).
+  // The local player's action bar, with live cooldown/MP/rank state from the server.
   abilities(): ReadonlyArray<AbilityView> {
-    return EMPTY_ABILITIES;
+    return this.self ? this.self.abilities : EMPTY_ABILITIES;
   }
 
+  // Inventory + shop aren't synced yet (that's a later layer) — empty for now.
   inventory(): InventoryView {
     return EMPTY_INVENTORY;
   }
@@ -96,44 +95,18 @@ export class ClientWorld implements IWorld {
   }
 
   botActive(): boolean {
-    return false;
+    return this.self ? this.self.botActive : false;
   }
 
-  // The client only ever streams intent. Movement -> move-intent; target selection is
-  // predicted locally + sent; ability presses are sent (the SERVER decides the hit).
-  // Inventory/loot commands are ignored until that slice ships.
+  // The client only ever streams intent. Movement is a compact move-intent; every other
+  // gameplay command is forwarded verbatim (the server whitelists + the sim validates).
   sendCommand(cmd: Command): void {
-    switch (cmd.t) {
-      case 'move': this.send({ t: 'move-intent', dx: cmd.dx, dz: cmd.dz }); break;
-      case 'stop': this.send({ t: 'move-intent', dx: 0, dz: 0 }); break;
-      case 'set-target': this.selectTarget(cmd.id); break;
-      case 'cycle-target': this.cycleTargetLocal(); break;
-      case 'use-ability': this.send({ t: 'use-ability', slot: cmd.slot }); break;
-      default: break; // equip/buy/enhance/sell/etc. — next slice
-    }
+    if (cmd.t === 'move') this.send({ t: 'move-intent', dx: cmd.dx, dz: cmd.dz });
+    else if (cmd.t === 'stop') this.send({ t: 'move-intent', dx: 0, dz: 0 });
+    else this.send({ t: 'cmd', cmd });
   }
 
   // ---- internals ----
-  // Predict the selection so the ring/target-frame react instantly; the server gets the
-  // same intent and confirms it by auto-attacking that mob (it ignores invalid ids).
-  private selectTarget(id: number | null): void {
-    this.myTarget = id;
-    this.send({ t: 'set-target', id });
-  }
-
-  // Tab-cycle among living mobs by distance to us (nearest first, then outward). Done
-  // locally from the mirrored world so the UI is instant; the chosen id is sent on.
-  private cycleTargetLocal(): void {
-    const me = this.myId != null ? this.to.get(this.myId) : undefined;
-    if (!me) return;
-    const enemies: EntitySnap[] = [];
-    for (const e of this.to.values()) if (e.kind === 'enemy' && e.hp > 0) enemies.push(e);
-    if (enemies.length === 0) { this.selectTarget(null); return; }
-    enemies.sort((a, b) => dist2(me, a) - dist2(me, b));
-    const idx = enemies.findIndex((e) => e.id === this.myTarget);
-    this.selectTarget(enemies[(idx + 1) % enemies.length].id); // idx -1 -> nearest; else the next one out
-  }
-
   private onMessage(data: unknown): void {
     if (typeof data !== 'string') return;
     let msg: ServerMessage;
@@ -149,13 +122,9 @@ export class ClientWorld implements IWorld {
       this.from = this.to; // the previous snapshot becomes the interpolation source
       this.to = new Map(msg.entities.map((e) => [e.id, e]));
       this.lastSnapMs = this.nowMs;
-      // New combat events (tick is irrelevant to a remote client). Drawn once by seq.
-      this.events = msg.events.map((ev) => ({ ...ev, tick: 0 }));
-      // Drop a target that died or vanished, so the frame matches the live world.
-      if (this.myTarget != null) {
-        const t = this.to.get(this.myTarget);
-        if (!t || t.kind !== 'enemy' || t.hp <= 0) this.myTarget = null;
-      }
+      this.events = msg.events.map((ev) => ({ ...ev, tick: 0 })); // tick is irrelevant remotely
+    } else if (msg.t === 'self') {
+      this.self = msg.self; // our own HUD/bag state
     }
   }
 
@@ -166,8 +135,8 @@ export class ClientWorld implements IWorld {
 
 // Build a render-ready EntityView from a snapshot entity. Position/orientation are the
 // interpolated values; hp/tier/boss/hostile/dead are the authoritative snapshot values;
-// everything combat-stat-related (str, mp, xp, …) is left at harmless defaults — none
-// of it is synced in this slice and the renderer doesn't need it to draw the entity.
+// the combat-stat fields are placeholders here (the LOCAL player overrides them from its
+// personal `self` state via mergeSelf; other players don't need them to be drawn).
 function entityView(s: EntitySnap, x: number, z: number, facing: number): EntityView {
   return {
     id: s.id, kind: s.kind, name: s.name,
@@ -179,15 +148,22 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
   };
 }
 
+// Overlay the local player's personal stats onto its public view (position/name/etc.
+// stay from the shared snapshot; the HUD-only numbers come from `self`).
+function mergeSelf(v: EntityView, s: SelfSnap): EntityView {
+  return {
+    ...v,
+    hp: s.hp, maxHp: s.maxHp, mp: s.mp, maxMp: s.maxMp,
+    level: s.level, xp: s.xp, xpToNext: s.xpToNext, attrPoints: s.attrPoints,
+    gold: s.gold, sp: s.sp, str: s.str, int: s.int,
+    weaponDamage: s.weaponDamage, weaponPlus: s.weaponPlus,
+  };
+}
+
 const EMPTY_ABILITIES: ReadonlyArray<AbilityView> = [];
 const EMPTY_INVENTORY: InventoryView = { capacity: 0, stacks: [], equipment: [] };
 const EMPTY_SHOP: ShopView = { name: '', stock: [], inRange: false };
 
-function dist2(a: EntitySnap, b: EntitySnap): number {
-  const dx = a.x - b.x;
-  const dz = a.z - b.z;
-  return dx * dx + dz * dz;
-}
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }

@@ -3,22 +3,20 @@
 // they can never drift. Pure types only — no DOM, no Node, no runtime code.
 //
 // SECURITY MODEL: the server is authoritative. The client only ever sends INTENT
-// (who it is, which way it wants to walk, which mob it wants to hit); the server
-// decides every position, every hit, every death and streams snapshots back. Nothing
-// position- or combat-sensitive is ever trusted from a client.
-//
-// This slice adds SHARED MOBS + COMBAT: the snapshot now carries the mobs (and the
-// town NPC) alongside players, plus the combat events (damage/death/…) the server's
-// sim produced, so both clients see the same fight. Loot/XP UI is the next slice.
-import type { EntityKind, EnemyTierId, SimEvent } from '../world_api';
+// (who it is, which way it wants to walk, which command it wants to run). The server
+// runs the one shared Sim, decides EVERY outcome — position, hit, loot, XP, gold — and
+// streams back (a) the shared world + combat events to everyone and (b) each player's
+// PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
+import type { EntityKind, EnemyTierId, SimEvent, Command, AbilityView } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
+// `cmd` forwards any gameplay Command (target, ability, equip, buy, …). The server
+// whitelists which commands it accepts (so a layer's commands light up only when wired)
+// and the Sim validates the rest (range, cooldown, MP, gold, ownership of the item, …).
 export type ClientMessage =
   | { t: 'join'; name: string } // sent once on connect; the server spawns a player
   | { t: 'move-intent'; dx: number; dz: number } // desired world-space direction ({0,0} = stop)
-  | { t: 'set-target'; id: number | null } // select a mob to attack (an entity id; null clears)
-  | { t: 'cycle-target' } // Tab: server picks the nearest enemy in front, then cycles
-  | { t: 'use-ability'; slot: number }; // press an action-bar slot (the sim gates range/cooldown/cost)
+  | { t: 'cmd'; cmd: Command }; // any other gameplay intent (server-validated)
 
 // One entity's public state in a snapshot — players AND mobs AND the town NPC. The
 // server owns all of it; the client only mirrors + interpolates. Kept compact (rounded
@@ -51,7 +49,31 @@ export interface NetEvent {
   text?: string;
 }
 
+// A player's OWN state — the part of the world only its owner needs (HUD + bag). The
+// server sends this to that one client each snapshot, so personal data never spams
+// everyone. Grows by layer: combat HUD + action bar now; inventory/shop later.
+export interface SelfSnap {
+  targetId: number | null; // the player's selected target (authoritative)
+  hp: number;
+  maxHp: number;
+  mp: number;
+  maxMp: number;
+  level: number;
+  xp: number;
+  xpToNext: number;
+  attrPoints: number;
+  gold: number;
+  sp: number;
+  str: number;
+  int: number;
+  weaponDamage: number;
+  weaponPlus: number;
+  botActive: boolean; // whether this player's auto-play is on
+  abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
+}
+
 // ---- server -> client ----
 export type ServerMessage =
   | { t: 'welcome'; id: number; snapshotHz: number } // your player id + the snapshot rate (for interpolation)
-  | { t: 'snapshot'; entities: EntitySnap[]; events: NetEvent[] }; // the shared world + new combat events
+  | { t: 'snapshot'; entities: EntitySnap[]; events: NetEvent[] } // the shared world + new combat events (broadcast)
+  | { t: 'self'; self: SelfSnap }; // YOUR personal HUD/bag state (sent only to you)
