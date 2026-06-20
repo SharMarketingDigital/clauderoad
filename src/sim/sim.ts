@@ -30,6 +30,9 @@ import {
 import {
   SKILL_MAX_RANK, skillUpgradeCost, rankDamageMult, rankEffectMult,
 } from './content/skill_ranks';
+import {
+  MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
+} from './content/durability';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
@@ -380,6 +383,9 @@ export class Sim implements IWorld {
         // both chances, so the UI shows the one matching the Lucky Powder toggle.
         enhanceChance: eq ? enhanceChance(eq.plus, false) : 0,
         enhanceChanceLucky: eq ? enhanceChance(eq.plus, true) : 0,
+        durability: eq?.durability ?? 0,
+        maxDurability: eq ? MAX_DURABILITY : 0,
+        repairCost: eq ? repairCost(eq.durability) : 0,
       };
     });
     return { capacity: BAG_SLOTS, stacks, equipment };
@@ -653,6 +659,9 @@ export class Sim implements IWorld {
       case 'enhance':
         this.enhance(p, cmd.slot, cmd.useLuckyPowder);
         break;
+      case 'repair':
+        this.repair(p, cmd.slot);
+        break;
       case 'use-item':
         this.useItem(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
@@ -682,7 +691,7 @@ export class Sim implements IWorld {
     if (!def || !def.slot) return; // unknown or not equippable
     if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
     const prev = p.equipment[def.slot];
-    p.equipment[def.slot] = { itemId, rarity, plus };
+    p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY }; // a freshly equipped item is in full repair
     // Return the displaced item to the bag, keeping its "+N". (Removing the new
     // item above frees room in the common qty-1 case; only a full bag of other
     // stacks could lose it — acceptable for now, like the loot-on-full case.)
@@ -882,7 +891,12 @@ export class Sim implements IWorld {
     const bagPressure = BAG_SLOTS - p.bag.length <= BOT_BAG_HEADROOM && this.botJunkCount(p) > 0;
     const potionPrice = botPrice('health_potion');
     const outOfPotions = !this.bagStack(p, 'health_potion') && potionPrice > 0 && p.gold >= potionPrice;
-    return bagPressure || outOfPotions;
+    // worn gear it can afford to repair -> worth a trip (it lost stats on death)
+    const gearWorn = EQUIP_SLOTS.some((slot) => {
+      const eq = p.equipment[slot];
+      return eq != null && eq.durability < DURABILITY_WORN_AT && p.gold >= repairCost(eq.durability);
+    });
+    return bagPressure || outOfPotions || gearWorn;
   }
 
   // At the vendor: sell every surplus piece of gear, restock potions (survival comes
@@ -898,6 +912,13 @@ export class Sim implements IWorld {
     while (potionPrice > 0 && this.botCount(p, 'health_potion') < BOT_POTION_STOCK
       && p.gold >= potionPrice && this.botCanStock(p, 'health_potion')) {
       this.applyAction(p, { t: 'buy', itemId: 'health_potion' });
+    }
+    // repair worn equipped gear (death cost) — buys back the combat stats it lost
+    for (const slot of EQUIP_SLOTS) {
+      const eq = p.equipment[slot];
+      if (eq && eq.durability < DURABILITY_WORN_AT && p.gold >= repairCost(eq.durability)) {
+        this.applyAction(p, { t: 'repair', slot });
+      }
     }
     for (const mat of ['elixir_weapon', 'elixir_armor', 'lucky_powder'] as const) {
       const price = botPrice(mat);
@@ -1119,6 +1140,20 @@ export class Sim implements IWorld {
     p.gold += value;
   }
 
+  // Pay the vendor to restore an equipped item's durability to full (GDD B8). Requires
+  // being near the vendor and enough gold; refuses (no charge) at full or when broke.
+  // Worn gear gives less of its bonus, so this buys the lost stats back.
+  private repair(p: Entity, slot: EquipSlot): void {
+    if (!this.nearVendor(p)) return;
+    const eq = p.equipment[slot];
+    if (!eq || eq.durability >= MAX_DURABILITY) return; // nothing to repair
+    const cost = repairCost(eq.durability);
+    if (cost <= 0 || p.gold < cost) return; // can't afford
+    p.gold -= cost;
+    eq.durability = MAX_DURABILITY;
+    this.recomputeStats(p); // restore the full bonus now that it's repaired
+  }
+
   // Whether the player is close enough to the vendor NPC to trade.
   private nearVendor(p: Entity): boolean {
     const v = this.ents.get(this.vendorId);
@@ -1141,9 +1176,11 @@ export class Sim implements IWorld {
       const eq = p.equipment[slot];
       const stats = eq ? ITEMS[eq.itemId]?.stats : undefined;
       if (!eq || !stats) continue;
-      // base -> rarity-scaled -> "+N"-scaled. Higher rarity AND higher "+" both
-      // grow the bonus.
-      const scale = (v: number): number => enhanceStat(rarityStat(v, eq.rarity), eq.plus);
+      // base -> rarity-scaled -> "+N"-scaled -> durability-scaled. Higher rarity AND
+      // higher "+" grow the bonus; worn-down gear (low durability) gives less of it.
+      // At full durability the factor is exactly 1, so equipping is unchanged.
+      const dmul = durabilityFactor(eq.durability);
+      const scale = (v: number): number => Math.round(enhanceStat(rarityStat(v, eq.rarity), eq.plus) * dmul);
       bonusStr += scale(stats.str ?? 0);
       bonusWeapon += scale(stats.weaponDamage ?? 0);
       bonusMaxHp += scale(stats.maxHp ?? 0);
@@ -1562,6 +1599,18 @@ export class Sim implements IWorld {
     p.deadUntil = this.tick + DEATH_RESPAWN_TICKS;
     p.targetId = null;
     p.effects.length = 0; // death clears debuffs (no DoT/stun carrying into the spirit/respawn)
+    // Death penalty (GDD B8): equipped gear loses durability (floored at 0). Worn gear
+    // gives less of its stat bonus until repaired at the vendor — so repeated dying
+    // (e.g. attriting the boss) makes you progressively weaker, at a gold cost to undo.
+    let worn = false;
+    for (const slot of EQUIP_SLOTS) {
+      const eq = p.equipment[slot];
+      if (eq && eq.durability > 0) {
+        eq.durability = Math.max(0, eq.durability - DEATH_DURABILITY_LOSS);
+        worn = true;
+      }
+    }
+    if (worn) this.recomputeStats(p); // fold the weaker (worn) bonus into effective stats now
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
@@ -1637,6 +1686,7 @@ export class Sim implements IWorld {
         const eq = e.equipment[slot];
         mix(strHash(eq ? `${eq.itemId}:${eq.rarity}` : ''));
         mix(eq ? eq.plus : -1);
+        mix(eq ? eq.durability : -1); // durability is gameplay state (it scales the bonus)
       }
       mix(strHash(e.tier)); // enemy strength tier (scales hp/damage/reward)
       // Active status effects (kind + timing/magnitude/source all drive future behavior).

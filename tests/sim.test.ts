@@ -36,6 +36,9 @@ import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS } from '../src/sim/content/enhance';
 import { SKILL_SP_COST, SKILL_MAX_RANK } from '../src/sim/content/skill_ranks';
+import {
+  MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
+} from '../src/sim/content/durability';
 import { RARITIES } from '../src/sim/content/rarity';
 import {
   BOSS_TEMPLATE,
@@ -2096,13 +2099,17 @@ describe('alchemy ("+N")', () => {
 
   it('refining succeeds (+1, stat rises) or fails (-1), staying within [0, MAX_PLUS]', () => {
     const sim = new Sim(7);
-    equipSwordAndRest(sim);
-    const baseDmg = weaponDamage(sim); // damage at +0
     const ELIXIRS = 20;
+    // Farm FIRST (deaths happen here), then equip a FRESH sword + flee — so the sword
+    // stays at full durability through the refine loop and death-wear (GDD B8, tested
+    // separately) can't confound the "+N raises damage" check.
     expect(farm(sim, 'elixir_weapon', ELIXIRS, 1500)).toBe(true);
+    equipSwordAndRest(sim);
+    fleeToSafety(sim);
     sim.sendCommand({ t: 'set-target', id: null });
     sim.sendCommand({ t: 'stop' });
     sim.step();
+    const baseDmg = weaponDamage(sim); // damage at +0, at full durability
 
     let sawSuccess = false;
     let sawFail = false;
@@ -2128,9 +2135,12 @@ describe('alchemy ("+N")', () => {
 
   it('an enhanced "+N" survives unequip and re-equip (carried on the bag stack)', () => {
     const sim = new Sim(7);
-    equipSwordAndRest(sim);
-    const sword = sim.inventory().equipment.find((e) => e.slot === 'weapon')!;
+    // Farm FIRST, then equip a FRESH sword + flee, so durability stays full both before
+    // and after the unequip/re-equip (death-wear is GDD B8; this test isolates the "+N").
     expect(farm(sim, 'elixir_weapon', 12, 1000)).toBe(true);
+    equipSwordAndRest(sim);
+    fleeToSafety(sim);
+    const sword = sim.inventory().equipment.find((e) => e.slot === 'weapon')!;
     sim.sendCommand({ t: 'set-target', id: null });
     sim.sendCommand({ t: 'stop' });
     sim.step();
@@ -2725,6 +2735,113 @@ describe('SP and skill ranks', () => {
     for (let i = 0; i < 4000; i++) sim.step();
     const maxRank = Math.max(...sim.abilities().map((a) => a.rank));
     expect(maxRank).toBeGreaterThan(1); // it spent SP to rank up on its own
+  });
+});
+
+// Drive the player into wolves until it dies once, then wait out the respawn so the
+// world is back to a live player WITH the death penalty applied.
+function dieOnceAndRespawn(sim: Sim): void {
+  driveIntoWolvesUntilDead(sim);
+  for (
+    let i = 0;
+    i < DEATH_RESPAWN_TICKS + 10 && sim.entities().find((e) => e.kind === 'player')!.dead;
+    i++
+  ) {
+    sim.step();
+  }
+}
+
+// Death penalty (GDD B8): dying wears down equipped gear; worn gear gives less of its
+// bonus until repaired at the vendor for gold. Gentle — never breaks, fully restorable.
+describe('death penalty (durability / repair)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const armor = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'armor')!;
+
+  // Equip a freshly-looted Couro de Lobo (armor) at full durability.
+  const equipFreshArmor = (sim: Sim): void => {
+    let g = 0;
+    while (bagQty(sim, 'wolf_leather') < 1 && g++ < 400) killNearestEnemy(sim);
+    const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
+    sim.step();
+  };
+
+  it('durabilityFactor: full at/above the threshold, gentle non-zero floor at 0', () => {
+    expect(durabilityFactor(MAX_DURABILITY)).toBe(1);
+    expect(durabilityFactor(DURABILITY_WORN_AT)).toBe(1); // healthy
+    expect(durabilityFactor(DURABILITY_WORN_AT - 1)).toBeLessThan(1); // just below -> bonus drops
+    expect(durabilityFactor(0)).toBeGreaterThan(0); // broken gear still gives SOME bonus (gentle)
+    expect(durabilityFactor(0)).toBeLessThan(1);
+    expect(durabilityFactor(20)).toBeLessThan(durabilityFactor(40)); // monotonic
+    expect(repairCost(MAX_DURABILITY)).toBe(0); // full -> free
+    expect(repairCost(0)).toBeGreaterThan(0); // broken -> costs gold
+  });
+
+  it('dying wears equipped gear (durability drops by the death loss)', () => {
+    const sim = new Sim(7);
+    equipFreshArmor(sim);
+    expect(armor(sim).durability).toBe(MAX_DURABILITY); // a freshly equipped item is full
+    dieOnceAndRespawn(sim);
+    expect(armor(sim).durability).toBe(MAX_DURABILITY - DEATH_DURABILITY_LOSS); // exactly one loss
+  });
+
+  it('worn gear gives a smaller bonus, and repairing at the vendor (for gold) restores it', () => {
+    const sim = new Sim(7);
+    // Do ALL the farming up front (so XP/levels don't change base maxHp between the
+    // measurements), getting the armor + enough gold to repair later.
+    let g = 0;
+    while ((bagQty(sim, 'wolf_leather') < 1 || player(sim).gold < 120) && g++ < 800) killNearestEnemy(sim);
+    const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
+    sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
+    sim.step();
+    expect(armor(sim).durability).toBe(MAX_DURABILITY);
+    const fullMaxHp = player(sim).maxHp;
+
+    // die until the armor is "worn" (below the threshold) -> a smaller HP bonus
+    let dGuard = 0;
+    while (armor(sim).durability >= DURABILITY_WORN_AT && dGuard++ < 12) dieOnceAndRespawn(sim);
+    expect(armor(sim).durability).toBeLessThan(DURABILITY_WORN_AT);
+    expect(player(sim).maxHp).toBeLessThan(fullMaxHp); // worn gear -> less of its +HP
+
+    // repair at the vendor: pay gold, durability AND the bonus come back
+    goToVendor(sim);
+    const gold0 = player(sim).gold;
+    const cost = armor(sim).repairCost;
+    expect(cost).toBeGreaterThan(0);
+    expect(gold0).toBeGreaterThanOrEqual(cost);
+    sim.sendCommand({ t: 'repair', slot: 'armor' });
+    sim.step();
+    expect(armor(sim).durability).toBe(MAX_DURABILITY); // fully repaired
+    expect(player(sim).gold).toBe(gold0 - cost); // paid the repair cost
+    expect(player(sim).maxHp).toBe(fullMaxHp); // full bonus restored
+  });
+
+  it('durability floors at 0, and repair is refused away from the vendor / when broke', () => {
+    const sim = new Sim(7);
+    equipFreshArmor(sim);
+    // die well past MAX/LOSS times -> durability floors at 0 (never negative)
+    const enough = Math.ceil(MAX_DURABILITY / DEATH_DURABILITY_LOSS) + 2;
+    for (let i = 0; i < enough; i++) dieOnceAndRespawn(sim);
+    expect(armor(sim).durability).toBe(0);
+
+    // away from the vendor: a repair command is a no-op (no gold spent)
+    fleeToSafety(sim);
+    const goldAway = player(sim).gold;
+    sim.sendCommand({ t: 'repair', slot: 'armor' });
+    sim.step();
+    expect(armor(sim).durability).toBe(0); // not repaired (not at the vendor)
+    expect(player(sim).gold).toBe(goldAway);
+
+    // at the vendor but unable to afford the full-repair cost: still refused
+    goToVendor(sim);
+    const cost = armor(sim).repairCost; // 100 at durability 0
+    if (player(sim).gold < cost) {
+      const gold0 = player(sim).gold;
+      sim.sendCommand({ t: 'repair', slot: 'armor' });
+      sim.step();
+      expect(armor(sim).durability).toBe(0); // refused — can't afford it
+      expect(player(sim).gold).toBe(gold0);
+    }
   });
 });
 

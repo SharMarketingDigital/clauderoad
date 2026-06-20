@@ -263,6 +263,8 @@ html, body {
   cursor: pointer;
 }
 .equip-slot.filled:hover { border-color: #fff; }
+/* worn gear (durability dropped below half) — an amber cue to repair at the vendor. */
+.equip-slot.filled.worn { border-color: #ffb35a; color: #ffd9a3; }
 
 .bag-stats {
   font-size: 11px;
@@ -350,6 +352,7 @@ html, body {
   font-family: inherit;
 }
 .shop-btn.sell { border-color: #6bff8a; }
+.shop-btn.repair { border-color: #ffb35a; } /* vendor repair (GDD B8) */
 .shop-btn:hover:not(:disabled) { background: #26344a; }
 .shop-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
 

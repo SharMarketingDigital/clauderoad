@@ -93,6 +93,12 @@ export interface EquipView {
   readonly plus: number;
   readonly enhanceChance: number; // 0..1, no powder (0 when empty or at the cap)
   readonly enhanceChanceLucky: number; // 0..1, with a Lucky Powder
+  // Durability (GDD B8 death penalty): current / max (0 for an empty slot), and the
+  // gold to fully repair it at the vendor (0 when full or empty). Worn gear gives less
+  // of its stat bonus until repaired.
+  readonly durability: number;
+  readonly maxDurability: number;
+  readonly repairCost: number;
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -131,6 +137,7 @@ export type Command =
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
   | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
+  | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
   | { t: 'rank-up'; slot: number } // spend SP to raise the rank of the ability in this action-bar slot

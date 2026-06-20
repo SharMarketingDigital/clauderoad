@@ -20,11 +20,14 @@ export interface ItemStack {
   qty: number;
 }
 
-// A specific equipped item instance (id + the rarity it rolled at + its +N).
+// A specific equipped item instance (id + the rarity it rolled at + its +N + its
+// current durability). Durability starts full on equip, drops on death (GDD B8), and
+// is restored by repairing at the vendor; worn gear gives less of its stat bonus.
 export interface EquippedItem {
   itemId: string;
   rarity: Rarity;
   plus: number;
+  durability: number;
 }
 
 // Internal mutable entity. The sim owns these; the outside world only ever

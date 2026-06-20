@@ -46,6 +46,7 @@ export class Hud {
   private shopHint: HTMLDivElement;
   private shopBuy: HTMLDivElement;
   private shopSell: HTMLDivElement;
+  private shopRepair: HTMLDivElement; // vendor repair buttons for worn equipped gear (GDD B8)
   private shopOpen = false;
   private lastShopSig = ''; // skip rebuilding the buy/sell buttons when nothing changed
   // SP wallet + skills panel (toggled with K): spend SP to rank up abilities (GDD B4)
@@ -107,6 +108,7 @@ export class Hud {
       <div class="shop" hidden>
         <div class="shop-title"></div>
         <div class="shop-hint"></div>
+        <div class="shop-repair"></div>
         <div class="shop-buy"></div>
         <div class="shop-sell"></div>
       </div>
@@ -150,6 +152,7 @@ export class Hud {
     this.shopHint = this.root.querySelector('.shop-hint') as HTMLDivElement;
     this.shopBuy = this.root.querySelector('.shop-buy') as HTMLDivElement;
     this.shopSell = this.root.querySelector('.shop-sell') as HTMLDivElement;
+    this.shopRepair = this.root.querySelector('.shop-repair') as HTMLDivElement;
     this.equipRow = this.root.querySelector('.equip-row') as HTMLDivElement;
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
     this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
@@ -295,6 +298,7 @@ export class Hud {
       if (this.lastShopSig !== 'far') {
         this.shopBuy.textContent = '';
         this.shopSell.textContent = '';
+        this.shopRepair.textContent = '';
         this.lastShopSig = 'far';
       }
       return;
@@ -307,9 +311,24 @@ export class Hud {
       `${p.gold}|` +
       s.stock.map((e) => `${e.itemId}:${e.price}`).join(',') +
       '|' +
-      inv.stacks.map((st) => `${st.itemId}:${st.rarity}:${st.plus}:${st.qty}:${st.sellValue}`).join(',');
+      inv.stacks.map((st) => `${st.itemId}:${st.rarity}:${st.plus}:${st.qty}:${st.sellValue}`).join(',') +
+      '|' +
+      inv.equipment.map((e) => `${e.itemId}:${e.durability}:${e.repairCost}`).join(',');
     if (sig === this.lastShopSig) return;
     this.lastShopSig = sig;
+
+    // Repair worn equipped gear (GDD B8 death penalty). Only damaged items appear.
+    this.shopRepair.textContent = '';
+    for (const eq of inv.equipment) {
+      if (eq.itemId == null || eq.durability >= eq.maxDurability) continue;
+      const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      const btn = document.createElement('button');
+      btn.className = 'shop-btn repair';
+      btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] — ${eq.repairCost}`;
+      btn.disabled = p.gold < eq.repairCost;
+      btn.addEventListener('click', () => world.sendCommand({ t: 'repair', slot: eq.slot }));
+      this.shopRepair.appendChild(btn);
+    }
 
     this.shopBuy.textContent = '';
     for (const e of s.stock) {
@@ -354,11 +373,15 @@ export class Hud {
       if (eq.itemId) {
         cell.dataset.rarity = eq.rarity ?? '';
         const plusTag = eq.plus > 0 ? ` +${eq.plus}` : '';
-        const text = `${label}: ${eq.name}${plusTag} (${eq.rarityName})`;
+        const durTag = ` · Dur ${eq.durability}/${eq.maxDurability}`;
+        // "worn" once the bonus starts dropping (below half) — a cue to repair.
+        cell.classList.toggle('worn', eq.durability < eq.maxDurability * 0.5);
+        const text = `${label}: ${eq.name}${plusTag} (${eq.rarityName})${durTag}`;
         cell.title = text;
         cell.textContent = text;
       } else {
         delete cell.dataset.rarity;
+        cell.classList.remove('worn');
         cell.title = label;
         cell.textContent = `${label}: —`;
       }
