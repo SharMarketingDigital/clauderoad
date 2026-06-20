@@ -8,6 +8,7 @@
 // it adds on join. Movement, mob AI, damage, death and respawn are identical online
 // and offline because it's literally the same simulation.
 import { Sim } from '../src/sim/sim';
+import { MAX_PLUS } from '../src/sim/content/enhance';
 import type { Command } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap } from '../src/net/protocol';
 
@@ -69,6 +70,38 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'rank-up', slot: cmd.slot });
         }
         return;
+      // --- Layer 3: inventory + economy (the sim re-validates ownership/gold/range/cap) ---
+      case 'equip':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'equip', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
+      case 'unequip':
+        if (VALID_SLOTS.has(cmd.slot)) this.sim.sendCommandFor(id, { t: 'unequip', slot: cmd.slot });
+        return;
+      case 'enhance':
+        if (VALID_SLOTS.has(cmd.slot) && typeof cmd.useLuckyPowder === 'boolean') {
+          this.sim.sendCommandFor(id, { t: 'enhance', slot: cmd.slot, useLuckyPowder: cmd.useLuckyPowder });
+        }
+        return;
+      case 'repair':
+        if (VALID_SLOTS.has(cmd.slot)) this.sim.sendCommandFor(id, { t: 'repair', slot: cmd.slot });
+        return;
+      case 'use-item':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'use-item', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
+      case 'buy':
+        if (typeof cmd.itemId === 'string' && cmd.itemId.length <= 64) {
+          this.sim.sendCommandFor(id, { t: 'buy', itemId: cmd.itemId });
+        }
+        return;
+      case 'sell':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
       default:
         return; // not accepted yet (a later layer wires it)
     }
@@ -84,12 +117,14 @@ export class ServerWorld {
   // inventory/shop join in a later layer.
   selfState(id: number): SelfSnap {
     const abilities = [...this.sim.abilitiesFor(id)];
+    const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
+    const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
     const e = this.sim.entities().find((v) => v.id === id);
     if (!e) {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
-        botActive: false, abilities,
+        botActive: false, abilities, inventory, shop,
       };
     }
     return {
@@ -99,7 +134,7 @@ export class ServerWorld {
       gold: e.gold, sp: e.sp, str: e.str, int: e.int,
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       botActive: this.sim.botActive(),
-      abilities,
+      abilities, inventory, shop,
     };
   }
 
@@ -144,6 +179,20 @@ export class ServerWorld {
   playerCount(): number {
     return this.sim.players().length;
   }
+}
+
+const VALID_SLOTS: ReadonlySet<string> = new Set(['weapon', 'armor']);
+const VALID_RARITIES: ReadonlySet<string> = new Set(['normal', 'sos', 'som', 'sun']);
+
+// A bag/equip item reference from a client: a non-empty bounded item id, a real rarity,
+// and a non-negative integer "+N". The sim STILL re-checks the player actually owns it
+// (and gold/range/cap), so this only rejects obviously-malformed input at the boundary.
+function validItemRef(itemId: unknown, rarity: unknown, plus: unknown): boolean {
+  return (
+    typeof itemId === 'string' && itemId.length > 0 && itemId.length <= 64 &&
+    typeof rarity === 'string' && VALID_RARITIES.has(rarity) &&
+    Number.isInteger(plus) && (plus as number) >= 0 && (plus as number) <= MAX_PLUS
+  );
 }
 
 function clamp(v: number, lo: number, hi: number): number {

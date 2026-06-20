@@ -161,3 +161,66 @@ describe('ServerWorld — Layer 2: personal progression (XP/attr/SP/ranks)', () 
     expect(sb.attrPoints).toBe(0);
   });
 });
+
+describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () => {
+  it('self carries the bag + shop, per player', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const s = w.selfState(a);
+    expect(s.inventory).toBeDefined();
+    expect(s.inventory.capacity).toBeGreaterThan(0);
+    expect(s.inventory.equipment.length).toBeGreaterThan(0); // weapon + armor slots
+    expect(s.shop).toBeDefined();
+    expect(s.shop.stock.length).toBeGreaterThan(0); // the vendor sells something
+    expect(s.shop.inRange).toBe(false); // spawned away from the vendor
+  });
+
+  it('loot + gold land in the KILLER, per player', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const b = w.addPlayer('B');
+    farm(w, a, 3000); // only A farms
+    const sa = w.selfState(a);
+    const sb = w.selfState(b);
+    expect(sa.inventory.stacks.length).toBeGreaterThan(0); // A looted items
+    expect(sa.gold).toBeGreaterThan(0); // and earned gold from kills
+    expect(sb.inventory.stacks.length).toBe(0); // B got nothing — loot is personal
+    expect(sb.gold).toBe(0);
+  });
+
+  it('accepts equip — a looted item goes onto the character (server applies it)', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: 'weapon' | 'armor' } | undefined;
+    for (let r = 0; r < 10 && !gear; r++) {
+      farm(w, a, 1200);
+      gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null) as typeof gear;
+    }
+    expect(gear).toBeDefined(); // looted some equippable gear
+    w.command(a, { t: 'equip', itemId: gear!.itemId, rarity: gear!.rarity, plus: gear!.plus });
+    w.step();
+    const eq = w.selfState(a).inventory.equipment.find((e) => e.slot === gear!.equipSlot);
+    expect(eq!.itemId).toBe(gear!.itemId); // it's now equipped (the server decided it)
+  });
+
+  it('the vendor loop works in MP — walk into range, sell loot for gold', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    farm(w, a, 2500); // earn loot to sell
+    const vendor = w.snapshot().entities.find((e) => e.kind === 'npc')!;
+    for (let i = 0; i < 2500 && !w.selfState(a).shop.inRange; i++) {
+      const me = selfOf(w, a);
+      w.command(a, { t: 'set-target', id: null }); // stop attacking
+      w.setIntent(a, vendor.x - me.x, vendor.z - me.z); // walk to the shop
+      w.step();
+    }
+    expect(w.selfState(a).shop.inRange).toBe(true); // reached the vendor
+    const s = w.selfState(a);
+    const sellable = s.inventory.stacks.find((st) => st.sellValue > 0);
+    expect(sellable).toBeDefined();
+    const gold0 = s.gold;
+    w.command(a, { t: 'sell', itemId: sellable!.itemId, rarity: sellable!.rarity, plus: sellable!.plus });
+    w.step(); // sell is drained BEFORE movement, so it lands while still in range
+    expect(w.selfState(a).gold).toBeGreaterThan(gold0); // converted loot to gold
+  });
+});

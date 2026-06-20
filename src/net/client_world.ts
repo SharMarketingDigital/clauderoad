@@ -85,13 +85,13 @@ export class ClientWorld implements IWorld {
     return this.self ? this.self.abilities : EMPTY_ABILITIES;
   }
 
-  // Inventory + shop aren't synced yet (that's a later layer) — empty for now.
+  // The local player's bag/equipment and the vendor view — streamed in `self`.
   inventory(): InventoryView {
-    return EMPTY_INVENTORY;
+    return this.self ? this.self.inventory : EMPTY_INVENTORY;
   }
 
   shop(): ShopView {
-    return EMPTY_SHOP;
+    return this.self ? this.self.shop : EMPTY_SHOP;
   }
 
   botActive(): boolean {

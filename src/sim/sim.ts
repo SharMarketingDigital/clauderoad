@@ -426,7 +426,13 @@ export class Sim implements IWorld {
   }
 
   inventory(): InventoryView {
-    const p = this.ents.get(this.localId);
+    return this.inventoryFor(this.localId);
+  }
+
+  // The bag + equipment for a SPECIFIC player (the server sends this to its owner each
+  // snapshot). The IWorld inventory() uses the local player.
+  inventoryFor(id: number): InventoryView {
+    const p = this.ents.get(id);
     const stacks = p
       ? p.bag.map((s) => ({
           itemId: s.itemId,
@@ -461,7 +467,13 @@ export class Sim implements IWorld {
   }
 
   shop(): ShopView {
-    const p = this.ents.get(this.localId);
+    return this.shopFor(this.localId);
+  }
+
+  // The vendor storefront for a SPECIFIC player (`inRange` depends on that player's
+  // position). The IWorld shop() uses the local player.
+  shopFor(id: number): ShopView {
+    const p = this.ents.get(id);
     return {
       name: VENDOR_NAME,
       stock: VENDOR_STOCK.map((s) => ({

@@ -7,7 +7,9 @@
 // runs the one shared Sim, decides EVERY outcome — position, hit, loot, XP, gold — and
 // streams back (a) the shared world + combat events to everyone and (b) each player's
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
-import type { EntityKind, EnemyTierId, SimEvent, Command, AbilityView } from '../world_api';
+import type {
+  EntityKind, EnemyTierId, SimEvent, Command, AbilityView, InventoryView, ShopView,
+} from '../world_api';
 
 // ---- client -> server (INTENT only) ----
 // `cmd` forwards any gameplay Command (target, ability, equip, buy, …). The server
@@ -51,7 +53,7 @@ export interface NetEvent {
 
 // A player's OWN state — the part of the world only its owner needs (HUD + bag). The
 // server sends this to that one client each snapshot, so personal data never spams
-// everyone. Grows by layer: combat HUD + action bar now; inventory/shop later.
+// everyone: combat HUD + action bar + the player's own bag/equipment + the vendor view.
 export interface SelfSnap {
   targetId: number | null; // the player's selected target (authoritative)
   hp: number;
@@ -70,6 +72,8 @@ export interface SelfSnap {
   weaponPlus: number;
   botActive: boolean; // whether this player's auto-play is on
   abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
+  inventory: InventoryView; // the player's bag + equipped gear (loot lands here)
+  shop: ShopView; // the vendor storefront + whether this player is in range to trade
 }
 
 // ---- server -> client ----
