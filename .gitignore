@@ -1,7 +1,9 @@
 node_modules/
 dist/
+dist-server/
 *.local
 .env
+ecosystem.config.cjs
 .DS_Store
 tmp/
 

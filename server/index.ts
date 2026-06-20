@@ -3,20 +3,55 @@
 // snapshots to everyone. The server decides all positions; clients only send intent.
 //
 // Config is via environment variables (nothing sensitive in code — see .env.example):
-//   PORT         (default 8080)  — the WebSocket port
-//   SNAPSHOT_HZ  (default 10)    — how many snapshots/sec we broadcast
+//   PORT             (default 8080)      — TCP port to listen on
+//   HOST             (default 0.0.0.0)   — bind address (0.0.0.0 accepts external conns)
+//   SNAPSHOT_HZ      (default 10)        — snapshots broadcast per second
+//   ALLOWED_ORIGINS  (default: empty)    — comma-separated list of allowed browser
+//                                          Origins. Set in PRODUCTION (e.g. the Vercel
+//                                          URL). When EMPTY we're in dev: only localhost
+//                                          is allowed. Never wide-open in production.
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { DT } from '../src/sim/sim';
 import type { ClientMessage, ServerMessage } from '../src/net/protocol';
 import { ServerWorld } from './world';
 
 const PORT = Number(process.env.PORT ?? 8080);
+const HOST = process.env.HOST ?? '0.0.0.0';
 const SNAPSHOT_HZ = Number(process.env.SNAPSHOT_HZ ?? 10);
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 const world = new ServerWorld();
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
 
-const wss = new WebSocketServer({ port: PORT });
+// One HTTP server hosts BOTH the healthcheck (plain GET) and the WebSocket upgrade.
+const httpServer = createServer(handleHttp);
+const wss = new WebSocketServer({
+  server: httpServer,
+  verifyClient: (info: { origin: string; secure: boolean; req: IncomingMessage }) => originAllowed(info.origin),
+});
+
+function handleHttp(req: IncomingMessage, res: ServerResponse): void {
+  if (req.method === 'GET' && (req.url === '/health' || req.url === '/healthz')) {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('ok'); // simple liveness probe — curl https://<server>/health -> "ok"
+    return;
+  }
+  res.writeHead(404, { 'content-type': 'text/plain' });
+  res.end('openrealm server');
+}
+
+// Anti-CSRF gate for browser clients. A browser ALWAYS sends Origin on a WS handshake;
+// non-browser clients (CLI tools, the healthcheck) send none and are allowed (the Origin
+// check only stops a malicious WEBSITE from hijacking a visitor's browser into our server).
+function originAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.length > 0) return ALLOWED_ORIGINS.includes(origin); // production allowlist
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin); // dev: localhost only
+}
 
 wss.on('connection', (ws) => {
   ws.on('message', (data) => handleMessage(ws, data));
@@ -68,6 +103,10 @@ setInterval(() => {
   }
 }, 1000 / SNAPSHOT_HZ);
 
-console.log(
-  `[server] openrealm listening on ws://localhost:${PORT} — tick ${Math.round(1 / DT)}Hz, snapshots ${SNAPSHOT_HZ}Hz`,
-);
+httpServer.listen(PORT, HOST, () => {
+  const mode = ALLOWED_ORIGINS.length > 0 ? `origins=[${ALLOWED_ORIGINS.join(', ')}]` : 'dev (localhost origins)';
+  console.log(
+    `[server] openrealm on ${HOST}:${PORT} — tick ${Math.round(1 / DT)}Hz, snapshots ${SNAPSHOT_HZ}Hz, ${mode}`,
+  );
+  console.log(`[server] health: GET http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/health`);
+});

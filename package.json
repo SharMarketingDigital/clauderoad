@@ -3,11 +3,16 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=18.18"
+  },
   "description": "Open-world online RPG, built in the spirit of World of ClaudeCraft.",
   "scripts": {
     "dev": "vite",
     "server": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
+    "build:server": "tsc --noEmit -p server/tsconfig.json && esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/index.js",
+    "start:server": "node dist-server/index.js",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p server/tsconfig.json",
@@ -21,6 +26,7 @@
     "@types/node": "^22.20.0",
     "@types/three": "^0.169.0",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.24.2",
     "tsx": "^4.22.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",

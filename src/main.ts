@@ -134,11 +134,13 @@ function startOnline(url: string, name: string): void {
   requestAnimationFrame(frame);
 }
 
-// Server URL precedence: ?mp=<ws-url>  >  VITE_SERVER_URL (.env)  >  ws://<host>:8080.
+// Server URL precedence: ?mp=<ws-url>  >  VITE_SERVER_URL (env)  >  ws://<host>:8080.
+// VITE_SERVER_URL is the production default (e.g. wss://api.meujogo.com on Vercel);
+// both ws:// and wss:// (secure) are supported. Unset -> local-dev fallback.
 function resolveServerUrl(arg: string | null): string {
-  if (arg && /^wss?:\/\//.test(arg)) return arg;
-  const env = import.meta.env as unknown as Record<string, string | undefined>;
-  if (env.VITE_SERVER_URL) return env.VITE_SERVER_URL;
+  if (arg && /^wss?:\/\//.test(arg)) return arg; // explicit ?mp=ws(s)://host:port
+  const fromEnv = import.meta.env.VITE_SERVER_URL; // inlined by Vite at build time
+  if (fromEnv) return fromEnv;
   return `ws://${location.hostname || 'localhost'}:8080`;
 }
 
