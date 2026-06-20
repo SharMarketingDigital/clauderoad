@@ -4,8 +4,10 @@ import * as THREE from 'three';
 import type { IWorld, EntityKind, EntityView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
 import { EnemyAvatars } from './enemy_avatars';
+import { NpcAvatar } from './npc_avatar';
 import { populateForest } from './forest';
 import { populateVillage } from './village';
+import { setupEnvironment, terrainHeight, type Environment } from './environment';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -38,6 +40,12 @@ export class Renderer {
   private enemyAvatars = new EnemyAvatars();
   private lastEnemyHitSeq = 0; // cursor: spot NEW damage events on the player (to lunge the attacker)
 
+  // The vendor NPC as an animated 3D character (idle). Loads async; capsule fallback.
+  private vendorAvatar = new NpcAvatar('/models/Mage.glb');
+
+  // sky / sun+shadows / undulating ground / grass / fog (all tunable in environment.ts)
+  private env: Environment;
+
   // third-person orbit camera state
   private camYaw = 0;
   private camPitch = 0.5;
@@ -47,22 +55,12 @@ export class Renderer {
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.gl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.scene.background = new THREE.Color(0x9fc0e8);
-    this.scene.fog = new THREE.Fog(0x9fc0e8, 70, 150);
-
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 600);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-    sun.position.set(40, 60, 20);
-    this.scene.add(sun);
-    this.scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x3a5a2a, 0.85));
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(2 * 70, 2 * 70),
-      new THREE.MeshStandardMaterial({ color: 0x4f7a3a }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    this.scene.add(ground);
+    // Atmosphere: gradient sky + clouds, sun with soft shadows, undulating
+    // colour-varied ground, dense grass, distance fog. The sky/sun follow the
+    // player each frame (see render()). All knobs live in environment.ts.
+    this.env = setupEnvironment(this.scene, this.gl);
 
     this.selectionRing = makeSelectionRing();
     this.scene.add(this.selectionRing);
@@ -133,6 +131,13 @@ export class Renderer {
     this.applyFlashes(dt);
     this.updatePlayerAvatar(world, dt);
     this.updateEnemyAvatars(world, dt);
+    // Keep the sky centred on the player and the sun's shadow frustum on them.
+    const pid = world.localPlayerId();
+    const pp = pid != null ? world.entities().find((e) => e.id === pid) : undefined;
+    const px = pp ? pp.x : 0;
+    const pz = pp ? pp.z : 0;
+    this.env.update(dt, px, pz, terrainHeight(px, pz));
+    if (this.vendorAvatar.ready) this.vendorAvatar.update(dt); // keep the vendor's idle playing
     this.updateCamera(world);
     this.gl.render(this.scene, this.camera);
   }
@@ -246,7 +251,8 @@ export class Renderer {
   private desiredRoot(e: EntityView): THREE.Object3D | null {
     if (e.kind === 'player') return this.playerAvatar.ready ? this.playerAvatar.root : null;
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
-    return null; // NPCs (the vendor) stay capsules
+    if (e.kind === 'npc') return this.vendorAvatar.ready ? this.vendorAvatar.root : null; // the vendor
+    return null;
   }
 
   private sync(world: IWorld): void {
@@ -276,7 +282,7 @@ export class Renderer {
         this.scene.add(m);
         this.meshes.set(e.id, m);
       }
-      m.position.set(e.x, 0, e.z);
+      m.position.set(e.x, terrainHeight(e.x, e.z), e.z); // sit on the (visual) terrain
       m.rotation.y = e.facing;
       updateGlow(m, e.weaponPlus);
       updateHostileTint(m, e);
@@ -293,7 +299,7 @@ export class Renderer {
     }
     // Park the selection ring under the current target (if any).
     if (targetView) {
-      this.selectionRing.position.set(targetView.x, 0.06, targetView.z);
+      this.selectionRing.position.set(targetView.x, terrainHeight(targetView.x, targetView.z) + 0.06, targetView.z);
       this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : (TIER_SCALE[targetView.tier] ?? 1)); // match boss/tier size
       this.selectionRing.visible = true;
     } else {
@@ -312,14 +318,15 @@ export class Renderer {
         pz = p.z;
       }
     }
+    const py = terrainHeight(px, pz); // follow the player up/down the hills
     const cy = Math.cos(this.camPitch);
     const sy = Math.sin(this.camPitch);
     this.camera.position.set(
       px + Math.sin(this.camYaw) * this.camDist * cy,
-      1.5 + this.camDist * sy,
+      py + 1.5 + this.camDist * sy,
       pz + Math.cos(this.camYaw) * this.camDist * cy,
     );
-    this.camera.lookAt(px, 1.2, pz);
+    this.camera.lookAt(px, py + 1.2, pz);
   }
 
   private resize(): void {
@@ -353,6 +360,7 @@ function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
   );
   nose.position.set(0, 1.0, 0.55); // +Z is "forward" (matches facing math)
   g.add(body, head, nose);
+  body.castShadow = head.castShadow = nose.castShadow = true; // capsule fallback drops a shadow too
   g.userData.body = body; // so the per-frame hostile tint can recolor it
   // Status-effect marker: a small bead above the head, shown + colored by the
   // active status (basic material, so the hit-flash never touches it).

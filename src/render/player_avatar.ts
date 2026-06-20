@@ -144,6 +144,7 @@ export class PlayerAvatar {
     // can get wrongly frustum-culled; disable culling on the whole avatar.
     this.root.traverse((o) => {
       o.frustumCulled = false;
+      o.castShadow = true;
     });
 
     this.ready = true;

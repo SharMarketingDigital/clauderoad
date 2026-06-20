@@ -92,8 +92,8 @@ export async function populateVillage(scene: THREE.Scene): Promise<void> {
   names.forEach((n, i) => {
     const s = gltfs[i].scene;
     s.traverse((o) => {
-      o.castShadow = false;
-      o.receiveShadow = false;
+      o.castShadow = true; // houses drop shadows
+      o.receiveShadow = true; // and catch them from each other / the chimney
     });
     tpl.set(n, s);
   });

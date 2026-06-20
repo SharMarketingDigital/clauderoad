@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VILLAGE_CX, VILLAGE_CZ, VILLAGE_CLEAR } from './village';
+import { terrainHeight } from './environment';
 
 const DENSITY = 1.0; // global multiplier on every count below — lower it if the scene feels heavy
 const SPREAD = 68; // half-extent of the scatter area (the ground plane is ~70 from centre)
@@ -106,7 +107,7 @@ export async function populateForest(scene: THREE.Scene): Promise<void> {
       const model = models.get(file);
       if (!model) continue;
       const s = clamp((kind.targetH / model.height) * (kind.varMin + rnd() * (kind.varMax - kind.varMin)), 0.1, 6);
-      pos.set(x, -model.minY * s, z); // seat the base on the ground
+      pos.set(x, terrainHeight(x, z) - model.minY * s, z); // seat the base on the (visual) terrain
       euler.set(0, rnd() * Math.PI * 2, 0);
       quat.setFromEuler(euler);
       scl.setScalar(s);
@@ -130,7 +131,7 @@ export async function populateForest(scene: THREE.Scene): Promise<void> {
       const inst = new THREE.InstancedMesh(part.geo, part.mat, mats.length);
       mats.forEach((m, i) => inst.setMatrixAt(i, m));
       inst.instanceMatrix.needsUpdate = true;
-      inst.castShadow = false;
+      inst.castShadow = true; // trees/rocks/bushes drop shadows
       inst.receiveShadow = false;
       forest.add(inst);
     }

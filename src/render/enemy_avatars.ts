@@ -80,6 +80,7 @@ class EnemyAvatar {
         }
       }
       o.frustumCulled = false; // a skinned mesh's static bbox can be wrongly culled when animated
+      o.castShadow = true;
     });
     if (style.tint !== undefined) {
       for (const m of this.materials) {
