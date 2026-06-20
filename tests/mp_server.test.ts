@@ -53,12 +53,15 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     expect(w.selfState(b).targetId).toBeNull(); // B unaffected — independent
   });
 
-  it('rejects a command not wired in this layer (set-bot stays off)', () => {
+  it('ignores an unknown / malformed command at the boundary (no crash)', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
-    w.command(a, { t: 'set-bot', on: true }); // Layer 4 — not accepted yet
+    const hp0 = w.selfState(a).hp;
+    w.command(a, { t: 'not-a-real-command' } as never); // unknown discriminant -> default
+    w.command(a, null as never); // non-object -> rejected up front
+    w.command(a, { t: 'use-ability' } as never); // missing slot -> field guard rejects
     w.step();
-    expect(w.selfState(a).botActive).toBe(false);
+    expect(w.selfState(a).hp).toBe(hp0); // nothing threw; state intact
   });
 
   it('routes use-ability — a cast fires on the server (MP spent or cooldown started)', () => {
@@ -222,5 +225,46 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     w.command(a, { t: 'sell', itemId: sellable!.itemId, rarity: sellable!.rarity, plus: sellable!.plus });
     w.step(); // sell is drained BEFORE movement, so it lands while still in range
     expect(w.selfState(a).gold).toBeGreaterThan(gold0); // converted loot to gold
+  });
+});
+
+describe('ServerWorld — Layer 4: per-player auto-play (bot)', () => {
+  it('accepts set-bot and toggles ONLY that player', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const b = w.addPlayer('B');
+    w.command(a, { t: 'set-bot', on: true });
+    w.step();
+    expect(w.selfState(a).botActive).toBe(true); // A's bot on
+    expect(w.selfState(b).botActive).toBe(false); // B unaffected (per-player)
+    w.command(a, { t: 'set-bot', on: false });
+    w.step();
+    expect(w.selfState(a).botActive).toBe(false); // toggled back off
+  });
+
+  it('the bot plays the SERVER-side player with NO manual input (it survives + evolves)', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    w.command(a, { t: 'set-bot', on: true });
+    const before = w.selfState(a);
+    for (let i = 0; i < 4000; i++) w.step(); // hands off — the server's bot plays this player
+    const after = w.selfState(a);
+    expect(after.botActive).toBe(true);
+    // level+xp only ever goes UP (kills), so this proves the bot fought + progressed alone.
+    expect(after.level + after.xp).toBeGreaterThan(before.level + before.xp);
+  });
+
+  it('two players run INDEPENDENT bots — A on, B off', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const b = w.addPlayer('B');
+    w.command(a, { t: 'set-bot', on: true }); // only A's bot is on; B sends nothing
+    for (let i = 0; i < 3000; i++) w.step();
+    const sa = w.selfState(a);
+    const sb = w.selfState(b);
+    expect(sa.level + sa.xp).toBeGreaterThan(1); // A's bot farmed + progressed
+    expect(sb.level).toBe(1); // B did nothing — no bot, no input
+    expect(sb.xp).toBe(0);
+    expect(sb.botActive).toBe(false);
   });
 });

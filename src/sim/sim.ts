@@ -135,8 +135,11 @@ export class Sim implements IWorld {
 
   // The town vendor NPC's entity id (a fixed, non-combat shopkeeper).
   private vendorId = 0;
-  // Auto-play: when on, the sim drives the player and manual input is ignored.
-  private botEnabled = false;
+  // Auto-play: the set of player ids whose bot is ON. The bot drives each of those
+  // players (survive/evolve) through the SAME applyAction path a human's commands use,
+  // and manual input from a bot-driven player is ignored. Per-player so the server can
+  // run a bot for each client independently; single-player just has the one local id.
+  private botPlayers = new Set<number>();
 
   // `spawnLocal` controls whether a local "Hero" player is created. Offline (and the
   // tests) keep the default — one local player, bit-identical to before. The SERVER
@@ -187,6 +190,7 @@ export class Sim implements IWorld {
     this.ents.delete(id);
     this.moveIntents.delete(id);
     this.pendings.delete(id);
+    this.botPlayers.delete(id);
     const i = this.playerIds.indexOf(id);
     if (i >= 0) this.playerIds.splice(i, 1);
     for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
@@ -486,7 +490,13 @@ export class Sim implements IWorld {
   }
 
   botActive(): boolean {
-    return this.botEnabled;
+    return this.botActiveFor(this.localId);
+  }
+
+  // Whether a SPECIFIC player's auto-play is on (the server reads this per client for
+  // that player's HUD). IWorld botActive() uses the local player.
+  botActiveFor(id: number): boolean {
+    return this.botPlayers.has(id);
   }
 
   sendCommand(cmd: Command): void {
@@ -535,26 +545,30 @@ export class Sim implements IWorld {
     for (const e of [...this.ents.values()]) this.stepStatuses(e);
 
     // --- per player: drain one-shot actions (+ the bot), then move ---
-    // The bot toggle is always honored; other MANUAL commands apply only while the
-    // bot is OFF (auto-play ignores manual input). The bot drives only the LOCAL
-    // player (single-player auto-play). One player => identical order to before.
+    // Each player's bot toggle is always honored; that player's other MANUAL commands
+    // apply only while ITS bot is OFF (auto-play ignores manual input). A bot-enabled
+    // player is driven by botStep. One player => identical order/behavior to before.
     for (const id of this.playerIds) {
       const p = this.ents.get(id);
       if (!p) continue;
       const pend = this.pendings.get(id)!;
       for (const cmd of pend) {
         if (cmd.t === 'set-bot') {
-          this.botEnabled = cmd.on;
-          if (!cmd.on) {
+          if (cmd.on) {
+            this.botPlayers.add(id);
+          } else {
+            this.botPlayers.delete(id);
             this.moveIntents.set(id, { t: 'stop' }); // hand control back to the human
             p.targetId = null;
           }
-        } else if (!this.botEnabled) {
+        } else if (!this.botPlayers.has(id)) {
           this.applyAction(p, cmd);
         }
       }
       pend.length = 0;
-      if (this.botEnabled && id === this.localId) this.botStep(p);
+      // A bot-driven player: botStep OWNS its movement (it overwrites moveIntents below
+      // every tick), so a racing/tampered client move-intent is harmlessly stomped.
+      if (this.botPlayers.has(id)) this.botStep(p);
       this.stepPlayer(p);
     }
 

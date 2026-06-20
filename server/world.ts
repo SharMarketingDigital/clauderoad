@@ -102,8 +102,12 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
         }
         return;
+      // --- Layer 4: auto-play (each player toggles ITS OWN bot) ---
+      case 'set-bot':
+        if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-bot', on: cmd.on });
+        return;
       default:
-        return; // not accepted yet (a later layer wires it)
+        return; // unknown / unsupported command — ignored
     }
   }
 
@@ -133,7 +137,7 @@ export class ServerWorld {
       level: e.level, xp: e.xp, xpToNext: e.xpToNext, attrPoints: e.attrPoints,
       gold: e.gold, sp: e.sp, str: e.str, int: e.int,
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
-      botActive: this.sim.botActive(),
+      botActive: this.sim.botActiveFor(id),
       abilities, inventory, shop,
     };
   }
