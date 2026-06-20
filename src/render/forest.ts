@@ -8,6 +8,7 @@
 // time. Per-instance scale + rotation keep it from reading as a tiled grid.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { VILLAGE_CX, VILLAGE_CZ, VILLAGE_CLEAR } from './village';
 
 const DENSITY = 1.0; // global multiplier on every count below — lower it if the scene feels heavy
 const SPREAD = 68; // half-extent of the scatter area (the ground plane is ~70 from centre)
@@ -100,6 +101,7 @@ export async function populateForest(scene: THREE.Scene): Promise<void> {
       const x = (rnd() * 2 - 1) * SPREAD;
       const z = (rnd() * 2 - 1) * SPREAD;
       if (Math.hypot(x, z) < CLEAR) continue; // keep the spawn / start area clear
+      if (Math.hypot(x - VILLAGE_CX, z - VILLAGE_CZ) < VILLAGE_CLEAR) continue; // no trees inside the village
       const file = kind.files[Math.floor(rnd() * kind.files.length)];
       const model = models.get(file);
       if (!model) continue;

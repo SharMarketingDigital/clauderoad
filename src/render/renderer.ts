@@ -5,6 +5,7 @@ import type { IWorld, EntityKind, EntityView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
 import { EnemyAvatars } from './enemy_avatars';
 import { populateForest } from './forest';
+import { populateVillage } from './village';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -66,9 +67,10 @@ export class Renderer {
     this.selectionRing = makeSelectionRing();
     this.scene.add(this.selectionRing);
 
-    // Decorative scenery: real KayKit forest models, loaded async and scattered.
-    // Fire-and-forget — the game runs while it loads; failure just leaves it bare.
+    // Decorative scenery (async, fire-and-forget — the game runs while it loads;
+    // failure just leaves it bare). Both are presentation-only with no collision.
     populateForest(this.scene).catch((err) => console.error('[forest] failed to load', err));
+    populateVillage(this.scene).catch((err) => console.error('[village] failed to load', err));
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
