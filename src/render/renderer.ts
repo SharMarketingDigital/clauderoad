@@ -63,7 +63,9 @@ export class Renderer {
   private clipCamSaved: { pitch: number; dist: number } | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.gl = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // preserveDrawingBuffer lets the clip recorder copy this canvas into its 9:16
+    // vertical crop: drawImage() of a WebGL canvas needs the buffer kept around.
+    this.gl = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.gl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 600);

@@ -4,8 +4,9 @@
 //   • Recorder    — manual ● REC with a "HUD: off/on" mode toggle:
 //                     off  -> canvas.captureStream() (clean 3D, no HUD, no picker)
 //                     on   -> getDisplayMedia() (whole tab the user picks, with HUD)
-//   • ClipRecorder — one-click 🎬 Clipe: auto-records a fixed CLIP_SECONDS scene in
-//                     BOTH ways at once (clean + with-HUD) for a "Dia 1, Dia 2..."
+//   • ClipRecorder — one-click 🎬 Clipe: auto-records a fixed CLIP_SECONDS scene as
+//                     up to THREE files at once — clean (no HUD), with-HUD, and a 9:16
+//                     vertical (Reels) crop of the scene centre — for a "Dia 1, Dia 2..."
 //                     evolution series. It turns the auto-play bot on, freezes a
 //                     consistent golden-hour light + camera, records, then restores.
 //
@@ -20,6 +21,10 @@ const CLIP_TIME = 0.7; // frozen time of day (0..1): ~0.7 = bright golden late-a
 const CLIP_FPS = 30; // both clip streams capture at this rate
 const CLIP_BITRATE = 6_000_000; // ~6 Mbps EACH — a touch lower since two streams encode at once
 const SHOW_COUNTDOWN_OVERLAY = true; // on-screen countdown (also shows in the HUD clip); false -> tab-title only
+// ---- tunables: vertical (9:16 Reels) clip ----
+const CLIP_VERTICAL = true; // also produce a 9:16 vertical cut of the scene centre (clean, no HUD)
+const VERT_W = 1080; // vertical output width (9:16 -> 1080×1920); lower both if 3 captures get heavy
+const VERT_H = 1920; // vertical output height
 // ---- shared ----
 const MIME_CANDIDATES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
 // ------------------------------------
@@ -168,13 +173,18 @@ export class ClipRecorder {
   private countdownTimer = 0;
   private botWasOn = false;
   private targetWas: number | null = null;
+  // 9:16 vertical: an aux 2D canvas the game canvas's centre is copied into each frame
+  private vertical: Track | null = null;
+  private vertCtx: CanvasRenderingContext2D | null = null;
+  private vertRaf = 0;
+  private vertLastDraw = 0;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly hooks: ClipHooks) {
     injectStyle();
     this.button = document.createElement('button');
     this.button.className = 'cr-clip-btn';
     this.button.textContent = '🎬 Clipe';
-    this.button.title = `Grava ${CLIP_SECONDS}s automáticos em 2 arquivos (sem HUD + com HUD) pra série de evolução`;
+    this.button.title = `Grava ${CLIP_SECONDS}s automáticos em 3 arquivos (sem HUD + com HUD + vertical 9:16) pra série de evolução`;
     getDock().appendChild(this.button);
     this.button.addEventListener('click', () => void this.startClip());
   }
@@ -222,12 +232,13 @@ export class ClipRecorder {
     await nextFrame();
     if (!this.active) return; // share stopped during the setup frame -> already restored
 
-    // 4) Start BOTH recorders at the same instant -> the two files cover the same ~15s.
+    // 4) Start every recorder at the same instant -> all files cover the same ~15s.
     const cleanStream = this.canvas.captureStream(CLIP_FPS);
     this.clean = makeTrack(cleanStream, mime);
     this.hud = makeTrack(displayStream, mime);
     this.clean.rec.start();
     this.hud.rec.start();
+    this.startVertical(mime); // optional 9:16 (Reels) cut of the scene centre, clean
 
     // 5) Countdown + auto-stop at CLIP_SECONDS.
     let remaining = CLIP_SECONDS;
@@ -239,10 +250,61 @@ export class ClipRecorder {
     }, 1000);
   }
 
+  // Spin up the optional 9:16 vertical recorder: an aux canvas the game canvas's
+  // central column is copied into each frame, then captured (clean — no HUD). Needs
+  // the renderer's preserveDrawingBuffer so drawImage(webglCanvas) isn't blank.
+  private startVertical(mime: string): void {
+    if (!CLIP_VERTICAL) return;
+    const aux = document.createElement('canvas');
+    aux.width = VERT_W;
+    aux.height = VERT_H;
+    const ctx = aux.getContext('2d');
+    if (!ctx || typeof aux.captureStream !== 'function') {
+      console.warn('[clip] vertical capture not supported here');
+      return;
+    }
+    this.vertCtx = ctx;
+    this.vertLastDraw = 0;
+    this.drawVertical(); // prime the first frame so the capture never opens blank
+    this.vertical = makeTrack(aux.captureStream(CLIP_FPS), mime);
+    this.vertical.rec.start();
+    this.vertRaf = requestAnimationFrame(this.vertLoop);
+  }
+
+  // Copy the central 9:16 column of the live game canvas into the aux canvas, ~CLIP_FPS
+  // times a second while the clip records (throttled so it doesn't draw at full 60).
+  private readonly vertLoop = (): void => {
+    if (!this.active || !this.vertCtx) return;
+    const now = performance.now();
+    if (now - this.vertLastDraw >= 1000 / CLIP_FPS - 1) {
+      this.vertLastDraw = now;
+      this.drawVertical();
+    }
+    this.vertRaf = requestAnimationFrame(this.vertLoop);
+  };
+
+  private drawVertical(): void {
+    const ctx = this.vertCtx;
+    if (!ctx) return;
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    if (cw === 0 || ch === 0) return;
+    // central column, full height, width = height * 9/16 (clamped if the canvas is
+    // somehow narrower than 9:16), scaled up to fill the vertical output.
+    const aspect = VERT_W / VERT_H;
+    let cropW = ch * aspect;
+    let cropH = ch;
+    if (cropW > cw) { cropW = cw; cropH = cw / aspect; }
+    const cropX = (cw - cropW) / 2;
+    const cropY = (ch - cropH) / 2;
+    ctx.drawImage(this.canvas, cropX, cropY, cropW, cropH, 0, 0, VERT_W, VERT_H);
+  }
+
   private finishClip(id: string): void {
     if (!this.active) return;
     this.active = false; // clear the "recording" flag first, so a future clip can always start
     if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = 0; }
+    if (this.vertRaf) { cancelAnimationFrame(this.vertRaf); this.vertRaf = 0; } // stop the copy loop
 
     try {
       // Recorder teardown is fallible browser I/O (MediaRecorder.stop + blob download,
@@ -250,9 +312,12 @@ export class ClipRecorder {
       // must NEVER skip the game restore below (or the camera/time/bot stay stuck).
       stopTrack(this.clean, `clauderoad-${id}-clean.webm`);
       stopTrack(this.hud, `clauderoad-${id}-hud.webm`);
+      stopTrack(this.vertical, `clauderoad-${id}-vertical.webm`);
     } finally {
       this.clean = null;
       this.hud = null;
+      this.vertical = null;
+      this.vertCtx = null;
       this.restoreGame(); // ALWAYS undo every clip-only override
     }
   }
