@@ -11,6 +11,7 @@ import { Renderer } from './render/renderer';
 import { Input } from './game/input';
 import { Hud } from './ui/hud';
 import { CombatText } from './ui/combat_text';
+import { makeCombatFeedback } from './ui/combat_feedback';
 import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
@@ -26,7 +27,6 @@ else startOffline();
 // ---------- single-player (offline) ----------
 function startOffline(): void {
   const WORLD_SEED = 1337; // fixed seed -> the world is the same place every load
-  const FCT_WORLD_Y = 2.2; // height (just above the head) where damage numbers pop
 
   const sim = new Sim(WORLD_SEED);
   const renderer = new Renderer(canvas);
@@ -44,50 +44,12 @@ function startOffline(): void {
     setClipCamera: (on) => renderer.setClipCamera(on),
   });
 
+  // Turn new sim events into presentation (hit flash + damage number, level-up, etc.).
+  // The SAME helper runs in multiplayer, reading the networked world's events.
+  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, hud);
+
   let last = performance.now() / 1000;
   let acc = 0;
-  let lastEventSeq = 0; // cursor: highest sim event seq already turned into visuals
-
-  // Turn new sim events into presentation: hit flash + damage number, level-up, etc.
-  function drawCombatFeedback(): void {
-    for (const ev of sim.recentEvents()) {
-      if (ev.seq <= lastEventSeq) continue;
-      lastEventSeq = ev.seq;
-      if (ev.kind === 'damage') {
-        renderer.flash(ev.targetId);
-        const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
-        if (p.visible) {
-          const incoming = ev.targetId === sim.localPlayerId();
-          combatText.spawn(p.x, p.y, String(ev.amount), incoming ? 'hurt' : 'damage');
-        }
-      } else if (ev.kind === 'levelup') {
-        renderer.flash(ev.targetId);
-        const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
-        if (p.visible) combatText.spawn(p.x, p.y, `NÍVEL ${ev.amount}!`, 'levelup');
-      } else if (ev.kind === 'enhance-success') {
-        renderer.flash(ev.targetId);
-        const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
-        if (p.visible) combatText.spawn(p.x, p.y, `Refino +${ev.amount}!`, 'levelup');
-      } else if (ev.kind === 'enhance-fail') {
-        const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
-        if (p.visible) combatText.spawn(p.x, p.y, `Falhou (+${ev.amount})`, 'fail');
-      } else if (ev.kind === 'heal') {
-        renderer.flash(ev.targetId);
-        const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
-        if (p.visible) combatText.spawn(p.x, p.y, `+${ev.amount}`, 'heal');
-      } else if (ev.kind === 'boss-spawn') {
-        hud.announce(`Um chefe surgiu: ${ev.text ?? 'Chefe'}!`);
-      } else if (ev.kind === 'boss-defeat') {
-        hud.announce(`${ev.text ?? 'O chefe'} foi derrotado!`);
-      } else if (ev.kind === 'boss-summon') {
-        hud.announce(`${ev.text ?? 'O chefe'} chama a matilha!`);
-      } else if (ev.kind === 'death') {
-        hud.announce('Você morreu! Renascendo...');
-      } else if (ev.kind === 'respawn') {
-        hud.announce('Você renasceu.');
-      }
-    }
-  }
 
   function frame(): void {
     const now = performance.now() / 1000;
@@ -104,7 +66,7 @@ function startOffline(): void {
     }
 
     renderer.render(sim);
-    drawCombatFeedback(); // after render: project with this frame's updated camera
+    drawCombatFeedback(sim); // after render: project with this frame's updated camera
     hud.update(sim);
     requestAnimationFrame(frame);
   }
@@ -117,6 +79,10 @@ function startOnline(url: string, name: string): void {
   const input = new Input(canvas, renderer);
   const world = new ClientWorld(url, name); // a network-backed IWorld
   const mpHud = new MpHud();
+  const combatText = new CombatText();
+  // SAME feedback as offline: the server streams combat events, we pop damage numbers,
+  // flash the hit, and banner deaths/boss spawns — identically on every client.
+  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, mpHud);
 
   let last = performance.now() / 1000;
   function frame(): void {
@@ -125,9 +91,10 @@ function startOnline(url: string, name: string): void {
     last = now;
     if (dt > 0.25) dt = 0.25;
 
-    input.apply(world); // WASD -> camera-relative direction -> move-intent to the server
+    input.apply(world); // WASD + Tab/click/1-9 -> intent to the server (it decides combat)
     world.update(dt); // advance snapshot interpolation
-    renderer.render(world); // local player = Knight, other players = capsules
+    renderer.render(world); // local player = Knight, other players = capsules, mobs = avatars
+    drawCombatFeedback(world); // after render: damage numbers from the server's events
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     requestAnimationFrame(frame);
   }

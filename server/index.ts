@@ -19,12 +19,13 @@ import { ServerWorld } from './world';
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const SNAPSHOT_HZ = Number(process.env.SNAPSHOT_HZ ?? 10);
+const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337); // fixed -> the same mob layout every boot
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-const world = new ServerWorld();
+const world = new ServerWorld(WORLD_SEED);
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
 
 // One HTTP server hosts BOTH the healthcheck (plain GET) and the WebSocket upgrade.
@@ -76,6 +77,15 @@ function handleMessage(ws: WebSocket, data: RawData): void {
   } else if (msg.t === 'move-intent') {
     const id = clientIds.get(ws);
     if (id != null) world.setIntent(id, msg.dx, msg.dz);
+  } else if (msg.t === 'set-target') {
+    const id = clientIds.get(ws);
+    if (id != null) world.setTarget(id, typeof msg.id === 'number' ? msg.id : null);
+  } else if (msg.t === 'cycle-target') {
+    const id = clientIds.get(ws);
+    if (id != null) world.cycleTarget(id);
+  } else if (msg.t === 'use-ability') {
+    const id = clientIds.get(ws);
+    if (id != null) world.useAbility(id, msg.slot);
   }
 }
 
@@ -94,10 +104,11 @@ function send(ws: WebSocket, msg: ServerMessage): void {
 // Fixed-timestep simulation tick (the server is the clock).
 setInterval(() => world.step(), DT * 1000);
 
-// Snapshot broadcast — one shared message to every connected client.
+// Snapshot broadcast — one shared message to every connected client (the SAME world +
+// the SAME combat events for everyone, so the fight is identical across clients).
 setInterval(() => {
   if (clientIds.size === 0) return;
-  const payload = JSON.stringify({ t: 'snapshot', players: world.snapshot() } satisfies ServerMessage);
+  const payload = JSON.stringify({ t: 'snapshot', ...world.snapshot() } satisfies ServerMessage);
   for (const ws of clientIds.keys()) {
     if (ws.readyState === WebSocket.OPEN) ws.send(payload);
   }

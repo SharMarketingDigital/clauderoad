@@ -112,12 +112,13 @@ export class Sim implements IWorld {
   private ents = new Map<number, Entity>();
   private nextId = 1;
   private localId: number;
-  // Continuous movement intent (held until changed).
-  private moveIntent: Command = { t: 'stop' };
-  // One-shot actions (target selection, later: ability casts) queued by the
-  // host and drained at the start of the next tick — so ALL state mutation
-  // still happens inside step(), keeping the sim deterministic.
-  private pending: Command[] = [];
+  // MULTIPLAYER: the sim supports N players (the server runs ONE shared world). Each
+  // player has its OWN held movement intent + queued one-shot actions, keyed by id.
+  // `playerIds` is the deterministic (join-order) iteration list. Single-player has a
+  // single entry (the local player), so the offline behavior is bit-identical.
+  private moveIntents = new Map<number, Command>();
+  private pendings = new Map<number, Command[]>();
+  private playerIds: number[] = [];
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
   private respawnQueue: number[] = [];
   // World boss: the live boss entity id (null when none) and the tick at which
@@ -137,14 +138,69 @@ export class Sim implements IWorld {
   // Auto-play: when on, the sim drives the player and manual input is ignored.
   private botEnabled = false;
 
-  constructor(seed: number) {
+  // `spawnLocal` controls whether a local "Hero" player is created. Offline (and the
+  // tests) keep the default — one local player, bit-identical to before. The SERVER
+  // passes `false`: it has NO local player and instead adds networked players via
+  // addPlayer(), so its world is purely the connected clients + the shared mobs.
+  constructor(seed: number, spawnLocal = true) {
     this.rng = new Rng(seed);
     // Enemy tiers roll from an INDEPENDENT deterministic substream so adding the
     // feature doesn't reshuffle the main loot/position Rng — worlds stay comparable.
     this.tierRng = new Rng((seed ^ 0x9e3779b9) >>> 0);
-    this.localId = this.spawnPlayer('Hero');
+    if (spawnLocal) {
+      this.localId = this.spawnPlayer('Hero');
+      this.registerPlayer(this.localId);
+    } else {
+      this.localId = 0; // server world: no local player (clients join via addPlayer)
+    }
     for (let i = 0; i < ENEMY_COUNT; i++) this.spawnEnemy(); // the starting pack is all baseline
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
+  }
+
+  // Wire up a player's per-player intent/command state and add it to the iteration
+  // list. Used by the constructor (local player) and addPlayer (networked players).
+  private registerPlayer(id: number): void {
+    this.playerIds.push(id);
+    this.moveIntents.set(id, { t: 'stop' });
+    this.pendings.set(id, []);
+  }
+
+  // ---------- multiplayer (the SERVER drives these; offline never does) ----------
+  // Add a networked player and return its id. Spawns are spread on a small ring (by
+  // id) so two players don't stack on the same spot. Deterministic — no Rng (the ring
+  // is a pure function of the id), so the shared world stays reproducible.
+  addPlayer(name: string): number {
+    const id = this.spawnPlayer(name);
+    const p = this.ents.get(id)!;
+    const a = id * 2.399963229728653; // golden angle -> an even, non-overlapping spread
+    p.x = Math.cos(a) * 4;
+    p.z = Math.sin(a) * 4;
+    p.homeX = p.x;
+    p.homeZ = p.z;
+    this.registerPlayer(id);
+    return id;
+  }
+
+  // Remove a networked player (on disconnect). Drops its per-player state and clears
+  // any enemy that was aggroed on it, so no mob chases a ghost.
+  removePlayer(id: number): void {
+    this.ents.delete(id);
+    this.moveIntents.delete(id);
+    this.pendings.delete(id);
+    const i = this.playerIds.indexOf(id);
+    if (i >= 0) this.playerIds.splice(i, 1);
+    for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
+  }
+
+  // Route a networked player's command into the world (same validation path as the
+  // local player's sendCommand). The client only ever sends intent; the sim decides.
+  sendCommandFor(id: number, cmd: Command): void {
+    this.routeCommand(id, cmd);
+  }
+
+  // The ids of all players currently in the world (server snapshot helper).
+  players(): ReadonlyArray<number> {
+    return this.playerIds;
   }
 
   // ---------- spawning ----------
@@ -410,10 +466,18 @@ export class Sim implements IWorld {
   }
 
   sendCommand(cmd: Command): void {
-    // Movement is a held intent (latest wins); everything else is a one-shot
-    // action queued for the next tick.
-    if (cmd.t === 'move' || cmd.t === 'stop') this.moveIntent = cmd;
-    else this.pending.push(cmd);
+    // The local (offline) player. Networked players use sendCommandFor(id, …).
+    this.routeCommand(this.localId, cmd);
+  }
+
+  // Movement is a held intent (latest wins); everything else is a one-shot action
+  // queued for the next tick — so ALL state mutation still happens inside step().
+  private routeCommand(id: number, cmd: Command): void {
+    if (cmd.t === 'move' || cmd.t === 'stop') {
+      if (this.moveIntents.has(id)) this.moveIntents.set(id, cmd);
+    } else {
+      this.pendings.get(id)?.push(cmd);
+    }
   }
 
   entities(): ReadonlyArray<EntityView> {
@@ -445,39 +509,53 @@ export class Sim implements IWorld {
     // Tick status effects (DoT damage + expiry) for everyone first, so a just-
     // expired stun lets the entity act this tick. Snapshot: a DoT may remove an entity.
     for (const e of [...this.ents.values()]) this.stepStatuses(e);
-    const player = this.ents.get(this.localId);
-    // Drain one-shot actions. The bot toggle is always honored; other MANUAL
-    // commands apply only while the bot is OFF (auto-play ignores manual input).
-    // Then, if the bot is on, it decides the player's actions + movement this tick.
-    if (player) {
-      for (const cmd of this.pending) {
+
+    // --- per player: drain one-shot actions (+ the bot), then move ---
+    // The bot toggle is always honored; other MANUAL commands apply only while the
+    // bot is OFF (auto-play ignores manual input). The bot drives only the LOCAL
+    // player (single-player auto-play). One player => identical order to before.
+    for (const id of this.playerIds) {
+      const p = this.ents.get(id);
+      if (!p) continue;
+      const pend = this.pendings.get(id)!;
+      for (const cmd of pend) {
         if (cmd.t === 'set-bot') {
           this.botEnabled = cmd.on;
           if (!cmd.on) {
-            this.moveIntent = { t: 'stop' }; // hand control back to the human
-            player.targetId = null;
+            this.moveIntents.set(id, { t: 'stop' }); // hand control back to the human
+            p.targetId = null;
           }
         } else if (!this.botEnabled) {
-          this.applyAction(player, cmd);
+          this.applyAction(p, cmd);
         }
       }
-      this.pending.length = 0;
-      if (this.botEnabled) this.botStep(player);
-    } else {
-      this.pending.length = 0;
+      pend.length = 0;
+      if (this.botEnabled && id === this.localId) this.botStep(p);
+      this.stepPlayer(p);
     }
-    if (player) this.stepPlayer(player);
+
+    // --- enemies act on the post-move positions (aggro the NEAREST living player) ---
     for (const e of this.ents.values()) {
-      if (e.kind === 'enemy') this.stepEnemy(e, player);
+      if (e.kind === 'enemy') this.stepEnemy(e);
     }
-    // Combat runs on the post-movement positions, then deaths repopulate.
-    if (player) this.autoAttack(player);
-    if (player) this.respawnPlayer(player); // revive a downed player once its timer elapses
+
+    // --- combat + respawn per player, on the post-movement positions ---
+    for (const id of this.playerIds) {
+      const p = this.ents.get(id);
+      if (p) this.autoAttack(p);
+    }
+    for (const id of this.playerIds) {
+      const p = this.ents.get(id);
+      if (p) this.respawnPlayer(p); // revive a downed player once its timer elapses
+    }
     this.processRespawns();
     this.updateBoss();
     this.pruneEvents();
     // A target that died or no longer exists clears the selection.
-    if (player) this.validateTarget(player);
+    for (const id of this.playerIds) {
+      const p = this.ents.get(id);
+      if (p) this.validateTarget(p);
+    }
   }
 
   // ---------- combat (melee auto-attack) ----------
@@ -776,7 +854,7 @@ export class Sim implements IWorld {
   private botStep(p: Entity): void {
     // a spirit or a stunned/knocked actor can't act — hold (revive/stun-end is automatic)
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) {
-      this.moveIntent = { t: 'stop' };
+      this.moveIntents.set(p.id, { t: 'stop' });
       return;
     }
 
@@ -794,7 +872,7 @@ export class Sim implements IWorld {
         // can't heal now (none held, or potion still on cooldown): break off from danger
         const threat = this.nearestEnemyWithin(p, BOT_FLEE_RADIUS);
         if (threat) {
-          this.moveIntent = { t: 'move', dx: p.x - threat.x, dz: p.z - threat.z };
+          this.moveIntents.set(p.id, { t: 'move', dx: p.x - threat.x, dz: p.z - threat.z });
           return;
         }
       }
@@ -807,7 +885,7 @@ export class Sim implements IWorld {
       } else {
         const v = this.ents.get(this.vendorId);
         if (v) {
-          this.moveIntent = { t: 'move', dx: v.x - p.x, dz: v.z - p.z };
+          this.moveIntents.set(p.id, { t: 'move', dx: v.x - p.x, dz: v.z - p.z });
           return; // walk to the shop
         }
       }
@@ -821,14 +899,14 @@ export class Sim implements IWorld {
     // === PRIORITY 4 — HUNT ================================================
     const target = this.botChooseTarget(p);
     if (!target) {
-      this.moveIntent = { t: 'stop' };
+      this.moveIntents.set(p.id, { t: 'stop' });
       return;
     }
     this.applyAction(p, { t: 'set-target', id: target.id });
     const dx = target.x - p.x;
     const dz = target.z - p.z;
     const reach = this.attackRange(p) - 0.4;
-    this.moveIntent = dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' };
+    this.moveIntents.set(p.id, dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' });
     this.botUseAbilities(p, target);
   }
 
@@ -1379,9 +1457,10 @@ export class Sim implements IWorld {
   private stepPlayer(p: Entity): void {
     if (p.deadUntil !== 0) return; // frozen while a spirit
     if (this.isIncapacitated(p) || this.isRooted(p)) return; // can't move while stunned or rooted
-    if (this.moveIntent.t !== 'move') return;
+    const intent = this.moveIntents.get(p.id);
+    if (!intent || intent.t !== 'move') return;
     // Same integration the server runs (src/sim/movement.ts); slow debuffs cut speed.
-    const m = applyMove(p.x, p.z, this.moveIntent.dx, this.moveIntent.dz, PLAYER_SPEED * this.slowFactor(p), DT, WORLD_HALF);
+    const m = applyMove(p.x, p.z, intent.dx, intent.dz, PLAYER_SPEED * this.slowFactor(p), DT, WORLD_HALF);
     if (!m) return;
     p.x = m.x;
     p.z = m.z;
@@ -1394,14 +1473,36 @@ export class Sim implements IWorld {
   // radius from where the chase began. The world boss never chases — it holds
   // its ground and only bites what steps into melee. Deterministic: movement is
   // arithmetic; only the idle wander destination draws from the sim Rng.
-  private stepEnemy(e: Entity, player: Entity | undefined): void {
+  // The nearest LIVING player to an entity. Multiplayer: an idle mob aggros whoever
+  // is closest. Single-player: returns the one local player when it's alive, else
+  // undefined — so the aggro check below behaves exactly as it did before.
+  private nearestLivingPlayer(e: Entity): Entity | undefined {
+    let best: Entity | undefined;
+    let bestD2 = Infinity;
+    for (const id of this.playerIds) {
+      const p = this.ents.get(id);
+      if (!p || p.hp <= 0) continue;
+      const dx = p.x - e.x;
+      const dz = p.z - e.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = p;
+      }
+    }
+    return best;
+  }
+
+  private stepEnemy(e: Entity): void {
     if (this.isIncapacitated(e)) return; // stunned / knocked down -> does nothing this tick
     const tmpl = e.boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
 
     // --- decide aggro / leash ---
     if (e.targetId == null) {
-      // idle: pull aggro if a living player is within range
-      if (player && player.hp > 0) {
+      // idle: pull aggro toward the NEAREST living player within range (multiplayer:
+      // a mob locks onto whoever is closest; single-player this is just the local one).
+      const player = this.nearestLivingPlayer(e);
+      if (player) {
         const dx = player.x - e.x;
         const dz = player.z - e.z;
         if (dx * dx + dz * dz <= tmpl.aggroRadius * tmpl.aggroRadius) {
@@ -1633,7 +1734,7 @@ export class Sim implements IWorld {
     p.hp = p.maxHp;
     p.mp = p.maxMp;
     p.targetId = null;
-    this.moveIntent = { t: 'stop' }; // don't drift from a pre-death movement intent
+    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-death movement intent
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,

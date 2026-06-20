@@ -24,6 +24,7 @@ long-running Node process on a **VPS** (Contabo). They talk over the internet vi
 | `PORT`            | server | `8080`             | TCP port the server listens on. |
 | `HOST`            | server | `0.0.0.0`          | Bind address. `0.0.0.0` accepts external connections. Use `127.0.0.1` if a reverse proxy on the same box is the only client. |
 | `SNAPSHOT_HZ`     | server | `10`               | Snapshots broadcast per second (smoothness vs. bandwidth). |
+| `WORLD_SEED`      | server | `1337`             | Seed for the shared world's deterministic mob layout (optional). |
 | `ALLOWED_ORIGINS` | server | *(empty)*          | Comma-separated allowlist of browser Origins. **Empty = dev** (localhost only). **Set in production** to your Vercel URL so only it may connect (never wide-open). |
 | `VITE_SERVER_URL` | client | *(unset → localhost)* | The `wss://`/`ws://` URL the browser connects to. Set in the Vercel dashboard to `wss://<your-server-domain>`. Locally, leave unset to use `ws://localhost:8080`. |
 
