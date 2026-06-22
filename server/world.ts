@@ -231,6 +231,12 @@ export class ServerWorld {
   playerCount(): number {
     return this.sim.players().length;
   }
+
+  // The player ids of everyone in `id`'s party (empty when solo) — used to route party
+  // chat ('/p') only to group members. Read-only (does not mutate the sim).
+  partyMemberIds(id: number): number[] {
+    return this.sim.partyViewFor(id)?.members.map((m) => m.id) ?? [];
+  }
 }
 
 const VALID_SLOTS: ReadonlySet<string> = new Set(['weapon', 'armor']);

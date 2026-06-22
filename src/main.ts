@@ -83,7 +83,7 @@ function startOnline(url: string, name: string): void {
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
-  const chat = new ChatBox((text) => world.sendChat(text)); // text chat (Enter to open)
+  const chat = new ChatBox((text, channel) => world.sendChat(text, channel)); // text chat (/p for party)
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,

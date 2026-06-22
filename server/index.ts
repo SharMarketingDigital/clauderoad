@@ -25,7 +25,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { DT } from '../src/sim/sim';
-import type { ClientMessage, ServerMessage, ChatLine } from '../src/net/protocol';
+import type { ClientMessage, ServerMessage, ChatLine, ChatChannel } from '../src/net/protocol';
 import { ServerWorld } from './world';
 import { ChatModerator } from './chat';
 import { Weather } from './weather';
@@ -135,19 +135,35 @@ async function handleMessage(ws: WebSocket, data: RawData): Promise<void> {
     const id = clientIds.get(ws);
     if (id != null) world.command(id, msg.cmd); // server whitelists + the sim validates
   } else if (msg.t === 'chat') {
-    handleChat(ws, msg.text);
+    handleChat(ws, msg.text, msg.channel);
   }
 }
 
 // A chat message from a client. We trust ONLY the text (sanitized + rate-limited by the
 // moderator); the sender name is whatever the server already knows for this connection.
-function handleChat(ws: WebSocket, rawText: unknown): void {
+// 'party' routes ONLY to the sender's party members (the server decides who they are);
+// 'say' (default) broadcasts to everyone.
+function handleChat(ws: WebSocket, rawText: unknown, channel: ChatChannel | undefined): void {
   const id = clientIds.get(ws);
   const name = clientNames.get(ws);
   if (id == null || name == null) return; // not joined yet
   const text = chat.accept(id, rawText, Date.now());
   if (text == null) return; // empty or over the rate limit -> drop
-  broadcastChat({ from: name, text, ts: Date.now() });
+  if (channel === 'party') {
+    const members = new Set(world.partyMemberIds(id));
+    if (members.size === 0) {
+      // not in a party -> a private system notice, only to the sender
+      send(ws, { t: 'chat', line: { from: '', text: 'Você não está em um grupo.', ts: Date.now(), system: true } });
+      return;
+    }
+    const line: ChatLine = { from: name, text, ts: Date.now(), channel: 'party' };
+    const payload = JSON.stringify({ t: 'chat', line } satisfies ServerMessage);
+    for (const [sock, sid] of clientIds) {
+      if (members.has(sid) && sock.readyState === WebSocket.OPEN) sock.send(payload); // only group members
+    }
+    return;
+  }
+  broadcastChat({ from: name, text, ts: Date.now() }); // 'say' (default) -> everyone
 }
 
 // Send a chat line to every connected client (player messages + system notices).

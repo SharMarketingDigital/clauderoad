@@ -7,7 +7,7 @@
 // ignore keystrokes (see ui/typing.ts) — the character never moves/acts while you type.
 // The always-visible history is a plain <div> (not a text field), so it never blocks the
 // game: WASD/skills work normally whenever the input isn't focused.
-import type { ChatLine } from '../net/protocol';
+import type { ChatLine, ChatChannel } from '../net/protocol';
 import { isTyping } from './typing';
 
 const HISTORY = 8; // how many recent lines stay on screen (tunable)
@@ -17,8 +17,8 @@ export class ChatBox {
   private logEl: HTMLDivElement;
   private input: HTMLInputElement;
 
-  // `send` forwards the typed text to the network (ClientWorld.sendChat).
-  constructor(private readonly send: (text: string) => void) {
+  // `send` forwards the typed text + its channel to the network (ClientWorld.sendChat).
+  constructor(private readonly send: (text: string, channel: ChatChannel) => void) {
     injectStyle();
     this.root = el('chat');
     this.logEl = el('chat-log'); // the permanent history panel
@@ -26,7 +26,7 @@ export class ChatBox {
     this.input.className = 'chat-input';
     this.input.type = 'text';
     this.input.maxLength = 200; // mirrors the server cap (the server still enforces it)
-    this.input.placeholder = 'mensagem… (Enter envia, Esc cancela)';
+    this.input.placeholder = 'mensagem… (/p p/ grupo · Enter envia · Esc cancela)';
     this.input.style.display = 'none'; // discreet: only shows while you're typing
     this.root.append(this.logEl, this.input);
     document.body.appendChild(this.root);
@@ -55,8 +55,17 @@ export class ChatBox {
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        const text = this.input.value.trim();
-        if (text) this.send(text);
+        const raw = this.input.value.trim();
+        if (raw) {
+          // "/p <msg>" -> party channel; plain text -> say; any other "/command" is ignored.
+          const p = /^\/p\b\s*/i.exec(raw);
+          if (p) {
+            const msg = raw.slice(p[0].length).trim();
+            if (msg) this.send(msg, 'party');
+          } else if (!raw.startsWith('/')) {
+            this.send(raw, 'say');
+          }
+        }
         this.input.blur(); // -> hide() via the blur listener; back to the game
       } else if (e.key === 'Escape') {
         e.preventDefault();
@@ -72,6 +81,9 @@ export class ChatBox {
     if (line.system) {
       row.classList.add('system');
       row.textContent = line.text; // e.g. "Fulano entrou"
+    } else if (line.channel === 'party') {
+      row.classList.add('party');
+      row.append(span('chat-tag', '[Grupo] '), span('chat-from', `${line.from}: `), span('chat-text', line.text));
     } else {
       row.append(span('chat-from', `${line.from}: `), span('chat-text', line.text));
     }
@@ -119,6 +131,8 @@ function injectStyle(): void {
       font: 500 13px/1.4 system-ui, sans-serif; color: #eef3ff; background: rgba(10,14,20,0.66);
       text-shadow: 0 1px 2px #000; word-break: break-word; animation: chat-in 0.18s ease-out; }
     .chat-line.system { color: #b8c4d8; font-style: italic; background: rgba(10,14,20,0.5); }
+    .chat-line.party { background: rgba(18,30,22,0.72); border-left: 2px solid #6fcf7f; }
+    .chat-tag { color: #6fcf7f; font-weight: 700; }
     .chat-from { color: #ffe9a8; font-weight: 700; }
     .chat-input { pointer-events: auto; width: 100%; box-sizing: border-box; padding: 6px 10px;
       font: 500 13px/1.2 system-ui, sans-serif; color: #fff; background: rgba(8,11,16,0.92);

@@ -20,8 +20,9 @@ export type ClientMessage =
   | { t: 'join'; name: string } // sent once on connect; the server spawns a player
   | { t: 'move-intent'; dx: number; dz: number } // desired world-space direction ({0,0} = stop)
   | { t: 'cmd'; cmd: Command } // any other gameplay intent (server-validated)
-  | { t: 'chat'; text: string }; // a chat message the player typed (server sanitizes the TEXT; the
-  // sender's NAME is whatever the server already knows for this connection — never trusted from here)
+  | { t: 'chat'; text: string; channel?: ChatChannel }; // a chat message the player typed (server sanitizes
+  // the TEXT; the NAME is whatever the server already knows for this connection — never trusted). `channel`
+  // 'party' routes only to the sender's party members; 'say' (default) broadcasts to everyone.
 
 // One entity's public state in a snapshot — players AND mobs AND the town NPC. The
 // server owns all of it; the client only mirrors + interpolates. Kept compact (rounded
@@ -84,14 +85,18 @@ export interface SelfSnap {
   invite: PartyInviteView | null; // a pending party invite to accept/refuse, or null
 }
 
-// One chat line the server broadcasts to everyone. `from` is the sender's name AS THE
-// SERVER KNOWS IT (never trusted from the client). `system` marks a server notice
-// (e.g. join/leave), which the UI renders without a "name:" prefix.
+// Which chat channel a message belongs to: 'say' (everyone) or 'party' (group only).
+export type ChatChannel = 'say' | 'party';
+
+// One chat line the server sends out. `from` is the sender's name AS THE SERVER KNOWS IT
+// (never trusted from the client). `system` marks a server notice (e.g. join/leave),
+// which the UI renders without a "name:" prefix. `channel` lets the UI tag party lines.
 export interface ChatLine {
   from: string;
   text: string;
   ts: number; // server timestamp (ms since epoch)
   system?: boolean;
+  channel?: ChatChannel; // 'party' lines render with a [Grupo] tag; absent/'say' = normal
 }
 
 // ---- server -> client ----

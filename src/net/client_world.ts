@@ -12,7 +12,7 @@ import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView,
   PartyView, PartyInviteView,
 } from '../world_api';
-import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine } from './protocol';
+import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine, ChatChannel } from './protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'offline';
 
@@ -136,10 +136,11 @@ export class ClientWorld implements IWorld {
     else this.send({ t: 'cmd', cmd });
   }
 
-  // Send a chat message. Only the text is sent; the server attributes it to this
-  // connection's known name, sanitizes, rate-limits, and rebroadcasts to everyone.
-  sendChat(text: string): void {
-    this.send({ t: 'chat', text });
+  // Send a chat message on a channel ('say' = everyone, 'party' = group only). Only the
+  // text + channel are sent; the server attributes it to this connection's known name,
+  // sanitizes, rate-limits, and routes it (broadcast for 'say', party members for 'party').
+  sendChat(text: string, channel: ChatChannel = 'say'): void {
+    this.send({ t: 'chat', text, channel });
   }
 
   // ---- internals ----
