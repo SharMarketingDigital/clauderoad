@@ -106,7 +106,7 @@ export function xpForLevel(level: number): number {
 // Party (social) commands — applied even when a player's auto-play (bot) is ON, since
 // auto-play owns only combat + movement, not the player's group membership.
 const PARTY_COMMANDS: ReadonlySet<Command['t']> = new Set([
-  'party-create', 'party-invite', 'party-accept', 'party-refuse', 'party-leave', 'party-kick',
+  'party-create', 'party-invite', 'party-accept', 'party-refuse', 'party-leave', 'party-kick', 'party-admit',
 ]);
 
 export class Sim implements IWorld {
@@ -645,6 +645,25 @@ export class Sim implements IWorld {
     this.removeFromParty(targetId);
   }
 
+  // Leader admits a player who asked to join via PARTY MATCHING (the request→approve
+  // handshake lives in the server's matching lobby, OUTSIDE the deterministic sim; this
+  // command is the authoritative membership change it produces — server-issued only, never
+  // accepted from a raw client). Mirrors invite+accept collapsed, re-validating everything
+  // (leader, capacity, target is a real, ungrouped, online player) so a stale approval is safe.
+  private admitToParty(leader: Entity, targetId: number): void {
+    const pid = this.partyOfPlayer.get(leader.id);
+    if (pid === undefined || targetId === leader.id) return;
+    const party = this.parties.get(pid)!;
+    if (party.leaderId !== leader.id) return; // only the leader admits
+    if (party.members.length >= maxPartySize(party.expMode)) return; // full
+    if (this.partyOfPlayer.has(targetId)) return; // already grouped elsewhere
+    const t = this.ents.get(targetId);
+    if (!t || t.kind !== 'player') return; // must be a real, online player
+    party.members.push(targetId);
+    this.partyOfPlayer.set(targetId, party.id);
+    this.pendingInvites.delete(targetId); // consume any stale invite to them (parity with accept)
+  }
+
   // Remove a player from whatever party it's in (shared by leave, kick, and disconnect).
   // A leaving LEADER promotes the next member; a party that drops to <=1 member dissolves
   // (the lone member goes solo), and any pending invites into it are dropped.
@@ -1061,6 +1080,7 @@ export class Sim implements IWorld {
       case 'party-refuse': this.refuseInvite(p); return;
       case 'party-leave': this.removeFromParty(p.id); return;
       case 'party-kick': this.kickFromParty(p, cmd.id); return;
+      case 'party-admit': this.admitToParty(p, cmd.playerId); return;
     }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {

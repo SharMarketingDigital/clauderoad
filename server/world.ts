@@ -9,14 +9,19 @@
 // and offline because it's literally the same simulation.
 import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
-import type { Command } from '../src/world_api';
-import type { EntitySnap, NetEvent, SelfSnap } from '../src/net/protocol';
+import type { Command, PartyView, EntityView } from '../src/world_api';
+import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
 import type { PlayerSave } from '../src/sim/save';
 import { Weather } from './weather';
+import { MatchingRegistry } from './matching';
 
 export class ServerWorld {
   private sim: Sim;
   private lastEventSeq = 0; // highest sim event seq already forwarded to clients
+  // Party matching (LFM lobby): SERVER state, not the sim. Listings + pending join
+  // requests; a listing self-expires after ~1h. The actual join is a sim command issued
+  // on approval (party-admit), so the sim stays authoritative over membership.
+  private matching = new MatchingRegistry(MATCHING_TTL_MS);
 
   // Time-of-day + rain are authoritative here too (presentation state, not the sim), so
   // every client renders the SAME sky/weather. Advanced on the tick, sent in the snapshot.
@@ -31,6 +36,11 @@ export class ServerWorld {
   }
 
   removePlayer(id: number): void {
+    // Clean up the lobby BEFORE the sim drops them: remove their listing (if they led one)
+    // and any pending request they had. The per-tick reconcile is the backstop for the gap.
+    const pv = this.sim.partyViewFor(id);
+    if (pv && this.isLeader(pv, id)) this.matching.unregister(pv.id);
+    this.matching.forgetPlayer(id);
     this.sim.removePlayer(id);
   }
 
@@ -150,10 +160,140 @@ export class ServerWorld {
   }
 
   // Advance the shared world one fixed tick (players + mobs + combat), and the
-  // time-of-day + weather clock by the same tick so it stays in lockstep.
-  step(): void {
+  // time-of-day + weather clock by the same tick so it stays in lockstep. `now` (server
+  // wall-clock, injected so tests can drive the matching expiry deterministically) only
+  // reconciles the LOBBY — it never reaches the deterministic sim.
+  step(now: number = Date.now()): void {
     this.sim.step();
     this.weather.step(DT);
+    this.reconcileMatching(now);
+  }
+
+  // ---- Party matching (lobby) — SERVER-authoritative, OUTSIDE the sim ----
+  // Leader lists their party as "looking for members". Title is sanitized; the levels are
+  // clamped to non-negative ints (0 = no bound). Requires leading a not-yet-full party.
+  registerMatching(id: number, title: unknown, minLevel: unknown, maxLevel: unknown, now: number): void {
+    const pv = this.sim.partyViewFor(id);
+    if (!pv || !this.isLeader(pv, id)) return; // must lead a party
+    if (pv.members.length >= pv.maxMembers) return; // already full — nothing to advertise
+    let lo = clampLevel(minLevel);
+    let hi = clampLevel(maxLevel);
+    if (hi > 0 && lo > hi) [lo, hi] = [hi, lo]; // an inverted range (e.g. 50–10) is surely a typo — normalize
+    this.matching.register(pv.id, id, sanitizeTitle(title), lo, hi, now);
+  }
+
+  // Leader removes their party's listing.
+  unregisterMatching(id: number): void {
+    const pv = this.sim.partyViewFor(id);
+    if (pv && this.isLeader(pv, id)) this.matching.unregister(pv.id);
+  }
+
+  // A player asks to join a listed party. Validated: requester is ungrouped + online, the
+  // party is still listed + not full, and the requester meets the level restriction.
+  requestJoin(id: number, partyId: unknown): void {
+    if (!Number.isInteger(partyId)) return;
+    const pid = partyId as number;
+    if (this.sim.partyViewFor(id)) return; // already grouped -> can't request
+    const me = this.entity(id);
+    if (!me) return;
+    const entry = this.matching.get(pid);
+    if (!entry) return; // not listed
+    const target = this.sim.partyViewFor(entry.leaderId);
+    if (!target || target.id !== pid || target.members.length >= target.maxMembers) return; // gone / full
+    if (entry.minLevel > 0 && me.level < entry.minLevel) return; // below the floor
+    if (entry.maxLevel > 0 && me.level > entry.maxLevel) return; // above the cap
+    this.matching.requestJoin(id, pid);
+  }
+
+  // The requester withdraws their own pending request.
+  cancelJoinRequest(id: number): void {
+    this.matching.cancelRequest(id);
+  }
+
+  // Leader approves a pending request -> issue the authoritative party-admit to the sim
+  // (the membership change lands on the next tick). Re-validates leadership + capacity +
+  // that the requester is still waiting and hasn't grouped elsewhere meanwhile.
+  approveJoin(id: number, playerId: unknown): void {
+    if (!Number.isInteger(playerId)) return;
+    const pid = playerId as number;
+    const pv = this.sim.partyViewFor(id);
+    if (!pv || !this.isLeader(pv, id)) return; // only the leader approves
+    if (!this.matching.hasRequest(pid, pv.id)) return; // no such request to my party
+    this.matching.cancelRequest(pid); // consume it either way
+    if (pv.members.length >= pv.maxMembers) return; // full now -> request just dropped
+    if (this.sim.partyViewFor(pid)) return; // grouped meanwhile -> request just dropped
+    this.sim.sendCommandFor(id, { t: 'party-admit', playerId: pid });
+  }
+
+  // Leader declines a pending request (drops it).
+  denyJoin(id: number, playerId: unknown): void {
+    if (!Number.isInteger(playerId)) return;
+    const pid = playerId as number;
+    const pv = this.sim.partyViewFor(id);
+    if (pv && this.isLeader(pv, id) && this.matching.hasRequest(pid, pv.id)) this.matching.cancelRequest(pid);
+  }
+
+  // Self-clean the lobby each tick: expire stale listings, drop listings whose party
+  // vanished / changed leader / filled up, and drop requests from players who left or
+  // have since grouped. Cheap (the lists are tiny) and keeps the list always-truthful.
+  private reconcileMatching(now: number): void {
+    this.matching.expire(now);
+    for (const e of this.matching.list()) {
+      const pv = this.sim.partyViewFor(e.leaderId);
+      const valid = pv && pv.id === e.partyId && this.isLeader(pv, e.leaderId) && pv.members.length < pv.maxMembers;
+      if (!valid) this.matching.unregister(e.partyId);
+    }
+    for (const e of this.matching.list()) {
+      for (const reqId of [...this.matching.requestersOf(e.partyId)]) {
+        if (!this.entity(reqId) || this.sim.partyViewFor(reqId)) this.matching.cancelRequest(reqId);
+      }
+    }
+  }
+
+  // The public LFM list (same for everyone), joining the lobby metadata with the LIVE
+  // party state from the sim (size / leader name / type).
+  matchingList(): MatchingEntryView[] {
+    const out: MatchingEntryView[] = [];
+    for (const e of this.matching.list()) {
+      const pv = this.sim.partyViewFor(e.leaderId);
+      if (!pv || pv.id !== e.partyId) continue; // stale (reconcile removes it next tick)
+      const leader = pv.members.find((m) => m.leader);
+      out.push({
+        partyId: e.partyId,
+        leaderName: leader?.name ?? '',
+        title: e.title,
+        expMode: pv.expMode,
+        members: pv.members.length,
+        maxMembers: pv.maxMembers,
+        minLevel: e.minLevel,
+        maxLevel: e.maxLevel,
+      });
+    }
+    return out;
+  }
+
+  // Pending join requests to `id`'s party (empty unless `id` is a leader with requests).
+  requestsFor(id: number): MatchingRequestView[] {
+    const pv = this.sim.partyViewFor(id);
+    if (!pv || !this.isLeader(pv, id)) return [];
+    const out: MatchingRequestView[] = [];
+    for (const reqId of this.matching.requestersOf(pv.id)) {
+      const e = this.entity(reqId);
+      if (e) out.push({ playerId: reqId, name: e.name, level: e.level });
+    }
+    return out;
+  }
+
+  // The party id `id` has asked to join (awaiting approval), or null.
+  myRequestPartyId(id: number): number | null {
+    return this.matching.requestOf(id);
+  }
+
+  private isLeader(pv: PartyView, id: number): boolean {
+    return pv.members.some((m) => m.id === id && m.leader);
+  }
+  private entity(id: number): EntityView | undefined {
+    return this.sim.entities().find((e) => e.id === id);
   }
 
   // A player's OWN state (HUD + action bar). The server sends this to that one client
@@ -167,11 +307,17 @@ export class ServerWorld {
     // Party state is the same for either branch (it survives a dead/missing entity view).
     const party = this.sim.partyViewFor(id);
     const invite = this.sim.inviteViewFor(id);
+    // Party-matching lobby state: the shared LFM list (for the E window) + this player's
+    // own request/leader-request state. Server state, joined with live sim party data.
+    const matching = this.matchingList();
+    const partyRequests = this.requestsFor(id);
+    const myRequestPartyId = this.matching.requestOf(id);
     if (!e) {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         botActive: false, abilities, inventory, shop, party, invite,
+        matching, partyRequests, myRequestPartyId,
       };
     }
     return {
@@ -182,6 +328,7 @@ export class ServerWorld {
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       botActive: this.sim.botActiveFor(id),
       abilities, inventory, shop, party, invite,
+      matching, partyRequests, myRequestPartyId,
     };
   }
 
@@ -243,6 +390,24 @@ const VALID_SLOTS: ReadonlySet<string> = new Set(['weapon', 'armor']);
 const VALID_RARITIES: ReadonlySet<string> = new Set(['normal', 'sos', 'som', 'sun']);
 const PARTY_EXP: ReadonlySet<string> = new Set(['each-get', 'auto-share']);
 const PARTY_LOOT: ReadonlySet<string> = new Set(['distribution', 'auto-share']);
+
+// Party-matching lobby tunables. A listing self-expires after ~1h (Silkroad); titles are
+// bounded short text. Both are server-side (the lobby never touches the deterministic sim).
+const MATCHING_TTL_MS = 60 * 60 * 1000; // ~1 hour
+const MATCHING_TITLE_MAX = 40;
+
+// A matching title from a client: a short, single-line, trimmed string (never trusted).
+function sanitizeTitle(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, MATCHING_TITLE_MAX);
+}
+// A level restriction from a client: a non-negative integer (0 = no bound), capped sane.
+function clampLevel(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  const i = Math.floor(n);
+  return i < 0 ? 0 : i > 999 ? 999 : i;
+}
 
 // A bag/equip item reference from a client: a non-empty bounded item id, a real rarity,
 // and a non-negative integer "+N". The sim STILL re-checks the player actually owns it

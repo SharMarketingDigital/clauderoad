@@ -16,6 +16,7 @@ import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
 import { PartyHud } from './ui/party_hud';
+import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -83,6 +84,7 @@ function startOnline(url: string, name: string): void {
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
+  const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
   const chat = new ChatBox((text, channel) => world.sendChat(text, channel)); // text chat (/p for party)
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
   const combatText = new CombatText();
@@ -105,6 +107,7 @@ function startOnline(url: string, name: string): void {
     hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
+    partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

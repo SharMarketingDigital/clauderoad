@@ -136,6 +136,31 @@ async function handleMessage(ws: WebSocket, data: RawData): Promise<void> {
     if (id != null) world.command(id, msg.cmd); // server whitelists + the sim validates
   } else if (msg.t === 'chat') {
     handleChat(ws, msg.text, msg.channel);
+  } else if (
+    msg.t === 'matching-register' || msg.t === 'matching-unregister' || msg.t === 'matching-request' ||
+    msg.t === 'matching-cancel' || msg.t === 'matching-approve' || msg.t === 'matching-deny'
+  ) {
+    handleMatching(ws, msg);
+  }
+}
+
+// Party-matching lobby intent (LFM list). The server validates everything (leadership,
+// capacity, level limits, sanitizes the title) inside ServerWorld; here we only resolve
+// the connection to its player id. On approval the world issues a sim party-admit, so the
+// membership change stays authoritative in the sim.
+function handleMatching(
+  ws: WebSocket,
+  msg: Extract<ClientMessage, { t: `matching-${string}` }>,
+): void {
+  const id = clientIds.get(ws);
+  if (id == null) return; // not joined yet
+  switch (msg.t) {
+    case 'matching-register': world.registerMatching(id, msg.title, msg.minLevel, msg.maxLevel, Date.now()); return;
+    case 'matching-unregister': world.unregisterMatching(id); return;
+    case 'matching-request': world.requestJoin(id, msg.partyId); return;
+    case 'matching-cancel': world.cancelJoinRequest(id); return;
+    case 'matching-approve': world.approveJoin(id, msg.playerId); return;
+    case 'matching-deny': world.denyJoin(id, msg.playerId); return;
   }
 }
 

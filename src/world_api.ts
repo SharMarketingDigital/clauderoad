@@ -193,7 +193,9 @@ export type Command =
   | { t: 'party-accept' } // accept your pending invite
   | { t: 'party-refuse' } // decline your pending invite
   | { t: 'party-leave' } // leave your party (a leaving leader promotes the next member, or it dissolves)
-  | { t: 'party-kick'; id: number }; // leader: remove a member by player id
+  | { t: 'party-kick'; id: number } // leader: remove a member by player id
+  | { t: 'party-admit'; playerId: number }; // leader admits a matching join-request (server-issued only; the
+  // request/approval handshake lives in the server's matching lobby — the sim just does the membership change)
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

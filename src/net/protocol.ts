@@ -9,7 +9,7 @@
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
   EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView,
-  PartyView, PartyInviteView,
+  PartyView, PartyInviteView, PartyExpMode,
 } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
@@ -20,9 +20,16 @@ export type ClientMessage =
   | { t: 'join'; name: string } // sent once on connect; the server spawns a player
   | { t: 'move-intent'; dx: number; dz: number } // desired world-space direction ({0,0} = stop)
   | { t: 'cmd'; cmd: Command } // any other gameplay intent (server-validated)
-  | { t: 'chat'; text: string; channel?: ChatChannel }; // a chat message the player typed (server sanitizes
+  | { t: 'chat'; text: string; channel?: ChatChannel } // a chat message the player typed (server sanitizes
   // the TEXT; the NAME is whatever the server already knows for this connection — never trusted). `channel`
   // 'party' routes only to the sender's party members; 'say' (default) broadcasts to everyone.
+  // --- party matching (lobby; SERVER state, not the sim — see SelfSnap.matching) ---
+  | { t: 'matching-register'; title: string; minLevel: number; maxLevel: number } // leader lists their party as LFM
+  | { t: 'matching-unregister' } // leader removes their party from the list
+  | { t: 'matching-request'; partyId: number } // ask to join a listed party (the leader then approves/denies)
+  | { t: 'matching-cancel' } // withdraw your own pending join request
+  | { t: 'matching-approve'; playerId: number } // leader: accept a pending join request (admits them to the sim party)
+  | { t: 'matching-deny'; playerId: number }; // leader: decline a pending join request
 
 // One entity's public state in a snapshot — players AND mobs AND the town NPC. The
 // server owns all of it; the client only mirrors + interpolates. Kept compact (rounded
@@ -58,6 +65,28 @@ export interface NetEvent {
   text?: string;
 }
 
+// One party registered in the PUBLIC matching list ("looking for members"). This is
+// SERVER/lobby state (title, level limits, an ~1h expiry) — deliberately NOT in the
+// deterministic sim. Everyone sees the same list; the live size/leader come from the sim.
+export interface MatchingEntryView {
+  partyId: number;
+  leaderName: string;
+  title: string;
+  expMode: PartyExpMode; // the party's XP mode (fixed at creation) — shown so seekers know the type
+  members: number; // current member count
+  maxMembers: number; // 4 (each-get) or 8 (auto-share)
+  minLevel: number; // join restriction; 0 = no minimum
+  maxLevel: number; // join restriction; 0 = no maximum
+}
+
+// One pending join REQUEST to the local player's party, shown to the LEADER to approve or
+// deny (the mirror of an invite). Personal — only the leader of the requested party sees it.
+export interface MatchingRequestView {
+  playerId: number;
+  name: string;
+  level: number;
+}
+
 // A player's OWN state — the part of the world only its owner needs (HUD + bag). The
 // server sends this to that one client each snapshot, so personal data never spams
 // everyone: combat HUD + action bar + the player's own bag/equipment + the vendor view.
@@ -83,6 +112,10 @@ export interface SelfSnap {
   shop: ShopView; // the vendor storefront + whether this player is in range to trade
   party: PartyView | null; // the player's party (members + modes), or null when solo
   invite: PartyInviteView | null; // a pending party invite to accept/refuse, or null
+  // --- party matching (lobby) ---
+  matching: MatchingEntryView[]; // the public LFM list (same for everyone; for the E window)
+  partyRequests: MatchingRequestView[]; // pending join requests to MY party (leader only; else empty)
+  myRequestPartyId: number | null; // the party I've asked to join (awaiting approval), or null
 }
 
 // Which chat channel a message belongs to: 'say' (everyone) or 'party' (group only).

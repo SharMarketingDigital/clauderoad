@@ -12,7 +12,10 @@ import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView,
   PartyView, PartyInviteView,
 } from '../world_api';
-import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine, ChatChannel } from './protocol';
+import type {
+  ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine, ChatChannel,
+  MatchingEntryView, MatchingRequestView,
+} from './protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'offline';
 
@@ -126,6 +129,44 @@ export class ClientWorld implements IWorld {
   }
   localInvite(): PartyInviteView | null {
     return this.self ? this.self.invite : null;
+  }
+
+  // ---- party matching (lobby; concrete MP channel, like chat — not part of IWorld) ----
+  // The shared LFM list, this player's pending join requests (leader), and the party it
+  // has asked to join — all mirrored from the server's authoritative `self` state.
+  matchingList(): MatchingEntryView[] {
+    return this.self ? this.self.matching : [];
+  }
+  partyRequests(): MatchingRequestView[] {
+    return this.self ? this.self.partyRequests : [];
+  }
+  myRequestPartyId(): number | null {
+    return this.self ? this.self.myRequestPartyId : null;
+  }
+  // The local player's level — the matching UI uses it to grey out groups whose level
+  // restriction this player doesn't meet (the server is still the authority on the join).
+  localLevel(): number {
+    return this.self ? this.self.level : 1;
+  }
+
+  // Matching intent (the server validates leadership / capacity / level limits / title).
+  registerMatching(title: string, minLevel: number, maxLevel: number): void {
+    this.send({ t: 'matching-register', title, minLevel, maxLevel });
+  }
+  unregisterMatching(): void {
+    this.send({ t: 'matching-unregister' });
+  }
+  requestJoinMatching(partyId: number): void {
+    this.send({ t: 'matching-request', partyId });
+  }
+  cancelMatchingRequest(): void {
+    this.send({ t: 'matching-cancel' });
+  }
+  approveJoin(playerId: number): void {
+    this.send({ t: 'matching-approve', playerId });
+  }
+  denyJoin(playerId: number): void {
+    this.send({ t: 'matching-deny', playerId });
   }
 
   // The client only ever streams intent. Movement is a compact move-intent; every other

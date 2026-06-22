@@ -380,3 +380,67 @@ describe('party loot distribution (SF3)', () => {
     expect(scenario()).toBe(scenario());
   });
 });
+
+// ---- party matching: the sim's `party-admit` command ----
+// Matching's request→approve handshake lives in the SERVER (see tests/matching.test.ts);
+// the only sim-side piece is `party-admit` — the authoritative membership change the
+// server issues on approval. These drive it directly (the server is the one that whitelists).
+describe('party matching: party-admit (SF3)', () => {
+  it('the leader admits a player, who joins the party', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    run(sim, a, EACH_GET);
+    run(sim, a, { t: 'party-admit', playerId: b });
+    expect(sim.partyViewFor(a)!.members.map((m) => m.name)).toEqual(['A', 'B']);
+    expect(sim.partyViewFor(b)!.id).toBe(sim.partyViewFor(a)!.id); // B is in the SAME party
+  });
+
+  it('a non-leader cannot admit', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    const c = sim.addPlayer('C');
+    run(sim, a, EACH_GET);
+    run(sim, a, { t: 'party-admit', playerId: b }); // leader admits B
+    run(sim, b, { t: 'party-admit', playerId: c }); // B is not the leader -> ignored
+    expect(sim.partyViewFor(c)).toBeNull();
+    expect(sim.partyViewFor(a)!.members.length).toBe(2);
+  });
+
+  it('cannot admit past the each-get cap of 4', () => {
+    const sim = serverSim();
+    const names = ['A', 'B', 'C', 'D', 'E'];
+    const ids = names.map((n) => sim.addPlayer(n));
+    run(sim, ids[0], EACH_GET);
+    for (let i = 1; i < ids.length; i++) run(sim, ids[0], { t: 'party-admit', playerId: ids[i] });
+    expect(sim.partyViewFor(ids[0])!.members.length).toBe(PARTY_MAX_EACH_GET); // 4
+    expect(sim.partyViewFor(ids[4])).toBeNull(); // the 5th never got in
+  });
+
+  it('cannot admit a player who is already grouped elsewhere', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    run(sim, a, EACH_GET);
+    run(sim, b, { t: 'party-create', exp: 'auto-share', loot: 'auto-share' }); // B leads its own party
+    run(sim, a, { t: 'party-admit', playerId: b }); // already grouped -> ignored
+    expect(sim.partyViewFor(a)!.members.length).toBe(1);
+    expect(sim.partyViewFor(b)!.id).not.toBe(sim.partyViewFor(a)!.id);
+  });
+
+  it('admit keeps the sim deterministic (same seed + commands => identical hash)', () => {
+    const scenario = (): string => {
+      const sim = new Sim(9, false);
+      const a = sim.addPlayer('A');
+      const b = sim.addPlayer('B');
+      const c = sim.addPlayer('C');
+      run(sim, a, { t: 'party-create', exp: 'auto-share', loot: 'distribution' });
+      run(sim, a, { t: 'party-admit', playerId: b });
+      run(sim, a, { t: 'party-admit', playerId: c });
+      for (let i = 0; i < 40; i++) sim.step();
+      return sim.hash();
+    };
+    expect(scenario()).toBe(scenario());
+  });
+});
