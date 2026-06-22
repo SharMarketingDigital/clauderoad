@@ -183,7 +183,10 @@ function injectStyle(): void {
   const s = document.createElement('style');
   s.id = 'party-style';
   s.textContent = `
-    .party { position: fixed; left: 14px; top: 116px; z-index: 41; width: 196px;
+    /* Left rail under the player frame runs on a 32px rhythm: gold(92) · bot(124) ·
+       SP(156). The party panel continues it at 188 so the member frames never cover
+       the wallet/SP again (was top:116, which sat on top of bot + SP). */
+    .party { position: fixed; left: 16px; top: 188px; z-index: 41; width: 196px;
       display: flex; flex-direction: column; gap: 7px; font-family: system-ui, sans-serif; }
     .party-frames { display: flex; flex-direction: column; gap: 5px; }
     .party-row { padding: 5px 8px; background: rgba(14,19,28,0.82); border: 1px solid rgba(120,160,220,0.4);
