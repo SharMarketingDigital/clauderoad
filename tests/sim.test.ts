@@ -29,7 +29,7 @@ import {
   inFrontOf,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
-import { ENEMY_COUNT, ENEMY_TEMPLATE, ENEMY_TIERS } from '../src/sim/content/enemies';
+import { ENEMY_COUNT, ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
@@ -266,10 +266,10 @@ describe('combat', () => {
     expect(enemyCount()).toBe(ENEMY_COUNT - 1); // not yet
     sim.step(); // reaches deathTick + RESPAWN_TICKS
     expect(enemyCount()).toBe(ENEMY_COUNT); // respawned
-    // ...and the respawned common mobs are the same base type (a grey wolf of
-    // some tier — a Champion/Elite carries a name suffix, boss excluded).
+    // ...and every respawned common mob is one of the known species (its name is
+    // that species' base name, optionally with a Champion/Elite tier suffix).
     const names = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss).map((e) => e.name);
-    expect(names.every((n) => n.startsWith(ENEMY_TEMPLATE.name))).toBe(true);
+    expect(names.every((n) => ENEMY_SPECIES.some((s) => n.startsWith(s.name)))).toBe(true);
   });
 
   it('the kill + rng-respawn path is deterministic (same seed => identical hash)', () => {
@@ -474,7 +474,7 @@ describe('abilities (Golpe Forte, slot 1)', () => {
 // Kill the nearest COMMON enemy (never the world boss) by chasing + attacking.
 // Targets a specific wolf by id (not cycle-target) so grind helpers stay
 // isolated from the boss regardless of its spawn timer. Returns true if it died.
-function killNearestEnemy(sim: Sim): boolean {
+function killNearestEnemy(sim: Sim, species?: string): boolean {
   const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
   const gold0 = playerOf().gold;
   // Re-acquire the nearest living wolf each tick and chase it. Robust to the
@@ -484,7 +484,10 @@ function killNearestEnemy(sim: Sim): boolean {
   for (let guard = 0; guard < 6000; guard++) {
     if (playerOf().gold > gold0) return true;
     const me = playerOf();
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    // Optionally restrict to one species (progression tests pass 'grey_wolf' to assert
+    // exact wolf XP/SP); unfiltered it kills the nearest of ANY species, so farming
+    // loops don't deplete one species (respawns roll a fresh species each time).
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && (!species || e.species === species));
     if (wolves.length === 0) {
       sim.step();
       continue;
@@ -504,10 +507,10 @@ function killNearestEnemy(sim: Sim): boolean {
 // that wolf's id, or null if none aggroed within the cap.
 function approachUntilAggro(sim: Sim): number | null {
   for (let i = 0; i < 2000; i++) {
-    const hostile = sim.entities().find((e) => e.kind === 'enemy' && !e.boss && e.hostile);
+    const hostile = sim.entities().find((e) => e.kind === 'enemy' && !e.boss && e.hostile && e.species === 'grey_wolf');
     if (hostile) return hostile.id;
     const p = sim.entities().find((e) => e.kind === 'player')!;
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.species === 'grey_wolf');
     if (wolves.length === 0) return null;
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     const w = wolves[0];
@@ -699,7 +702,7 @@ function driveIntoWolvesUntilDead(sim: Sim): void {
 function castWolf(sim: Sim, slot: number): number | null {
   for (let i = 0; i < 2000; i++) {
     const p = sim.entities().find((e) => e.kind === 'player')!;
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
     if (wolves.length === 0) return null;
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     const w = wolves[0];
@@ -911,6 +914,7 @@ function equipSpear(sim: Sim): void {
     sim.sendCommand({ t: 'equip', itemId: 'iron_spear', rarity: spear.rarity, plus: spear.plus });
     sim.step();
   }
+  restoreToFull(sim); // farming can leave the player hurt (tougher humanoid respawns); reset to a clean full-HP baseline
 }
 
 // The Lança mastery: equipping a spear swaps the whole kit (area + crit), grants
@@ -920,7 +924,7 @@ describe('spear mastery (Lança)', () => {
   const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss);
   const nearestWolf = (sim: Sim) => {
     const p = player(sim);
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     return wolves[0];
   };
@@ -1123,6 +1127,7 @@ function equipBow(sim: Sim): void {
     sim.sendCommand({ t: 'equip', itemId: 'short_bow', rarity: bow.rarity, plus: bow.plus });
     sim.step();
   }
+  restoreToFull(sim); // farming can leave the player hurt (tougher humanoid respawns); reset to a clean full-HP baseline
 }
 
 // The Arco mastery: a ranged auto-attack ("auto-shot") that fires from afar, a
@@ -1131,7 +1136,7 @@ describe('bow mastery (Arco)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
   const nearestWolf = (sim: Sim) => {
     const p = player(sim);
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     return wolves[0];
   };
@@ -1276,7 +1281,9 @@ describe('bow mastery (Arco)', () => {
 // Champion & Elite tiers: the starting pack is baseline, but reinforcements roll
 // occasional tougher tiers (more HP/damage/reward, drawn bigger).
 describe('enemy tiers (champion & elite)', () => {
-  const wolves = (sim: Sim) => sim.entities().filter((e) => e.kind === 'enemy' && !e.boss);
+  // These tier tests assert HP/damage scaled off the grey wolf, so they look at the
+  // wolf species specifically (the world now also spawns humanoid species).
+  const wolves = (sim: Sim) => sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.species === 'grey_wolf');
 
   it('the starting pack is all baseline; respawns introduce tougher tiers', () => {
     const sim = new Sim(7);
@@ -1490,9 +1497,9 @@ describe('progression (XP & levels)', () => {
     const hp0 = player().maxHp;
     const mp0 = player().maxMp;
 
-    // exactly enough kills to cross the level-1 threshold (50 XP / 25 = 2 wolves)
+    // exactly enough WOLF kills to cross the level-1 threshold (50 XP / 25 = 2 wolves)
     const kills = Math.ceil(xpForLevel(1) / ENEMY_TEMPLATE.xp);
-    for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim)).toBe(true);
+    for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim, 'grey_wolf')).toBe(true);
 
     const pp = player();
     expect(pp.level).toBe(2);
@@ -1506,8 +1513,8 @@ describe('progression (XP & levels)', () => {
     // and a level-up event was emitted for the visual feedback
     expect(sim.recentEvents().some((e) => e.kind === 'levelup' && e.amount === 2)).toBe(true);
 
-    // one more kill: XP accumulates again toward level 3 (the HUD bar refills)
-    expect(killNearestEnemy(sim)).toBe(true);
+    // one more WOLF kill: XP accumulates again toward level 3 (the HUD bar refills)
+    expect(killNearestEnemy(sim, 'grey_wolf')).toBe(true);
     const after = player();
     expect(after.level).toBe(2);
     expect(after.xp).toBe(ENEMY_TEMPLATE.xp); // 25 progress into level 2
@@ -2659,7 +2666,7 @@ describe('SP and skill ranks', () => {
   it('killing a mob grants SP', () => {
     const sim = new Sim(7);
     expect(player(sim).sp).toBe(0);
-    expect(killNearestEnemy(sim)).toBe(true);
+    expect(killNearestEnemy(sim, 'grey_wolf')).toBe(true);
     expect(player(sim).sp).toBeGreaterThanOrEqual(ENEMY_TEMPLATE.sp); // at least a normal wolf's SP
   });
 

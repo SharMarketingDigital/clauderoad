@@ -2,9 +2,11 @@
 // sim. Each enemy gets its OWN skinned clone (SkeletonUtils.clone — a plain
 // .clone() does not rebuild the skeleton) + its own AnimationMixer, driven from
 // the same Rig_Medium clips the player uses (Idle when still, Walk when moving).
-// Variety by model (Warrior/Rogue/Minion); Champion/Elite are bigger + tinted;
-// the boss is a big purple mage. No melee-attack clip exists in the free Rig_Medium
-// set, so a hit is a short procedural lunge (a forward pitch).
+// The model is chosen by the sim's enemy species: grey wolves rotate the three
+// skeletons (Warrior/Rogue/Minion), while humanoid species (brute/bandit/archer/
+// assassin) use their own KayKit Adventurer model. Champion/Elite are bigger +
+// tinted; the boss is a big purple mage. No melee-attack clip exists in the free
+// Rig_Medium set, so a hit is a short procedural lunge (a forward pitch).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -22,8 +24,23 @@ const FILES: Record<string, string> = {
   rogue: '/models/skeletons/Skeleton_Rogue.glb',
   minion: '/models/skeletons/Skeleton_Minion.glb',
   mage: '/models/skeletons/Skeleton_Mage.glb',
+  // Humanoid species (KayKit Adventurers) — they share Rig_Medium with the
+  // skeletons, so they animate from the same Idle/Walk clips at no extra cost.
+  brute: '/models/Barbarian.glb',
+  bandit: '/models/Rogue.glb',
+  archer: '/models/Ranger.glb',
+  assassin: '/models/Rogue_Hooded.glb',
 };
 const COMMON = ['warrior', 'rogue', 'minion']; // common wolves rotate through these for variety
+
+// Map an enemy species id (sim's EntityView.species) to its model variant. A
+// species not listed here (the grey wolf, '') falls back to the skeleton look.
+const SPECIES_VARIANT: Record<string, string> = {
+  brute: 'brute',
+  bandit: 'bandit',
+  archer: 'archer',
+  assassin: 'assassin',
+};
 
 const TIER_SCALE: Record<string, number> = { normal: 1, champion: 1.35, elite: 1.7 };
 const TIER_TINT: Record<string, number | undefined> = {
@@ -40,11 +57,18 @@ interface Style {
   tint?: number;
 }
 
-// Pick the skeleton model + size + tint from the entity's boss/tier/id.
+// Pick the model + size + tint from the entity's boss/species/tier/id.
 function styleFor(e: EntityView): Style {
   if (e.boss) return { variant: 'mage', scale: BOSS_SCALE, tint: BOSS_TINT };
-  if (e.tier === 'elite') return { variant: 'warrior', scale: TIER_SCALE.elite, tint: TIER_TINT.elite };
-  if (e.tier === 'champion') return { variant: 'warrior', scale: TIER_SCALE.champion, tint: TIER_TINT.champion };
+  const scale = TIER_SCALE[e.tier] ?? 1;
+  const tint = TIER_TINT[e.tier];
+  // A humanoid species keeps its OWN model at every tier; champion/elite just
+  // scale it up and tint it (orange/violet), same as the wolves.
+  const named = SPECIES_VARIANT[e.species];
+  if (named) return { variant: named, scale, tint };
+  // Grey wolf (no named species): champion/elite show as the warrior skeleton;
+  // a normal wolf rotates the three common skeletons for cosmetic variety.
+  if (e.tier === 'champion' || e.tier === 'elite') return { variant: 'warrior', scale, tint };
   return { variant: COMMON[e.id % COMMON.length], scale: 1 };
 }
 
@@ -164,11 +188,15 @@ export class EnemyAvatars {
 
   private async load(): Promise<void> {
     const loader = new GLTFLoader();
-    const [warrior, rogue, minion, mage, general, movement] = await Promise.all([
+    const [warrior, rogue, minion, mage, brute, bandit, archer, assassin, general, movement] = await Promise.all([
       loader.loadAsync(FILES.warrior),
       loader.loadAsync(FILES.rogue),
       loader.loadAsync(FILES.minion),
       loader.loadAsync(FILES.mage),
+      loader.loadAsync(FILES.brute),
+      loader.loadAsync(FILES.bandit),
+      loader.loadAsync(FILES.archer),
+      loader.loadAsync(FILES.assassin),
       loader.loadAsync('/models/Rig_Medium_General.glb'), // already in public/models from the Knight slice
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'),
     ]);
@@ -176,6 +204,10 @@ export class EnemyAvatars {
     this.templates.set('rogue', rogue.scene);
     this.templates.set('minion', minion.scene);
     this.templates.set('mage', mage.scene);
+    this.templates.set('brute', brute.scene);
+    this.templates.set('bandit', bandit.scene);
+    this.templates.set('archer', archer.scene);
+    this.templates.set('assassin', assassin.scene);
     const clips = [...general.animations, ...movement.animations];
     this.idleClip = clips.find((c) => c.name === 'Idle_A');
     this.walkClip = clips.find((c) => c.name === 'Walking_A'); // swap to 'Running_A' for a charging look

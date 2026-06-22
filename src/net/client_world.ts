@@ -178,7 +178,7 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
     hp: s.hp, maxHp: s.maxHp, mp: 0, maxMp: 0,
     level: 1, xp: 0, xpToNext: 1, attrPoints: 0,
     gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
-    boss: s.boss, tier: s.tier, hostile: s.hostile, dead: s.dead, statuses: [],
+    boss: s.boss, tier: s.tier, species: s.species, hostile: s.hostile, dead: s.dead, statuses: [],
   };
 }
 

@@ -36,6 +36,7 @@ export interface EntitySnap {
   maxHp: number;
   tier: EnemyTierId; // enemy strength tier ('normal' for players/NPCs); render scales/tints by it
   boss: boolean; // a world boss — render draws it bigger / distinct
+  species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
   hostile: boolean; // an enemy currently aggroed (chasing/biting) — for the hostile tint
   dead: boolean; // a downed player in the "spirit" state
 }

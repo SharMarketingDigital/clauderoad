@@ -60,6 +60,7 @@ export interface EntityView {
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly tier: EnemyTierId; // enemy strength tier ('normal' for the player/NPCs); render scales/tints by it
+  readonly species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
   readonly hostile: boolean; // an enemy currently aggroed on the player (chasing or, for the rooted boss, biting in melee)
   readonly dead: boolean; // a downed player in the "spirit" state, awaiting respawn
   readonly statuses: ReadonlyArray<StatusKind>; // active status-effect kinds (for the on-target indicator)

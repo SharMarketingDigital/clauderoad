@@ -25,6 +25,12 @@ export interface EnemyTemplate {
   swingTime: number; // seconds between bites
   aggroRadius: number; // world units; aggros when the player is this close
   leashRadius: number; // world units from the chase anchor before it gives up
+  // Per-species behavior (optional; omitted == the baseline melee wolf). The sim
+  // defaults these to ENEMY_SPEED / MELEE_RANGE, so leaving them off reproduces the
+  // original wolf exactly.
+  speed?: number; // chase/wander units/sec (default ENEMY_SPEED)
+  attackRange?: number; // reach to strike (default MELEE_RANGE); a ranged species stands off at ~this distance
+  spawnWeight?: number; // relative spawn frequency among the species roster (default 1)
 }
 
 export const ENEMY_TEMPLATE: EnemyTemplate = {
@@ -41,6 +47,7 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
   swingTime: 2.0,
   aggroRadius: 8,
   leashRadius: 16,
+  spawnWeight: 5, // the most common species — the world stays wolf-led but varied
   drops: [
     { itemId: 'wolf_leather', chance: 0.4 },
     { itemId: 'health_potion', chance: 0.25 },
@@ -51,6 +58,143 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
     { itemId: 'elixir_armor', chance: 0.12 },
   ],
 };
+
+// --- Humanoid species (reuse the KayKit Adventurer models already on disk; they
+// share Rig_Medium, so they animate with the same Idle/Walk clips as the wolves).
+// Each is its own template with distinct stats AND behavior; the tier system
+// (normal/champion/elite) still layers on top. Numbers are provisional — grounded
+// loosely against the base wolf (40 HP / 6 dmg), tune by playing.
+
+// A tanky, slow-moving brute that hits hard and is a real wall of HP.
+export const BRUTE_TEMPLATE: EnemyTemplate = {
+  id: 'brute',
+  name: 'Bruto Saqueador',
+  hp: 110,
+  xp: 60,
+  sp: 8,
+  goldMin: 6,
+  goldMax: 18,
+  str: 14, // meleeDamage(14,4) = 11 per blow — a heavy hit
+  weaponDamage: 4,
+  swingTime: 2.6, // slow, telegraphed swings
+  aggroRadius: 8,
+  leashRadius: 16,
+  speed: 1.7, // lumbering — easy to kite, dangerous up close
+  spawnWeight: 2,
+  drops: [
+    { itemId: 'wolf_leather', chance: 0.45 },
+    { itemId: 'health_potion', chance: 0.3 },
+    { itemId: 'iron_spear', chance: 0.06 }, // the brute carries a spear (a way to farm into the Lança mastery)
+    { itemId: 'lucky_powder', chance: 0.2 },
+    { itemId: 'elixir_armor', chance: 0.16 },
+  ],
+};
+
+// A fast, frail bandit: quick frequent bites, low HP, carries coin.
+export const BANDIT_TEMPLATE: EnemyTemplate = {
+  id: 'bandit',
+  name: 'Bandido',
+  hp: 26,
+  xp: 18,
+  sp: 3,
+  goldMin: 3,
+  goldMax: 12, // bandits drop a bit more coin
+  str: 6, // meleeDamage(6,2) = 5 per nick
+  weaponDamage: 2,
+  swingTime: 1.4, // fast, pecking attacks
+  aggroRadius: 9,
+  leashRadius: 18,
+  speed: 3.3, // quick — closes the gap and chases hard
+  spawnWeight: 3,
+  drops: [
+    { itemId: 'health_potion', chance: 0.3 },
+    { itemId: 'old_sword', chance: 0.05 },
+    { itemId: 'lucky_powder', chance: 0.2 },
+    { itemId: 'elixir_weapon', chance: 0.14 },
+  ],
+};
+
+// A ranged renegade archer: notices from afar, stands off and shoots instead of
+// closing to melee (attackRange >> MELEE_RANGE makes the AI hold its distance).
+export const ARCHER_TEMPLATE: EnemyTemplate = {
+  id: 'archer',
+  name: 'Arqueiro Renegado',
+  hp: 34,
+  xp: 32,
+  sp: 5,
+  goldMin: 4,
+  goldMax: 12,
+  str: 7, // meleeDamage(7,3) = 6 per shot
+  weaponDamage: 3,
+  swingTime: 2.2, // a measured draw between shots
+  aggroRadius: 12, // spots you from range
+  leashRadius: 22,
+  speed: 2.2,
+  attackRange: 11, // shoots from afar — holds distance rather than charging in
+  spawnWeight: 2,
+  drops: [
+    { itemId: 'health_potion', chance: 0.25 },
+    { itemId: 'short_bow', chance: 0.06 }, // drops a bow (a way to farm into the Arco mastery)
+    { itemId: 'lucky_powder', chance: 0.2 },
+    { itemId: 'elixir_weapon', chance: 0.14 },
+  ],
+};
+
+// A fast, bursty assassin: closes quickly and hits hard for its low HP.
+export const ASSASSIN_TEMPLATE: EnemyTemplate = {
+  id: 'assassin',
+  name: 'Assassino Encapuzado',
+  hp: 30,
+  xp: 34,
+  sp: 6,
+  goldMin: 4,
+  goldMax: 14,
+  str: 11, // meleeDamage(11,3) = 8 per strike — punchy for a glass cannon
+  weaponDamage: 3,
+  swingTime: 1.8,
+  aggroRadius: 9,
+  leashRadius: 16,
+  speed: 3.0, // darts in
+  spawnWeight: 2,
+  drops: [
+    { itemId: 'health_potion', chance: 0.25 },
+    { itemId: 'old_sword', chance: 0.06 },
+    { itemId: 'lucky_powder', chance: 0.22 },
+    { itemId: 'elixir_weapon', chance: 0.14 },
+    { itemId: 'elixir_armor', chance: 0.14 },
+  ],
+};
+
+// The species roster used for spawning. A spawn rolls one by spawnWeight via the
+// sim's dedicated speciesRng (an independent substream, like the tier roll), so
+// adding variety never perturbs the main loot/position Rng.
+export const ENEMY_SPECIES: EnemyTemplate[] = [
+  ENEMY_TEMPLATE,
+  BRUTE_TEMPLATE,
+  BANDIT_TEMPLATE,
+  ARCHER_TEMPLATE,
+  ASSASSIN_TEMPLATE,
+];
+
+// Fast lookup by species id (for loot/stat resolution on kill and for the AI).
+export const SPECIES_BY_ID: Record<string, EnemyTemplate> = Object.fromEntries(
+  ENEMY_SPECIES.map((s) => [s.id, s]),
+);
+
+const SPECIES_WEIGHT_TOTAL = ENEMY_SPECIES.reduce((s, t) => s + (t.spawnWeight ?? 1), 0);
+
+// Pick a species from a roll in [0,1) by spawnWeight. Pure (the sim supplies the
+// roll), mirroring pickEnemyTier — keeps content Rng-free and deterministic.
+export function pickSpecies(roll: number): EnemyTemplate {
+  const target = roll * SPECIES_WEIGHT_TOTAL;
+  let acc = 0;
+  for (const t of ENEMY_SPECIES) {
+    acc += t.spawnWeight ?? 1;
+    if (target < acc) return t;
+  }
+  return ENEMY_SPECIES[0];
+}
+
 export const ENEMY_COUNT = 12;
 
 // Enemy strength tiers. A spawn rolls one by weight: most mobs are 'normal', a

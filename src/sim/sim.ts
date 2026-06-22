@@ -17,7 +17,7 @@ import type {
   StatusKind,
 } from '../world_api';
 import { CLASSES } from './content/classes';
-import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier } from './content/enemies';
+import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID } from './content/enemies';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
@@ -110,6 +110,7 @@ export class Sim implements IWorld {
 
   private rng: Rng;
   private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
+  private speciesRng: Rng; // independent substream for enemy-species rolls (see constructor)
   private ents = new Map<number, Entity>();
   private nextId = 1;
   private localId: number;
@@ -151,6 +152,9 @@ export class Sim implements IWorld {
     // Enemy tiers roll from an INDEPENDENT deterministic substream so adding the
     // feature doesn't reshuffle the main loot/position Rng — worlds stay comparable.
     this.tierRng = new Rng((seed ^ 0x9e3779b9) >>> 0);
+    // Likewise, enemy SPECIES roll from their own substream, so a varied bestiary
+    // doesn't reshuffle the main loot/position Rng either.
+    this.speciesRng = new Rng((seed ^ 0x85ebca6b) >>> 0);
     if (spawnLocal) {
       this.localId = this.spawnPlayer('Hero');
       this.registerPlayer(this.localId);
@@ -248,6 +252,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      species: '',
       boss: false, summoned: false,
       homeX: 0, homeZ: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
@@ -263,22 +268,30 @@ export class Sim implements IWorld {
     const id = this.nextId++;
     const x = this.rng.range(-WORLD_HALF, WORLD_HALF);
     const z = this.rng.range(-WORLD_HALF, WORLD_HALF);
+    // Variety arrives with REINFORCEMENTS: the starting pack is all grey wolves
+    // (a gentle early game, GDD B4b), and every respawn rolls a species + tier — so
+    // the world fills with the tougher humanoid species as you farm. This mirrors how
+    // champion/elite tiers also only show up on respawn. The roll always runs, so the
+    // speciesRng stream — and thus determinism — is independent of the tiered flag.
+    const rolled = pickSpecies(this.speciesRng.next());
+    const sp = tiered ? rolled : ENEMY_TEMPLATE;
     const tier = tiered ? pickEnemyTier(this.tierRng.next()) : ENEMY_TIERS[0];
-    const hp = Math.round(ENEMY_TEMPLATE.hp * tier.hpMult);
-    const name = tier.nameSuffix ? `${ENEMY_TEMPLATE.name} ${tier.nameSuffix}` : ENEMY_TEMPLATE.name;
+    const hp = Math.round(sp.hp * tier.hpMult);
+    const name = tier.nameSuffix ? `${sp.name} ${tier.nameSuffix}` : sp.name;
     this.ents.set(id, {
       id, kind: 'enemy', name,
       x, z, facing: 0,
       hp, maxHp: hp,
       targetId: null,
-      str: Math.round(ENEMY_TEMPLATE.str * tier.damageMult),
-      weaponDamage: Math.round(ENEMY_TEMPLATE.weaponDamage * tier.damageMult),
+      str: Math.round(sp.str * tier.damageMult),
+      weaponDamage: Math.round(sp.weaponDamage * tier.damageMult),
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: hp, baseMaxMp: 0,
-      swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
+      swingTicks: Math.round(sp.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: tier.id,
+      species: sp.id,
       boss: false, summoned: false,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -301,6 +314,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      species: '',
       boss: false, summoned: false,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
@@ -325,6 +339,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      species: t.id,
       boss: true, summoned: false,
       homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
       targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
@@ -396,6 +411,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      species: ENEMY_TEMPLATE.id,
       boss: false, summoned: true,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -553,6 +569,7 @@ export class Sim implements IWorld {
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         boss: e.boss,
         tier: e.tier,
+        species: e.species,
         hostile: e.kind === 'enemy' && e.targetId != null,
         dead: e.kind === 'player' && e.deadUntil !== 0,
         statuses: e.effects.map((s) => s.kind),
@@ -705,20 +722,24 @@ export class Sim implements IWorld {
     }
     if (killer.kind === 'player') {
       const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
-      this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : Math.round(ENEMY_TEMPLATE.xp * tier.xpMult));
+      const st = SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE; // the dead mob's species (xp/sp baseline)
+      this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : Math.round(st.xp * tier.xpMult));
       // SP (skill points) — the second currency. Scales with the tier like XP; the
       // boss pays a big lump. Spent later to rank up the mastery's abilities (GDD B4).
-      killer.sp += dead.boss ? BOSS_TEMPLATE.sp : Math.round(ENEMY_TEMPLATE.sp * tier.xpMult);
-      this.rollLoot(killer, dead.boss, dead.boss ? 1 : tier.goldMult);
+      killer.sp += dead.boss ? BOSS_TEMPLATE.sp : Math.round(st.sp * tier.xpMult);
+      this.rollLoot(killer, dead, dead.boss ? 1 : tier.goldMult);
     }
   }
 
   // Roll a kill's loot into the killer's bag. ALL randomness goes through the
   // sim Rng (never Math.random) so the same seed + commands drop the same loot.
   // The boss uses its own (bigger gold, generous drops, far better rarities) table.
-  private rollLoot(p: Entity, boss: boolean, goldMult = 1): void {
-    const t = boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
-    const rarities = boss ? BOSS_TEMPLATE.rarities : RARITIES;
+  private rollLoot(p: Entity, dead: Entity, goldMult = 1): void {
+    // Gold + drop table come from the dead mob: the boss table for a boss, else the
+    // killed species' own table (a bandit drops bandit loot). The Rng draw order is
+    // unchanged (gold int, then per-drop), so the wolf's loot stream is preserved.
+    const t = dead.boss ? BOSS_TEMPLATE : (SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE);
+    const rarities = dead.boss ? BOSS_TEMPLATE.rarities : RARITIES;
     // Same Rng draw as before (so the loot stream is unchanged), scaled by tier.
     p.gold += Math.round(this.rng.int(t.goldMin, t.goldMax + 1) * goldMult);
     for (const drop of t.drops) {
@@ -1557,7 +1578,16 @@ export class Sim implements IWorld {
 
   private stepEnemy(e: Entity): void {
     if (this.isIncapacitated(e)) return; // stunned / knocked down -> does nothing this tick
-    const tmpl = e.boss ? BOSS_TEMPLATE : ENEMY_TEMPLATE;
+    // Per-species behavior. `sp` is the species template (undefined for the boss,
+    // which is rooted/melee). reach/move default to the baseline wolf (MELEE_RANGE /
+    // ENEMY_SPEED), so a species that omits them behaves exactly like the old wolf.
+    const sp = e.boss ? undefined : (SPECIES_BY_ID[e.species] ?? ENEMY_TEMPLATE);
+    const tmpl = sp ?? BOSS_TEMPLATE; // for the aggro/leash radii (both templates carry them)
+    const reach = sp?.attackRange ?? MELEE_RANGE; // strike when the target is within this
+    const moveSpeed = (sp?.speed ?? ENEMY_SPEED) * this.slowFactor(e); // slow -> slower chase
+    // A ranged species holds its distance (stop just inside its reach); a meleer
+    // closes to CONTACT_DIST, byte-identical to the original wolf.
+    const stopDist = reach > MELEE_RANGE ? reach - 0.5 : CONTACT_DIST;
 
     // --- decide aggro / leash ---
     if (e.targetId == null) {
@@ -1607,16 +1637,16 @@ export class Sim implements IWorld {
       const dx = target.x - e.x;
       const dz = target.z - e.z;
       const dist = Math.hypot(dx, dz);
-      if (dist <= MELEE_RANGE && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
+      if (dist <= reach && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         this.hitPlayer(target, meleeDamage(e.str, e.weaponDamage));
       }
-      if (!e.boss && !this.isRooted(e) && dist > CONTACT_DIST) {
-        // the boss is rooted, so it bites in melee but never chases; a rooted enemy can't move either
+      if (!e.boss && !this.isRooted(e) && dist > stopDist) {
+        // the boss is rooted, so it bites in melee but never chases; a rooted enemy can't move either.
+        // A ranged species stops at stopDist (just inside its reach) and shoots from there.
         const len = dist < 1e-4 ? 1 : dist;
-        const speed = ENEMY_SPEED * this.slowFactor(e); // slow -> slower chase
-        e.x = clamp(e.x + (dx / len) * speed * DT, -WORLD_HALF, WORLD_HALF);
-        e.z = clamp(e.z + (dz / len) * speed * DT, -WORLD_HALF, WORLD_HALF);
+        e.x = clamp(e.x + (dx / len) * moveSpeed * DT, -WORLD_HALF, WORLD_HALF);
+        e.z = clamp(e.z + (dz / len) * moveSpeed * DT, -WORLD_HALF, WORLD_HALF);
         e.facing = Math.atan2(dx / len, dz / len);
       }
       return;
@@ -1634,9 +1664,8 @@ export class Sim implements IWorld {
     const dz = e.targetZ - e.z;
     const len = Math.hypot(dx, dz);
     if (len < 0.1) return;
-    const speed = ENEMY_SPEED * this.slowFactor(e);
-    e.x += (dx / len) * speed * DT;
-    e.z += (dz / len) * speed * DT;
+    e.x += (dx / len) * moveSpeed * DT;
+    e.z += (dz / len) * moveSpeed * DT;
     e.facing = Math.atan2(dx / len, dz / len);
   }
 

@@ -176,6 +176,7 @@ export class ServerWorld {
         maxHp: Math.round(e.maxHp),
         tier: e.tier,
         boss: e.boss,
+        species: e.species,
         hostile: e.hostile,
         dead: e.dead,
       });
