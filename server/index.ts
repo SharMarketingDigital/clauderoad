@@ -8,6 +8,9 @@
 //   SNAPSHOT_HZ      (default 10)        — snapshots broadcast per second
 //   CHAT_MAX_LEN     (default 200)       — max chat message length (chars)
 //   CHAT_RATE_PER_SEC(default 3)         — anti-flood: max chat messages per player per second
+//   WEATHER_DAY_SECONDS         (240)    — full day/night cycle length (seconds)
+//   WEATHER_RAIN_CLEAR_SECONDS  (150)    — mean dry span before rain (auto-toggling weather)
+//   WEATHER_RAIN_WET_SECONDS    (45)     — mean rainy span before it clears
 //   ALLOWED_ORIGINS  (default: empty)    — comma-separated list of allowed browser
 //                                          Origins. Set in PRODUCTION (e.g. the Vercel
 //                                          URL). When EMPTY we're in dev: only localhost
@@ -18,6 +21,7 @@ import { DT } from '../src/sim/sim';
 import type { ClientMessage, ServerMessage, ChatLine } from '../src/net/protocol';
 import { ServerWorld } from './world';
 import { ChatModerator } from './chat';
+import { Weather } from './weather';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -25,12 +29,24 @@ const SNAPSHOT_HZ = Number(process.env.SNAPSHOT_HZ ?? 10);
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337); // fixed -> the same mob layout every boot
 const CHAT_MAX_LEN = Number(process.env.CHAT_MAX_LEN ?? 200);
 const CHAT_RATE_PER_SEC = Number(process.env.CHAT_RATE_PER_SEC ?? 3);
+// Weather (synchronized day/night + rain): the full cycle length and the mean dry/rainy
+// spans of the auto-toggling rain. Defaults match the offline feel (240s day).
+// Positive-finite or fall back to the default: a misconfigured WEATHER_* (0 / "" / NaN)
+// must NOT reach the cycle math (dt/0 would NaN the synced time for everyone).
+const posNum = (raw: string | undefined, def: number): number => {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : def;
+};
+const WEATHER_DAY_SECONDS = posNum(process.env.WEATHER_DAY_SECONDS, 240);
+const WEATHER_RAIN_CLEAR_SECONDS = posNum(process.env.WEATHER_RAIN_CLEAR_SECONDS, 150);
+const WEATHER_RAIN_WET_SECONDS = posNum(process.env.WEATHER_RAIN_WET_SECONDS, 45);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-const world = new ServerWorld(WORLD_SEED);
+const weather = new Weather(WEATHER_DAY_SECONDS, WEATHER_RAIN_CLEAR_SECONDS, WEATHER_RAIN_WET_SECONDS);
+const world = new ServerWorld(WORLD_SEED, weather);
 const chat = new ChatModerator(CHAT_MAX_LEN, CHAT_RATE_PER_SEC);
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
 const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known, for chat)

@@ -309,8 +309,18 @@ async function populateGrass(scene: THREE.Scene): Promise<void> {
   scene.add(group);
 }
 
+// Server-driven sky state (multiplayer): the time of day (0..1) + whether it's raining.
+// When passed to update(), it overrides the local clock + R/T keys so every client
+// shows the SAME sky. Offline this is omitted and the local cycle runs.
+export interface WeatherState {
+  time: number;
+  raining: boolean;
+}
+
 export interface Environment {
-  update(dt: number, px: number, pz: number, py: number): void;
+  // `server` (multiplayer only) drives time + rain from the server; omit/null offline to
+  // run the local day/night clock + the R/T test keys.
+  update(dt: number, px: number, pz: number, py: number, server?: WeatherState | null): void;
   // Freeze the day/night cycle at a fixed time of day (0..1) so a recorded clip
   // always has the same light; pass null to resume the running cycle. Presentation only.
   setTimeOverride(t: number | null): void;
@@ -423,10 +433,17 @@ export function setupEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
     setTimeOverride(t) {
       timeOverride = t;
     },
-    update(dt, px, pz, py) {
-      // advance the clock unless a clip froze it; render the (possibly overridden) time
-      if (timeOverride === null) timeOfDay = (timeOfDay + dt / DAY_LENGTH) % 1;
-      const tNow = timeOverride ?? timeOfDay;
+    update(dt, px, pz, py, server = null) {
+      if (server) {
+        // MULTIPLAYER: time + rain are the server's — everyone shares one sky. The local
+        // clock and the R/T test keys are overridden each frame (so R/T do nothing in MP).
+        timeOfDay = server.time;
+        rainTarget = server.raining ? 1 : 0;
+      } else if (timeOverride === null) {
+        // SINGLE-PLAYER: advance the local clock (the R/T keys + clip override still apply).
+        timeOfDay = (timeOfDay + dt / DAY_LENGTH) % 1;
+      }
+      const tNow = timeOverride ?? timeOfDay; // timeOverride is null in MP -> = server.time
       // ease rain toward its target
       const dir = Math.sign(rainTarget - rainAmt);
       if (dir !== 0) rainAmt = Math.max(0, Math.min(1, rainAmt + dir * dt / RAIN_FADE));

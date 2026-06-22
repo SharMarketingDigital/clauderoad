@@ -33,6 +33,12 @@ export class ClientWorld implements IWorld {
   private events: SimEvent[] = []; // combat events from the LATEST snapshot (drawn once, by seq)
   private nowMs = 0; // a local clock advanced by update(dt)
   private lastSnapMs = 0; // nowMs when `to` arrived
+  // Server-driven day/night + rain (so everyone sees the same sky). `time` is
+  // interpolated between snapshots; raining is the latest (the renderer eases the fade).
+  private fromTime = 0;
+  private toTime = 0;
+  private raining = false;
+  private hasWeather = false; // false until the first snapshot arrives
 
   constructor(url: string, private readonly name: string) {
     this.ws = new WebSocket(url);
@@ -54,6 +60,16 @@ export class ClientWorld implements IWorld {
     let n = 0;
     for (const e of this.to.values()) if (e.kind === 'player') n++;
     return n;
+  }
+
+  // The server-authoritative time-of-day (0..1, interpolated between snapshots) + rain
+  // flag. Null until the first snapshot. The renderer feeds this into the day/night
+  // system in MP so every client shows the SAME sky/weather. (Not part of IWorld — a
+  // concrete channel, like the chat — so render reads it via the MP loop, not the seam.)
+  weather(): { time: number; raining: boolean } | null {
+    if (!this.hasWeather) return null;
+    const t = this.snapIntervalMs > 0 ? clamp01((this.nowMs - this.lastSnapMs) / this.snapIntervalMs) : 1;
+    return { time: lerpTime(this.fromTime, this.toTime, t), raining: this.raining };
   }
 
   // ---- IWorld ----
@@ -133,6 +149,10 @@ export class ClientWorld implements IWorld {
       this.to = new Map(msg.entities.map((e) => [e.id, e]));
       this.lastSnapMs = this.nowMs;
       this.events = msg.events.map((ev) => ({ ...ev, tick: 0 })); // tick is irrelevant remotely
+      this.fromTime = this.hasWeather ? this.toTime : msg.time; // 1st snapshot: no source -> sit still
+      this.toTime = msg.time;
+      this.raining = msg.raining;
+      this.hasWeather = true;
     } else if (msg.t === 'self') {
       this.self = msg.self; // our own HUD/bag state
     } else if (msg.t === 'chat') {
@@ -184,6 +204,13 @@ function lerpAngle(a: number, b: number, t: number): number {
   while (d > Math.PI) d -= 2 * Math.PI;
   while (d < -Math.PI) d += 2 * Math.PI;
   return a + d * t;
+}
+// Interpolate time-of-day on the 0..1 cycle. The clock only moves FORWARD, so a `to`
+// that wrapped past midnight (b < a) is carried the short way forward, not backward.
+function lerpTime(a: number, b: number, t: number): number {
+  let d = b - a;
+  if (d < -0.5) d += 1; // b wrapped 0.99 -> 0.01: go forward through midnight
+  return ((a + d * t) % 1 + 1) % 1;
 }
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;

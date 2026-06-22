@@ -97,7 +97,8 @@ function startOnline(url: string, name: string): void {
 
     input.apply(world); // WASD + Tab/click/1-9 -> intent to the server (it decides combat)
     world.update(dt); // advance snapshot interpolation
-    renderer.render(world); // local player = Knight, other players = capsules, mobs = avatars
+    // The server owns time-of-day + rain, so all clients share one sky (interpolated).
+    renderer.render(world, world.weather()); // local player = Knight, others = Knights, mobs = avatars
     drawCombatFeedback(world); // after render: damage numbers from the server's events
     hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());

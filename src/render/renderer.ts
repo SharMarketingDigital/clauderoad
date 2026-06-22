@@ -8,7 +8,7 @@ import { EnemyAvatars } from './enemy_avatars';
 import { NpcAvatar } from './npc_avatar';
 import { populateForest } from './forest';
 import { populateVillage } from './village';
-import { setupEnvironment, terrainHeight, type Environment } from './environment';
+import { setupEnvironment, terrainHeight, type Environment, type WeatherState } from './environment';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -166,7 +166,9 @@ export class Renderer {
     };
   }
 
-  render(world: IWorld): void {
+  // `serverWeather` (multiplayer) drives the day/night + rain from the server so all
+  // clients share the same sky; omit it offline to run the local cycle + R/T keys.
+  render(world: IWorld, serverWeather: WeatherState | null = null): void {
     const nowMs = performance.now(); // host clock — fine here, never in src/sim
     const dt = this.lastRenderMs ? Math.min(0.1, (nowMs - this.lastRenderMs) / 1000) : 0;
     this.lastRenderMs = nowMs;
@@ -181,7 +183,7 @@ export class Renderer {
     const pp = pid != null ? world.entities().find((e) => e.id === pid) : undefined;
     const px = pp ? pp.x : 0;
     const pz = pp ? pp.z : 0;
-    this.env.update(dt, px, pz, terrainHeight(px, pz));
+    this.env.update(dt, px, pz, terrainHeight(px, pz), serverWeather);
     if (this.vendorAvatar.ready) this.vendorAvatar.update(dt); // keep the vendor's idle playing
     this.updateCamera(world);
     this.gl.render(this.scene, this.camera);

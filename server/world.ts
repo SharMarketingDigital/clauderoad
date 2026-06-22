@@ -7,16 +7,21 @@
 // `spawnLocal=false`, so there's no phantom local player — only the networked clients
 // it adds on join. Movement, mob AI, damage, death and respawn are identical online
 // and offline because it's literally the same simulation.
-import { Sim } from '../src/sim/sim';
+import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
 import type { Command } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap } from '../src/net/protocol';
+import { Weather } from './weather';
 
 export class ServerWorld {
   private sim: Sim;
   private lastEventSeq = 0; // highest sim event seq already forwarded to clients
 
-  constructor(seed: number) {
+  // Time-of-day + rain are authoritative here too (presentation state, not the sim), so
+  // every client renders the SAME sky/weather. Advanced on the tick, sent in the snapshot.
+  // `weather` defaults to a standard cycle (handy for tests); the server passes one
+  // configured from env. It's advanced on the tick and included in the snapshot.
+  constructor(seed: number, private readonly weather: Weather = new Weather(240, 150, 45)) {
     this.sim = new Sim(seed, /* spawnLocal */ false);
   }
 
@@ -111,9 +116,11 @@ export class ServerWorld {
     }
   }
 
-  // Advance the shared world one fixed tick (players + mobs + combat).
+  // Advance the shared world one fixed tick (players + mobs + combat), and the
+  // time-of-day + weather clock by the same tick so it stays in lockstep.
   step(): void {
     this.sim.step();
+    this.weather.step(DT);
   }
 
   // A player's OWN state (HUD + action bar). The server sends this to that one client
@@ -145,7 +152,7 @@ export class ServerWorld {
   // The shared world (players + mobs + the town NPC), plus the combat events the sim
   // produced SINCE the last snapshot (so every client draws each damage number / death
   // exactly once). Numbers are rounded to keep the message small.
-  snapshot(): { entities: EntitySnap[]; events: NetEvent[] } {
+  snapshot(): { entities: EntitySnap[]; events: NetEvent[]; time: number; raining: boolean } {
     const entities: EntitySnap[] = [];
     for (const e of this.sim.entities()) {
       entities.push({
@@ -177,7 +184,9 @@ export class ServerWorld {
         text: ev.text,
       });
     }
-    return { entities, events };
+    // Time-of-day (rounded) + rain flag — the same for every client, so the world's
+    // sky/weather is synchronized. The client interpolates `time` between snapshots.
+    return { entities, events, time: round(this.weather.timeOfDay), raining: this.weather.isRaining };
   }
 
   playerCount(): number {
