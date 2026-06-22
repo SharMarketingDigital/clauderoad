@@ -116,6 +116,7 @@ export class Sim implements IWorld {
   private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
   private speciesRng: Rng; // independent substream for enemy-species rolls (see constructor)
   private procRng: Rng; // independent substream for enemy on-hit status procs (see constructor)
+  private partyRng: Rng; // independent substream for party loot auto-share recipient picks (see constructor)
   private ents = new Map<number, Entity>();
   private nextId = 1;
   private localId: number;
@@ -168,6 +169,10 @@ export class Sim implements IWorld {
     // And enemy on-hit status PROCS roll from their own substream, so a mob/boss
     // debuffing the player never perturbs the main loot/position stream.
     this.procRng = new Rng((seed ^ 0xc2b2ae35) >>> 0);
+    // And party LOOT auto-share picks its random recipient from its own substream, so
+    // WHICH member gets an item never perturbs the main loot stream (the items that drop
+    // are unchanged — only their owner differs).
+    this.partyRng = new Rng((seed ^ 0x27d4eb2f) >>> 0);
     if (spawnLocal) {
       this.localId = this.spawnPlayer('Hero');
       this.registerPlayer(this.localId);
@@ -911,16 +916,8 @@ export class Sim implements IWorld {
       killer.sp += Math.round(sp * mult);
       return;
     }
-    // 'auto-share': split (by level) among the members within range of the killer.
-    const r2 = PARTY_SHARE_RANGE * PARTY_SHARE_RANGE;
-    const inRange: Entity[] = [];
-    for (const mid of party.members) {
-      const m = this.ents.get(mid);
-      if (!m || m.kind !== 'player' || m.deadUntil !== 0) continue; // a downed spirit doesn't share (Silkroad)
-      const dx = m.x - killer.x;
-      const dz = m.z - killer.z;
-      if (dx * dx + dz * dz <= r2) inRange.push(m);
-    }
+    // 'auto-share': split (by level) among the living members within range of the killer.
+    const inRange = this.partyMembersInRange(party, killer);
     const sumLevels = inRange.reduce((s, m) => s + m.level, 0);
     if (sumLevels <= 0) { this.gainXp(killer, xp); killer.sp += sp; return; } // degenerate -> killer
     let xpAssigned = 0;
@@ -948,8 +945,12 @@ export class Sim implements IWorld {
     const bt = dead.boss ? (BOSS_DEF_BY_ID[dead.species]?.template ?? BOSS_DEFS[0].template) : null;
     const t = bt ?? (SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE);
     const rarities = bt ? bt.rarities : RARITIES;
-    // Same Rng draw as before (so the loot stream is unchanged), scaled by tier.
+    // Gold goes to the killer/picker (it is not an "item"); same Rng draw as before.
     p.gold += Math.round(this.rng.int(t.goldMin, t.goldMax + 1) * goldMult);
+    // Where each dropped ITEM goes: the picker (Item Distribution / solo) or a random
+    // in-range party member (Item Auto Share). Resolved once; the per-item random pick
+    // uses partyRng, so the ITEM ROLL (which/how rare, via this.rng) is unchanged.
+    const recipients = this.lootRecipients(p);
     for (const drop of t.drops) {
       // First decide if the item drops at all, then roll HOW rare it is.
       // Only equippable gear has a meaningful rarity; materials/consumables drop
@@ -957,9 +958,40 @@ export class Sim implements IWorld {
       if (this.rng.next() < drop.chance) {
         const equippable = ITEMS[drop.itemId]?.slot != null;
         const rarity = equippable ? rollRarity(this.rng, rarities) : 'normal';
-        addToBag(p.bag, drop.itemId, rarity, 0, 1);
+        const to = recipients.length === 1 ? recipients[0] : recipients[this.partyRng.int(0, recipients.length)];
+        addToBag(to.bag, drop.itemId, rarity, 0, 1);
       }
     }
+  }
+
+  // Who receives this kill's dropped items (GDD B6 loot modes / Silkroad). Solo or
+  // "Item Distribution" -> just the picker (the killer), byte-identical to before. "Item
+  // Auto Share" -> the living members within PARTY_SHARE_RANGE of the killer (each item
+  // then goes to a RANDOM one of these via partyRng); none in range -> falls back to the
+  // killer so an item is never lost.
+  private lootRecipients(killer: Entity): Entity[] {
+    const pid = this.partyOfPlayer.get(killer.id);
+    const party = pid !== undefined ? this.parties.get(pid) : undefined;
+    if (!party || party.lootMode !== 'auto-share') return [killer];
+    const inRange = this.partyMembersInRange(party, killer);
+    return inRange.length > 0 ? inRange : [killer];
+  }
+
+  // The LIVING party members within share range of the killer — the shared eligibility
+  // rule for BOTH auto-share XP and auto-share loot (so the two can never drift). Excludes
+  // non-players and downed spirits (Silkroad: a dead member doesn't share); always includes
+  // the killer itself (alive, at distance 0). Pure read, no Rng.
+  private partyMembersInRange(party: Party, killer: Entity): Entity[] {
+    const r2 = PARTY_SHARE_RANGE * PARTY_SHARE_RANGE;
+    const out: Entity[] = [];
+    for (const mid of party.members) {
+      const m = this.ents.get(mid);
+      if (!m || m.kind !== 'player' || m.deadUntil !== 0) continue;
+      const dx = m.x - killer.x;
+      const dz = m.z - killer.z;
+      if (dx * dx + dz * dz <= r2) out.push(m);
+    }
+    return out;
   }
 
   // Award XP and level up across as many thresholds as it crosses (carrying the

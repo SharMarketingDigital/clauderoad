@@ -318,3 +318,65 @@ describe('party XP/SP distribution (SF2)', () => {
     expect(totalXp(sim, a) - xa0).toBe(ENEMY_TEMPLATE.xp); // A (alone in range) got it all
   });
 });
+
+// ---- SF3: loot distribution ----
+function bagItems(sim: Sim, id: number): number {
+  return sim.inventoryFor(id).stacks.reduce((s, st) => s + st.qty, 0);
+}
+
+describe('party loot distribution (SF3)', () => {
+  it('item-distribution: dropped items go only to the killer (others get none)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    run(sim, a, { t: 'party-create', exp: 'each-get', loot: 'distribution' });
+    run(sim, a, { t: 'party-invite', name: 'B' });
+    run(sim, b, { t: 'party-accept' });
+    for (let i = 0; i < 6; i++) killOneWolf(sim, a); // A farms; B does nothing
+    expect(bagItems(sim, a)).toBeGreaterThan(0); // A collected its loot
+    expect(bagItems(sim, b)).toBe(0); // distribution: B never receives A's drops
+  });
+
+  it('item-auto-share: dropped items are shared out to in-range members', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    run(sim, a, { t: 'party-create', exp: 'each-get', loot: 'auto-share' });
+    run(sim, a, { t: 'party-invite', name: 'B' });
+    run(sim, b, { t: 'party-accept' });
+    for (let i = 0; i < 18; i++) killOneWolf(sim, a, [b]); // B follows -> in range for the random hand-out
+    expect(bagItems(sim, b)).toBeGreaterThan(0); // B received some auto-shared drops
+    expect(bagItems(sim, a) + bagItems(sim, b)).toBeGreaterThan(0);
+  });
+
+  it('item-auto-share: an OUT-of-range member receives no items', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    run(sim, a, { t: 'party-create', exp: 'each-get', loot: 'auto-share' });
+    run(sim, a, { t: 'party-invite', name: 'B' });
+    run(sim, b, { t: 'party-accept' });
+    for (let i = 0; i < 300; i++) { // park B in the far corner, well out of share range
+      const bb = sim.entities().find((x) => x.id === b)!;
+      sim.sendCommandFor(b, { t: 'move', dx: WORLD_HALF - bb.x, dz: WORLD_HALF - bb.z });
+      sim.sendCommandFor(a, { t: 'stop' });
+      sim.step();
+    }
+    for (let i = 0; i < 6; i++) killOneWolf(sim, a); // A farms near where it stands
+    expect(bagItems(sim, b)).toBe(0); // B was out of range the whole time
+  });
+
+  it('loot auto-share keeps the sim deterministic (same seed + commands => identical hash)', () => {
+    const scenario = (): string => {
+      const sim = new Sim(5, false);
+      const a = sim.addPlayer('A');
+      const b = sim.addPlayer('B');
+      run(sim, a, { t: 'party-create', exp: 'each-get', loot: 'auto-share' });
+      run(sim, a, { t: 'party-invite', name: 'B' });
+      run(sim, b, { t: 'party-accept' });
+      for (let i = 0; i < 8; i++) killOneWolf(sim, a, [b]);
+      return sim.hash();
+    };
+    expect(scenario()).toBe(scenario());
+  });
+});
