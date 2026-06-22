@@ -63,6 +63,9 @@ export class MpHud implements Announcer {
       tag.root.classList.toggle('hostile', isEnemy && e.hostile);
       tag.root.classList.toggle('target', isTarget);
       tag.root.classList.toggle('dead', e.dead);
+      // The Knights are identical, so give each OTHER player a subtle id-derived name
+      // hue to tell them apart. Local player + enemies keep their CSS color (clear it).
+      tag.name.style.color = !isMe && e.kind === 'player' ? playerHue(e.id) : '';
 
       // HP bar for combatants (players + mobs); hidden for the non-combat NPC.
       const showHp = (e.kind === 'player' || e.kind === 'enemy') && e.maxHp > 0;
@@ -102,6 +105,11 @@ export class MpHud implements Announcer {
     }
     return tag;
   }
+}
+
+// A distinct, readable name color per remote player (light enough for the dark tag bg).
+function playerHue(id: number): string {
+  return `hsl(${(id * 67) % 360}, 70%, 78%)`;
 }
 
 function el(className: string): HTMLDivElement {

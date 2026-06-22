@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import type { IWorld, EntityKind, EntityView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
+import { PlayerAvatars } from './player_avatars';
 import { EnemyAvatars } from './enemy_avatars';
 import { NpcAvatar } from './npc_avatar';
 import { populateForest } from './forest';
@@ -42,6 +43,10 @@ export class Renderer {
   private playerPrevX = 0;
   private playerPrevZ = 0;
   private playerLastMoveMs = 0; // host time of the player's last position change (for idle vs walk)
+
+  // OTHER (remote) players' animated Knights — one loaded model, cloned per player.
+  // Capsule is the fallback until the model loads. Read-only consumer of IWorld.
+  private playerAvatars = new PlayerAvatars();
 
   // Enemies/boss as animated 3D skeletons (one mixer each). Loads async; capsule
   // is the fallback until ready. Read-only consumer of IWorld, like everything here.
@@ -169,6 +174,7 @@ export class Renderer {
     this.sync(world);
     this.applyFlashes(dt);
     this.updatePlayerAvatar(world, dt);
+    this.updatePlayerAvatars(world, dt);
     this.updateEnemyAvatars(world, dt);
     // Keep the sky centred on the player and the sun's shadow frustum on them.
     const pid = world.localPlayerId();
@@ -271,6 +277,20 @@ export class Renderer {
     this.playerAvatar.update(dt, moving);
   }
 
+  // Drive each REMOTE player's Knight: idle vs walk from its interpolated position
+  // (the same idle/walk smoothing the enemies use). The LOCAL player is handled by
+  // updatePlayerAvatar; everything here READS IWorld and never mutates the sim.
+  private updatePlayerAvatars(world: IWorld, dt: number): void {
+    if (!this.playerAvatars.ready) return;
+    const nowMs = this.lastRenderMs;
+    const localId = world.localPlayerId();
+    for (const e of world.entities()) {
+      if (e.kind === 'player' && e.id !== localId && this.playerAvatars.has(e.id)) {
+        this.playerAvatars.update(e.id, dt, e.x, e.z, nowMs);
+      }
+    }
+  }
+
   private applyFlashes(dt: number): void {
     for (const [id, remaining] of this.flashes) {
       const m = this.meshes.get(id);
@@ -288,9 +308,12 @@ export class Renderer {
   // The 3D model that should represent an entity, once loaded: the Knight for the
   // player, a skeleton for enemies/boss. Null => not ready yet (use the capsule).
   private desiredRoot(e: EntityView, localId: number | null): THREE.Object3D | null {
-    // The single Knight avatar is the LOCAL player's. Other players (multiplayer)
-    // fall back to the capsule — one mesh per id — so they don't share the one avatar.
-    if (e.kind === 'player') return e.id === localId && this.playerAvatar.ready ? this.playerAvatar.root : null;
+    if (e.kind === 'player') {
+      // The single PlayerAvatar is the LOCAL player's (it carries the attack swing).
+      if (e.id === localId) return this.playerAvatar.ready ? this.playerAvatar.root : null;
+      // Every OTHER player gets its own cloned Knight (one loaded model, cloned per id).
+      return this.playerAvatars.rootFor(e.id, e.x, e.z);
+    }
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
     if (e.kind === 'npc') return this.vendorAvatar.ready ? this.vendorAvatar.root : null; // the vendor
     return null;
@@ -337,6 +360,7 @@ export class Renderer {
         this.scene.remove(m);
         this.meshes.delete(id);
         this.enemyAvatars.release(id); // dispose a skeleton avatar if this id was one
+        this.playerAvatars.release(id); // dispose a remote Knight if this id was one
       }
     }
     // Park the selection ring under the current target (if any).
