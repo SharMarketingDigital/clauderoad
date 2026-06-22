@@ -19,3 +19,15 @@ export const PARTY_MAX_AUTO_SHARE = 8; // "Exp Auto Share": up to 8
 export function maxPartySize(exp: PartyExpMode): number {
   return exp === 'auto-share' ? PARTY_MAX_AUTO_SHARE : PARTY_MAX_EACH_GET;
 }
+
+// "Exp Auto Share": members within this distance OF THE KILLER share a kill's XP/SP
+// (proportional to level). Anyone farther gets nothing (Silkroad ~50 units).
+export const PARTY_SHARE_RANGE = 50;
+
+// "Exp Each Get": a per-member XP/SP bonus by party size — +0% / +2% / +5% / +10% for
+// 1 / 2 / 3 / 4 members (Silkroad). Indexed by party size; index 0 is unused.
+export const EACH_GET_BONUS = [1.0, 1.0, 1.02, 1.05, 1.1];
+
+export function eachGetBonus(size: number): number {
+  return EACH_GET_BONUS[Math.max(1, Math.min(size, PARTY_MAX_EACH_GET))];
+}

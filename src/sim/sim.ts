@@ -11,7 +11,7 @@
 
 import { Rng } from './rng';
 import { applyMove } from './movement';
-import { type Party, maxPartySize } from './party';
+import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './party';
 import type { Entity, ItemStack } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
@@ -880,11 +880,62 @@ export class Sim implements IWorld {
     if (killer.kind === 'player') {
       const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
       const st = SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE; // the dead mob's species (xp/sp baseline)
-      // A boss pays its big flat XP/SP lump; a common mob scales by tier (GDD B4).
-      this.gainXp(killer, bossDef ? bossDef.template.xp : Math.round(st.xp * tier.xpMult));
-      killer.sp += bossDef ? bossDef.template.sp : Math.round(st.sp * tier.xpMult);
+      // A boss pays its big flat XP/SP lump; a common mob scales by tier (GDD B4). The
+      // reward is then distributed by the killer's party mode (solo = all to the killer).
+      const baseXp = bossDef ? bossDef.template.xp : Math.round(st.xp * tier.xpMult);
+      const baseSp = bossDef ? bossDef.template.sp : Math.round(st.sp * tier.xpMult);
+      this.awardReward(killer, baseXp, baseSp);
       this.rollLoot(killer, dead, bossDef ? 1 : tier.goldMult);
     }
+  }
+
+  // Distribute a kill's XP + SP to the killer's PARTY per its mode (GDD B6 / Silkroad):
+  //   solo (no party) -> the killer gets it all (offline + ungrouped: identical to before).
+  //   'each-get'      -> the killer keeps its own kill's reward, scaled by the party-size
+  //                      bonus (+0/+2/+5/+10% for 1/2/3/4); others get nothing from THIS kill.
+  //   'auto-share'    -> split among members within PARTY_SHARE_RANGE of the killer, by level;
+  //                      the rounding remainder goes to the killer. Out-of-range members: nothing.
+  // Pure deterministic math (no Rng), so the loot/position stream is untouched. The XP/SP
+  // tests run solo, so they see the exact pre-party behavior.
+  private awardReward(killer: Entity, xp: number, sp: number): void {
+    const pid = this.partyOfPlayer.get(killer.id);
+    const party = pid !== undefined ? this.parties.get(pid) : undefined;
+    if (!party) {
+      this.gainXp(killer, xp);
+      killer.sp += sp;
+      return;
+    }
+    if (party.expMode === 'each-get') {
+      const mult = eachGetBonus(party.members.length);
+      this.gainXp(killer, Math.round(xp * mult));
+      killer.sp += Math.round(sp * mult);
+      return;
+    }
+    // 'auto-share': split (by level) among the members within range of the killer.
+    const r2 = PARTY_SHARE_RANGE * PARTY_SHARE_RANGE;
+    const inRange: Entity[] = [];
+    for (const mid of party.members) {
+      const m = this.ents.get(mid);
+      if (!m || m.kind !== 'player' || m.deadUntil !== 0) continue; // a downed spirit doesn't share (Silkroad)
+      const dx = m.x - killer.x;
+      const dz = m.z - killer.z;
+      if (dx * dx + dz * dz <= r2) inRange.push(m);
+    }
+    const sumLevels = inRange.reduce((s, m) => s + m.level, 0);
+    if (sumLevels <= 0) { this.gainXp(killer, xp); killer.sp += sp; return; } // degenerate -> killer
+    let xpAssigned = 0;
+    let spAssigned = 0;
+    for (const m of inRange) {
+      if (m.id === killer.id) continue; // the killer takes its share + the remainder, below
+      const mxp = Math.floor((xp * m.level) / sumLevels);
+      const msp = Math.floor((sp * m.level) / sumLevels);
+      this.gainXp(m, mxp);
+      m.sp += msp;
+      xpAssigned += mxp;
+      spAssigned += msp;
+    }
+    this.gainXp(killer, xp - xpAssigned); // killer: its floor share + the rounding remainder
+    killer.sp += sp - spAssigned;
   }
 
   // Roll a kill's loot into the killer's bag. ALL randomness goes through the
