@@ -11,10 +11,13 @@
 // A name <input> makes isTyping() true while focused, so the character never moves while
 // you type a name (same mechanism as chat).
 import type { IWorld, PartyExpMode, PartyLootMode } from '../world_api';
+import { isTyping } from './typing';
 
 export class PartyHud {
   private root: HTMLDivElement;
+  private header: HTMLDivElement;
   private framesEl: HTMLDivElement;
+  private visible = true; // panel shown by default (co-op awareness); P toggles it
   // controls
   private createBtn: HTMLButtonElement;
   private createForm: HTMLDivElement;
@@ -30,6 +33,8 @@ export class PartyHud {
   constructor(private readonly world: IWorld) {
     injectStyle();
     this.root = el('party');
+    this.header = el('party-header'); // small caption + advertises the P toggle
+    this.header.textContent = 'Grupo · P';
     this.framesEl = el('party-frames');
 
     // --- controls ---
@@ -84,8 +89,22 @@ export class PartyHud {
     popupBtns.append(acceptBtn, refuseBtn);
     this.invitePopup.append(this.inviteText, popupBtns);
 
-    this.root.append(this.framesEl, controls);
+    this.root.append(this.header, this.framesEl, controls);
     document.body.append(this.root, this.invitePopup);
+
+    // P toggles the party panel open/closed (MMO social key). Guarded by isTyping() so
+    // it never fires while typing in chat or the invite-name field. The invite popup is
+    // a separate element (appended to body, not to root), so hiding the panel never hides
+    // an incoming invite — you can't miss being invited even with the list collapsed.
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat || isTyping()) return;
+      if (e.key.toLowerCase() === 'p') this.setVisible(!this.visible);
+    });
+  }
+
+  private setVisible(open: boolean): void {
+    this.visible = open;
+    this.root.style.display = open ? 'flex' : 'none'; // .party is display:flex when shown
   }
 
   private doInvite(): void {
@@ -188,6 +207,8 @@ function injectStyle(): void {
        the wallet/SP again (was top:116, which sat on top of bot + SP). */
     .party { position: fixed; left: 16px; top: 188px; z-index: 41; width: 196px;
       display: flex; flex-direction: column; gap: 7px; font-family: system-ui, sans-serif; }
+    .party-header { font: 700 10px/1 system-ui, sans-serif; color: #9fb2cc; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 1px 3px; text-shadow: 0 1px 2px #000; }
     .party-frames { display: flex; flex-direction: column; gap: 5px; }
     .party-row { padding: 5px 8px; background: rgba(14,19,28,0.82); border: 1px solid rgba(120,160,220,0.4);
       border-radius: 7px; display: flex; flex-direction: column; gap: 4px; }
