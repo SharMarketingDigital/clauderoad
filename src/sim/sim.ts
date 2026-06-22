@@ -108,6 +108,7 @@ export class Sim implements IWorld {
   private rng: Rng;
   private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
   private speciesRng: Rng; // independent substream for enemy-species rolls (see constructor)
+  private procRng: Rng; // independent substream for enemy on-hit status procs (see constructor)
   private ents = new Map<number, Entity>();
   private nextId = 1;
   private localId: number;
@@ -149,6 +150,9 @@ export class Sim implements IWorld {
     // Likewise, enemy SPECIES roll from their own substream, so a varied bestiary
     // doesn't reshuffle the main loot/position Rng either.
     this.speciesRng = new Rng((seed ^ 0x85ebca6b) >>> 0);
+    // And enemy on-hit status PROCS roll from their own substream, so a mob/boss
+    // debuffing the player never perturbs the main loot/position stream.
+    this.procRng = new Rng((seed ^ 0xc2b2ae35) >>> 0);
     if (spawnLocal) {
       this.localId = this.spawnPlayer('Hero');
       this.registerPlayer(this.localId);
@@ -1655,6 +1659,7 @@ export class Sim implements IWorld {
       if (dist <= reach && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         this.hitPlayer(target, meleeDamage(e.str, e.weaponDamage));
+        this.applyEnemyOnHit(e, target); // chance to inflict a status (slow / bleed / stun)
       }
       if (!rooted && !this.isRooted(e) && dist > stopDist) {
         // A rooted boss (and a stunned/rooted enemy) holds position — it only bites in
@@ -1722,6 +1727,23 @@ export class Sim implements IWorld {
       nextAt: kind === 'dot' ? this.tick + Math.max(1, periodTicks) : 0,
       source,
     });
+  }
+
+  // An enemy/boss can inflict a status on the player when its bite LANDS (slow, a
+  // bleeding DoT, a brief stun…). The chance is rolled on a SEPARATE Rng (procRng),
+  // so it never touches the main loot/position stream — a same-seed run is unaffected.
+  // Only enemies do this to players (never the reverse); used with parsimony (the
+  // `onHit` fields in content). Skips a downed spirit (and never procs without an onHit).
+  private applyEnemyOnHit(e: Entity, target: Entity): void {
+    if (target.kind !== 'player' || target.deadUntil !== 0) return;
+    const onHit = e.boss
+      ? (BOSS_DEF_BY_ID[e.species] ?? BOSS_DEFS[0]).template.onHit
+      : (SPECIES_BY_ID[e.species] ?? ENEMY_TEMPLATE).onHit;
+    if (!onHit || this.procRng.next() >= onHit.chance) return;
+    this.applyStatus(
+      target, onHit.kind, Math.round(onHit.durationSecs * TICK_RATE),
+      onHit.magnitude ?? 0, onHit.periodSecs ? Math.round(onHit.periodSecs * TICK_RATE) : 0, e.id,
+    );
   }
 
   // Stun and knockdown both prevent ALL action (move + attack + cast).

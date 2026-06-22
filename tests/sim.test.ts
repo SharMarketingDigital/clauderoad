@@ -29,7 +29,7 @@ import {
   inFrontOf,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
-import { ENEMY_COUNT, ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES } from '../src/sim/content/enemies';
+import { ENEMY_COUNT, ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
@@ -2471,6 +2471,52 @@ describe('second boss (Senhor da Guerra)', () => {
     };
     expect(run(7)).toBe(run(7));
     expect(run(7)).not.toBe(run(99));
+  });
+});
+
+// Enemies/bosses inflict status on the PLAYER (the reverse of the player's own kit):
+// a slow/stun/bleed on a landed bite, rolled on a dedicated procRng so it can't
+// perturb the deterministic loot/position stream.
+describe('enemies apply status effects', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const findWarlord = (sim: Sim) => sim.entities().find((e) => e.boss && e.species === 'warlord');
+
+  it('the content carries on-hit status data (Warlord slow, Alfa stun, Assassin bleed)', () => {
+    expect(WARLORD_TEMPLATE.onHit?.kind).toBe('slow');
+    expect(BOSS_TEMPLATE.onHit?.kind).toBe('stun');
+    expect(ASSASSIN_TEMPLATE.onHit?.kind).toBe('dot');
+    // the common wolf must NOT debuff — it's the determinism-critical species
+    expect(ENEMY_TEMPLATE.onHit).toBeUndefined();
+  });
+
+  it('a boss inflicts a status on the player (the Warlord hamstrings you on a hit)', () => {
+    const sim = new Sim(7);
+    while (!findWarlord(sim)) sim.step(); // advance to the Warlord
+    let slowed = false;
+    for (let i = 0; i < 2500 && !slowed; i++) {
+      const w = findWarlord(sim);
+      const p = player(sim);
+      if (w) sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); // close in / re-approach after a death
+      sim.step();
+      if (player(sim).statuses.includes('slow')) slowed = true; // the Warlord's hamstring landed
+    }
+    expect(slowed).toBe(true);
+  });
+
+  it('enemy status procs do NOT perturb the deterministic stream (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      // fight the Warlord for a while so its slow procs fire, then fingerprint the world
+      while (!findWarlord(sim)) sim.step();
+      for (let i = 0; i < 1200; i++) {
+        const w = findWarlord(sim);
+        const p = player(sim);
+        if (w) sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+      }
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
   });
 });
 

@@ -2,7 +2,7 @@
 // boss definitions (BOSS_DEFS) — each with its own template, spawn point, timers,
 // loot, summon behavior, and whether it holds its ground or chases. Adding a boss is
 // just another entry here; the sim loops over the registry. Numbers are provisional.
-import type { DropEntry } from './enemies';
+import type { DropEntry, OnHitStatus } from './enemies';
 import type { RarityDef } from './rarity';
 
 // Stats / loot / summon shape of ONE boss. Placement, timing and movement live on
@@ -30,6 +30,7 @@ export interface BossTemplate {
   swingTime: number;
   aggroRadius: number;
   leashRadius: number;
+  onHit?: OnHitStatus; // optional status the boss inflicts on the player when it bites
 }
 
 // One boss IN the world: its template plus where/when it spawns and how it behaves.
@@ -85,6 +86,9 @@ export const BOSS_TEMPLATE: BossTemplate = {
   swingTime: 2.5, // bites slower but for meleeDamage(60,30) = 60 — ~10x a common wolf
   aggroRadius: 12,
   leashRadius: 40,
+  // A brief, occasional stun — the Alfa's bite staggers you (interrupts a beat),
+  // so the summoned wolves get a window. Short + rare, so it's a threat, not a lock.
+  onHit: { kind: 'stun', chance: 0.18, durationSecs: 0.5 },
 };
 
 // --- Boss #2: the Warlord — a MOVING melee boss that hunts you down and calls in
@@ -117,6 +121,9 @@ export const WARLORD_TEMPLATE: BossTemplate = {
   swingTime: 2.2, // hits a touch faster than the Alfa
   aggroRadius: 14, // spots you from farther (it hunts)
   leashRadius: 45,
+  // A hamstring: a moderate slow so you can't simply kite the Warlord forever while
+  // its mercenaries close in. Half speed for a couple of seconds, ~1 bite in 3.
+  onHit: { kind: 'slow', chance: 0.35, durationSecs: 2, magnitude: 0.5 },
 };
 
 // Alfa placement/timing — kept as named constants (tests + the registry reference them).

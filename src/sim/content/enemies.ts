@@ -1,5 +1,16 @@
 // Data-as-code content for mobs.
-import type { EnemyTierId } from '../../world_api';
+import type { EnemyTierId, StatusKind } from '../../world_api';
+
+// A status an enemy/boss can inflict ON the player when it lands a melee hit. The
+// chance is rolled via the sim's dedicated procRng, so it never perturbs the main
+// loot/position Rng stream (determinism stays intact). Used with parsimony.
+export interface OnHitStatus {
+  kind: StatusKind; // 'slow' (speed factor) | 'dot' (bleed) | 'stun' | ...
+  chance: number; // 0..1 chance to apply per landed bite
+  durationSecs: number;
+  magnitude?: number; // slow: speed factor in (0,1); dot: damage per application
+  periodSecs?: number; // dot: seconds between damage applications
+}
 
 export interface DropEntry {
   itemId: string; // an id in content/items.ts ITEMS
@@ -31,6 +42,7 @@ export interface EnemyTemplate {
   speed?: number; // chase/wander units/sec (default ENEMY_SPEED)
   attackRange?: number; // reach to strike (default MELEE_RANGE); a ranged species stands off at ~this distance
   spawnWeight?: number; // relative spawn frequency among the species roster (default 1)
+  onHit?: OnHitStatus; // optional status this species inflicts on the player when it bites
 }
 
 export const ENEMY_TEMPLATE: EnemyTemplate = {
@@ -156,6 +168,9 @@ export const ASSASSIN_TEMPLATE: EnemyTemplate = {
   leashRadius: 16,
   speed: 3.0, // darts in
   spawnWeight: 2,
+  // A bleeding wound: a small damage-over-time on a successful strike (parsimonious —
+  // ~6 total over 3s, occasional). Thematic for an assassin; never one-shots.
+  onHit: { kind: 'dot', chance: 0.3, durationSecs: 3, magnitude: 2, periodSecs: 1 },
   drops: [
     { itemId: 'health_potion', chance: 0.25 },
     { itemId: 'old_sword', chance: 0.06 },
