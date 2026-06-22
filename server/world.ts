@@ -121,6 +121,29 @@ export class ServerWorld {
       case 'set-bot':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-bot', on: cmd.on });
         return;
+      // --- Party / co-op (GDD B6): the sim validates leader/capacity/membership ---
+      case 'party-create':
+        if (PARTY_EXP.has(cmd.exp) && PARTY_LOOT.has(cmd.loot)) {
+          this.sim.sendCommandFor(id, { t: 'party-create', exp: cmd.exp, loot: cmd.loot });
+        }
+        return;
+      case 'party-invite':
+        if (typeof cmd.name === 'string' && cmd.name.length > 0 && cmd.name.length <= 24) {
+          this.sim.sendCommandFor(id, { t: 'party-invite', name: cmd.name });
+        }
+        return;
+      case 'party-accept':
+        this.sim.sendCommandFor(id, { t: 'party-accept' });
+        return;
+      case 'party-refuse':
+        this.sim.sendCommandFor(id, { t: 'party-refuse' });
+        return;
+      case 'party-leave':
+        this.sim.sendCommandFor(id, { t: 'party-leave' });
+        return;
+      case 'party-kick':
+        if (Number.isInteger(cmd.id)) this.sim.sendCommandFor(id, { t: 'party-kick', id: cmd.id });
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }
@@ -141,11 +164,14 @@ export class ServerWorld {
     const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
     const e = this.sim.entities().find((v) => v.id === id);
+    // Party state is the same for either branch (it survives a dead/missing entity view).
+    const party = this.sim.partyViewFor(id);
+    const invite = this.sim.inviteViewFor(id);
     if (!e) {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
-        botActive: false, abilities, inventory, shop,
+        botActive: false, abilities, inventory, shop, party, invite,
       };
     }
     return {
@@ -155,7 +181,7 @@ export class ServerWorld {
       gold: e.gold, sp: e.sp, str: e.str, int: e.int,
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       botActive: this.sim.botActiveFor(id),
-      abilities, inventory, shop,
+      abilities, inventory, shop, party, invite,
     };
   }
 
@@ -209,6 +235,8 @@ export class ServerWorld {
 
 const VALID_SLOTS: ReadonlySet<string> = new Set(['weapon', 'armor']);
 const VALID_RARITIES: ReadonlySet<string> = new Set(['normal', 'sos', 'som', 'sun']);
+const PARTY_EXP: ReadonlySet<string> = new Set(['each-get', 'auto-share']);
+const PARTY_LOOT: ReadonlySet<string> = new Set(['distribution', 'auto-share']);
 
 // A bag/equip item reference from a client: a non-empty bounded item id, a real rarity,
 // and a non-negative integer "+N". The sim STILL re-checks the player actually owns it

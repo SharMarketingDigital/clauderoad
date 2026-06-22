@@ -9,6 +9,7 @@
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
   EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView,
+  PartyView, PartyInviteView,
 } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
@@ -79,6 +80,8 @@ export interface SelfSnap {
   abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
   inventory: InventoryView; // the player's bag + equipped gear (loot lands here)
   shop: ShopView; // the vendor storefront + whether this player is in range to trade
+  party: PartyView | null; // the player's party (members + modes), or null when solo
+  invite: PartyInviteView | null; // a pending party invite to accept/refuse, or null
 }
 
 // One chat line the server broadcasts to everyone. `from` is the sender's name AS THE

@@ -10,6 +10,7 @@
 // The server is authoritative for everything; this only mirrors and renders.
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView,
+  PartyView, PartyInviteView,
 } from '../world_api';
 import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine } from './protocol';
 
@@ -117,6 +118,14 @@ export class ClientWorld implements IWorld {
 
   botActive(): boolean {
     return this.self ? this.self.botActive : false;
+  }
+
+  // The local player's party + pending invite — mirrored from the server's `self` state.
+  localParty(): PartyView | null {
+    return this.self ? this.self.party : null;
+  }
+  localInvite(): PartyInviteView | null {
+    return this.self ? this.self.invite : null;
   }
 
   // The client only ever streams intent. Movement is a compact move-intent; every other

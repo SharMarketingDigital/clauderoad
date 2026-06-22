@@ -11,10 +11,11 @@
 
 import { Rng } from './rng';
 import { applyMove } from './movement';
+import { type Party, maxPartySize } from './party';
 import type { Entity, ItemStack } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
-  StatusKind,
+  StatusKind, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID } from './content/enemies';
@@ -102,6 +103,12 @@ export function xpForLevel(level: number): number {
   return 25 * level * (level + 1);
 }
 
+// Party (social) commands — applied even when a player's auto-play (bot) is ON, since
+// auto-play owns only combat + movement, not the player's group membership.
+const PARTY_COMMANDS: ReadonlySet<Command['t']> = new Set([
+  'party-create', 'party-invite', 'party-accept', 'party-refuse', 'party-leave', 'party-kick',
+]);
+
 export class Sim implements IWorld {
   tick = 0;
 
@@ -119,6 +126,14 @@ export class Sim implements IWorld {
   private moveIntents = new Map<number, Command>();
   private pendings = new Map<number, Command[]>();
   private playerIds: number[] = [];
+  // Party (co-op, GDD B6). Authoritative party state lives HERE in the deterministic
+  // sim (mutated only by commands), so XP/loot distribution can run inside killEnemy.
+  // Offline single-player never issues party commands, so these stay empty and the
+  // determinism/hash is unchanged. (XP/loot effects arrive in later sub-fatias.)
+  private nextPartyId = 1;
+  private parties = new Map<number, Party>(); // partyId -> party
+  private partyOfPlayer = new Map<number, number>(); // playerId -> partyId (absent = solo)
+  private pendingInvites = new Map<number, { fromId: number; partyId: number }>(); // inviteeId -> invite
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
   private respawnQueue: number[] = [];
   // World bosses: one runtime slot per entry in BOSS_DEFS (same order). Each tracks
@@ -190,6 +205,10 @@ export class Sim implements IWorld {
   // Remove a networked player (on disconnect). Drops its per-player state and clears
   // any enemy that was aggroed on it, so no mob chases a ghost.
   removePlayer(id: number): void {
+    // Leave any party first (promotes a new leader / dissolves a now-too-small party, and
+    // cancels the player's outbound invites), then drop this player's OWN pending invite.
+    this.removeFromParty(id);
+    this.pendingInvites.delete(id);
     this.ents.delete(id);
     this.moveIntents.delete(id);
     this.pendings.delete(id);
@@ -561,6 +580,129 @@ export class Sim implements IWorld {
     }
   }
 
+  // ---------- party / co-op (GDD B6) ----------
+  // Authoritative party state lives in the deterministic sim, mutated ONLY by these
+  // command handlers (the server routes the commands; offline never sends them). All
+  // are pure state mutations — no Rng — so determinism is untouched.
+
+  // Form a party with the caller as leader + sole member. The leader fixes BOTH modes
+  // here (Silkroad); the XP mode also caps the size. Ignored if already grouped.
+  private createParty(p: Entity, exp: PartyExpMode, loot: PartyLootMode): void {
+    if (this.partyOfPlayer.has(p.id)) return;
+    const id = this.nextPartyId++;
+    this.parties.set(id, { id, leaderId: p.id, members: [p.id], expMode: exp, lootMode: loot });
+    this.partyOfPlayer.set(p.id, id);
+  }
+
+  // Leader invites an ONLINE player by name (the first match that is online, ungrouped,
+  // and not already invited). Sets a pending invite the target accepts/refuses.
+  private inviteToParty(leader: Entity, name: string): void {
+    const pid = this.partyOfPlayer.get(leader.id);
+    if (pid === undefined) return; // must form a party first
+    const party = this.parties.get(pid)!;
+    if (party.leaderId !== leader.id) return; // only the leader invites
+    if (party.members.length >= maxPartySize(party.expMode)) return; // full
+    for (const tid of this.playerIds) {
+      if (tid === leader.id) continue;
+      const t = this.ents.get(tid);
+      if (!t || t.kind !== 'player' || t.name !== name) continue;
+      if (this.partyOfPlayer.has(tid) || this.pendingInvites.has(tid)) continue; // grouped / already invited
+      this.pendingInvites.set(tid, { fromId: leader.id, partyId: pid });
+      return; // first match only
+    }
+  }
+
+  // The invited player accepts: join the party if it still exists, isn't full, and the
+  // player hasn't grouped elsewhere meanwhile. Always clears the pending invite.
+  private acceptInvite(p: Entity): void {
+    const inv = this.pendingInvites.get(p.id);
+    if (!inv) return;
+    this.pendingInvites.delete(p.id);
+    if (this.partyOfPlayer.has(p.id)) return;
+    const party = this.parties.get(inv.partyId);
+    if (!party || party.members.length >= maxPartySize(party.expMode)) return;
+    party.members.push(p.id);
+    this.partyOfPlayer.set(p.id, party.id);
+  }
+
+  // Decline (drop the pending invite).
+  private refuseInvite(p: Entity): void {
+    this.pendingInvites.delete(p.id);
+  }
+
+  // Leader removes a member (not itself — the leader uses leave to depart).
+  private kickFromParty(leader: Entity, targetId: number): void {
+    const pid = this.partyOfPlayer.get(leader.id);
+    if (pid === undefined || targetId === leader.id) return;
+    const party = this.parties.get(pid)!;
+    if (party.leaderId !== leader.id) return; // only the leader kicks
+    if (this.partyOfPlayer.get(targetId) !== pid) return; // not in this party
+    this.removeFromParty(targetId);
+  }
+
+  // Remove a player from whatever party it's in (shared by leave, kick, and disconnect).
+  // A leaving LEADER promotes the next member; a party that drops to <=1 member dissolves
+  // (the lone member goes solo), and any pending invites into it are dropped.
+  private removeFromParty(playerId: number): void {
+    const pid = this.partyOfPlayer.get(playerId);
+    if (pid === undefined) return;
+    this.partyOfPlayer.delete(playerId);
+    // Cancel any invites this player had sent (only a leader has outbound ones), so a
+    // leaving/kicked inviter never leaves a stale invite naming a non-member behind.
+    for (const [inviteeId, inv] of this.pendingInvites) {
+      if (inv.fromId === playerId) this.pendingInvites.delete(inviteeId);
+    }
+    const party = this.parties.get(pid);
+    if (!party) return;
+    const i = party.members.indexOf(playerId);
+    if (i >= 0) party.members.splice(i, 1);
+    if (party.leaderId === playerId && party.members.length > 0) party.leaderId = party.members[0];
+    if (party.members.length <= 1) {
+      for (const m of party.members) this.partyOfPlayer.delete(m);
+      this.parties.delete(pid);
+      for (const [inviteeId, inv] of this.pendingInvites) {
+        if (inv.partyId === pid) this.pendingInvites.delete(inviteeId);
+      }
+    }
+  }
+
+  // The local player's party / pending invite (offline = null; the offline player can't
+  // group, since there's no one to invite). The server reads partyViewFor/inviteViewFor
+  // per player to fill each `self`; the online ClientWorld mirrors them.
+  localParty(): PartyView | null {
+    return this.partyViewFor(this.localId);
+  }
+  localInvite(): PartyInviteView | null {
+    return this.inviteViewFor(this.localId);
+  }
+
+  partyViewFor(id: number): PartyView | null {
+    const pid = this.partyOfPlayer.get(id);
+    if (pid === undefined) return null;
+    const party = this.parties.get(pid);
+    if (!party) return null;
+    return {
+      id: party.id,
+      expMode: party.expMode,
+      lootMode: party.lootMode,
+      maxMembers: maxPartySize(party.expMode),
+      members: party.members.map((mid) => ({
+        id: mid,
+        name: this.ents.get(mid)?.name ?? '',
+        leader: mid === party.leaderId,
+      })),
+    };
+  }
+
+  inviteViewFor(id: number): PartyInviteView | null {
+    const inv = this.pendingInvites.get(id);
+    if (!inv) return null;
+    const party = this.parties.get(inv.partyId);
+    const from = this.ents.get(inv.fromId);
+    if (!party || !from) return null;
+    return { fromId: inv.fromId, fromName: from.name, expMode: party.expMode, lootMode: party.lootMode };
+  }
+
   entities(): ReadonlyArray<EntityView> {
     const out: EntityView[] = [];
     for (const e of this.ents.values()) {
@@ -609,7 +751,10 @@ export class Sim implements IWorld {
             this.moveIntents.set(id, { t: 'stop' }); // hand control back to the human
             p.targetId = null;
           }
-        } else if (!this.botPlayers.has(id)) {
+        } else if (!this.botPlayers.has(id) || PARTY_COMMANDS.has(cmd.t)) {
+          // Manual combat/economy input is ignored while auto-play is ON, but SOCIAL
+          // party commands still apply (auto-play owns only the player's combat + movement,
+          // so you can still accept an invite / manage your group while botting).
           this.applyAction(p, cmd);
         }
       }
@@ -816,6 +961,15 @@ export class Sim implements IWorld {
 
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
+    // Party (social) commands work even while downed/stunned — no combat involved.
+    switch (cmd.t) {
+      case 'party-create': this.createParty(p, cmd.exp, cmd.loot); return;
+      case 'party-invite': this.inviteToParty(p, cmd.name); return;
+      case 'party-accept': this.acceptInvite(p); return;
+      case 'party-refuse': this.refuseInvite(p); return;
+      case 'party-leave': this.removeFromParty(p.id); return;
+      case 'party-kick': this.kickFromParty(p, cmd.id); return;
+    }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {
       case 'cycle-target':
@@ -1931,6 +2085,19 @@ export class Sim implements IWorld {
       mix(s.entityId ?? -1);
       mix(Number.isFinite(s.spawnAt) ? s.spawnAt : -1);
       mix(s.summonsFired);
+    }
+    // Party state (deterministic order: parties by id with members in join order, then
+    // pending invites by invitee id). Empty offline, so this adds nothing to the hash there.
+    for (const pid of [...this.parties.keys()].sort((a, b) => a - b)) {
+      const party = this.parties.get(pid)!;
+      mix(party.id); mix(party.leaderId);
+      mix(strHash(party.expMode)); mix(strHash(party.lootMode));
+      for (const m of party.members) mix(m);
+      mix(-1); // member-list terminator
+    }
+    for (const iid of [...this.pendingInvites.keys()].sort((a, b) => a - b)) {
+      const inv = this.pendingInvites.get(iid)!;
+      mix(iid); mix(inv.fromId); mix(inv.partyId);
     }
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);

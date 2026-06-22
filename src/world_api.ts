@@ -124,6 +124,41 @@ export interface ShopView {
   readonly inRange: boolean;
 }
 
+// Party (co-op group), Silkroad-style. The leader picks BOTH modes at creation:
+//   exp:  'each-get'   — each member keeps the XP they earned (no range limit), +bonus
+//                        by party size; capacity 4.
+//         'auto-share' — each kill's XP is split (by level) among members IN RANGE;
+//                        capacity 8.
+//   loot: 'distribution' — the item goes to whoever picked it up (as solo).
+//         'auto-share'   — the item goes to a random member in range.
+// Defined at the seam so the sim, protocol and UI agree.
+export type PartyExpMode = 'each-get' | 'auto-share';
+export type PartyLootMode = 'distribution' | 'auto-share';
+
+// One party member as the UI sees it. Look up live HP/position in entities() by id.
+export interface PartyMemberView {
+  readonly id: number;
+  readonly name: string;
+  readonly leader: boolean;
+}
+
+// The local player's party (members + modes), for the frames + party window.
+export interface PartyView {
+  readonly id: number;
+  readonly expMode: PartyExpMode;
+  readonly lootMode: PartyLootMode;
+  readonly maxMembers: number; // 4 (each-get) or 8 (auto-share)
+  readonly members: ReadonlyArray<PartyMemberView>; // includes the leader; join order
+}
+
+// A pending party invitation shown to the invited player (accept / refuse).
+export interface PartyInviteView {
+  readonly fromId: number;
+  readonly fromName: string;
+  readonly expMode: PartyExpMode;
+  readonly lootMode: PartyLootMode;
+}
+
 // Player intent / commands. The client streams these into the world.
 // Offline they hit the local Sim; online they will be sent to the server.
 //
@@ -144,7 +179,14 @@ export type Command =
   | { t: 'rank-up'; slot: number } // spend SP to raise the rank of the ability in this action-bar slot
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
   | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
-  | { t: 'set-bot'; on: boolean }; // toggle auto-play (the sim drives the player; manual input ignored)
+  | { t: 'set-bot'; on: boolean } // toggle auto-play (the sim drives the player; manual input ignored)
+  // --- party / co-op (GDD B6) ---
+  | { t: 'party-create'; exp: PartyExpMode; loot: PartyLootMode } // form a party; you become leader
+  | { t: 'party-invite'; name: string } // leader: invite an online player by name
+  | { t: 'party-accept' } // accept your pending invite
+  | { t: 'party-refuse' } // decline your pending invite
+  | { t: 'party-leave' } // leave your party (a leaving leader promotes the next member, or it dissolves)
+  | { t: 'party-kick'; id: number }; // leader: remove a member by player id
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -216,5 +258,10 @@ export interface IWorld {
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;
+  // The local player's party (members + modes), or null when solo. UI draws the
+  // party frames + window from this; online it mirrors the server's authoritative state.
+  localParty(): PartyView | null;
+  // A pending party invite for the local player (to accept/refuse), or null.
+  localInvite(): PartyInviteView | null;
   sendCommand(cmd: Command): void;
 }
