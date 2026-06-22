@@ -8,7 +8,7 @@
 // streams back (a) the shared world + combat events to everyone and (b) each player's
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
-  EntityKind, EnemyTierId, SimEvent, Command, AbilityView, InventoryView, ShopView,
+  EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView,
 } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
@@ -39,6 +39,8 @@ export interface EntitySnap {
   species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
   hostile: boolean; // an enemy currently aggroed (chasing/biting) — for the hostile tint
   dead: boolean; // a downed player in the "spirit" state
+  weaponPlus: number; // enhancement level of the equipped weapon (0 if none) — drives the +N glow on EVERY entity
+  statuses: StatusKind[]; // active status-effect kinds (stun/slow/root/bleed…) — for the on-entity indicator
 }
 
 // A presentation event forwarded from the server's sim (floating damage numbers, hit

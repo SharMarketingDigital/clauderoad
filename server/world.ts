@@ -179,6 +179,8 @@ export class ServerWorld {
         species: e.species,
         hostile: e.hostile,
         dead: e.dead,
+        weaponPlus: e.weaponPlus, // so OTHER players' weapon glow renders (not just the local one)
+        statuses: [...e.statuses], // so stun/slow/bleed indicators show on every entity in MP
       });
     }
     const events: NetEvent[] = [];
