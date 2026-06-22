@@ -15,6 +15,7 @@ import { makeCombatFeedback } from './ui/combat_feedback';
 import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
+import { ChatBox } from './ui/chat';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 
@@ -80,6 +81,8 @@ function startOnline(url: string, name: string): void {
   const world = new ClientWorld(url, name); // a network-backed IWorld
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
+  const chat = new ChatBox((text) => world.sendChat(text)); // text chat (Enter to open)
+  world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,
   // flash the hit, and the Hud banners deaths/boss spawns — identically on every client.

@@ -3,6 +3,7 @@
 // will be sent to the server instead of a local Sim — no change needed here.)
 import type { IWorld, Command } from '../world_api';
 import type { Renderer } from '../render/renderer';
+import { isTyping } from '../ui/typing';
 
 export class Input {
   private keys = new Set<string>();
@@ -20,6 +21,7 @@ export class Input {
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
+      if (isTyping()) return; // chat (or any text field) has focus -> keys are for typing
       if (e.key === 'Tab') {
         e.preventDefault(); // don't move focus off the canvas
         if (!e.repeat) this.pending.push({ t: 'cycle-target' });
@@ -78,6 +80,14 @@ export class Input {
     // Auto-play drives the player from the sim; ignore (and drop) manual input.
     if (world.botActive()) {
       this.pending.length = 0;
+      return;
+    }
+    // While typing in the chat, the player must NOT move/act: drop queued actions,
+    // forget held keys (so a key pressed before opening chat doesn't stick), and stop.
+    if (isTyping()) {
+      this.pending.length = 0;
+      this.keys.clear();
+      world.sendCommand({ t: 'stop' });
       return;
     }
     for (const cmd of this.pending) world.sendCommand(cmd);

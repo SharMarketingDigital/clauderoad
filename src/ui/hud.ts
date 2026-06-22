@@ -1,5 +1,6 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
 import type { IWorld, AbilityView, InventoryView, EntityView } from '../world_api';
+import { isTyping } from './typing';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -169,6 +170,7 @@ export class Hud {
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      if (isTyping()) return; // don't fire HUD hotkeys while typing in the chat
       if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
       else if (e.key.toLowerCase() === 'v') this.setShop(!this.shopOpen);
       else if (e.key.toLowerCase() === 'k') this.setSkills(!this.skillsOpen);

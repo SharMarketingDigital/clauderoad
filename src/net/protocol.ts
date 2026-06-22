@@ -18,7 +18,9 @@ import type {
 export type ClientMessage =
   | { t: 'join'; name: string } // sent once on connect; the server spawns a player
   | { t: 'move-intent'; dx: number; dz: number } // desired world-space direction ({0,0} = stop)
-  | { t: 'cmd'; cmd: Command }; // any other gameplay intent (server-validated)
+  | { t: 'cmd'; cmd: Command } // any other gameplay intent (server-validated)
+  | { t: 'chat'; text: string }; // a chat message the player typed (server sanitizes the TEXT; the
+  // sender's NAME is whatever the server already knows for this connection — never trusted from here)
 
 // One entity's public state in a snapshot — players AND mobs AND the town NPC. The
 // server owns all of it; the client only mirrors + interpolates. Kept compact (rounded
@@ -76,8 +78,19 @@ export interface SelfSnap {
   shop: ShopView; // the vendor storefront + whether this player is in range to trade
 }
 
+// One chat line the server broadcasts to everyone. `from` is the sender's name AS THE
+// SERVER KNOWS IT (never trusted from the client). `system` marks a server notice
+// (e.g. join/leave), which the UI renders without a "name:" prefix.
+export interface ChatLine {
+  from: string;
+  text: string;
+  ts: number; // server timestamp (ms since epoch)
+  system?: boolean;
+}
+
 // ---- server -> client ----
 export type ServerMessage =
   | { t: 'welcome'; id: number; snapshotHz: number } // your player id + the snapshot rate (for interpolation)
   | { t: 'snapshot'; entities: EntitySnap[]; events: NetEvent[] } // the shared world + new combat events (broadcast)
-  | { t: 'self'; self: SelfSnap }; // YOUR personal HUD/bag state (sent only to you)
+  | { t: 'self'; self: SelfSnap } // YOUR personal HUD/bag state (sent only to you)
+  | { t: 'chat'; line: ChatLine }; // a chat line, broadcast to everyone

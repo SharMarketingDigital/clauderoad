@@ -11,13 +11,17 @@
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView,
 } from '../world_api';
-import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap } from './protocol';
+import type { ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine } from './protocol';
 
 export type NetStatus = 'connecting' | 'online' | 'offline';
 
 export class ClientWorld implements IWorld {
   readonly tick = 0; // not meaningful online; satisfies IWorld
   status: NetStatus = 'connecting';
+
+  // Chat is a separate channel from the game world (IWorld) — the UI sets this callback
+  // and we invoke it for each chat line the server broadcasts. Not part of IWorld.
+  onChat: ((line: ChatLine) => void) | null = null;
 
   private ws: WebSocket;
   private myId: number | null = null;
@@ -106,6 +110,12 @@ export class ClientWorld implements IWorld {
     else this.send({ t: 'cmd', cmd });
   }
 
+  // Send a chat message. Only the text is sent; the server attributes it to this
+  // connection's known name, sanitizes, rate-limits, and rebroadcasts to everyone.
+  sendChat(text: string): void {
+    this.send({ t: 'chat', text });
+  }
+
   // ---- internals ----
   private onMessage(data: unknown): void {
     if (typeof data !== 'string') return;
@@ -125,6 +135,8 @@ export class ClientWorld implements IWorld {
       this.events = msg.events.map((ev) => ({ ...ev, tick: 0 })); // tick is irrelevant remotely
     } else if (msg.t === 'self') {
       this.self = msg.self; // our own HUD/bag state
+    } else if (msg.t === 'chat') {
+      this.onChat?.(msg.line); // hand the chat line to the UI
     }
   }
 

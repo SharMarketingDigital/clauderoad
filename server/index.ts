@@ -6,6 +6,8 @@
 //   PORT             (default 8080)      — TCP port to listen on
 //   HOST             (default 0.0.0.0)   — bind address (0.0.0.0 accepts external conns)
 //   SNAPSHOT_HZ      (default 10)        — snapshots broadcast per second
+//   CHAT_MAX_LEN     (default 200)       — max chat message length (chars)
+//   CHAT_RATE_PER_SEC(default 3)         — anti-flood: max chat messages per player per second
 //   ALLOWED_ORIGINS  (default: empty)    — comma-separated list of allowed browser
 //                                          Origins. Set in PRODUCTION (e.g. the Vercel
 //                                          URL). When EMPTY we're in dev: only localhost
@@ -13,20 +15,25 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { DT } from '../src/sim/sim';
-import type { ClientMessage, ServerMessage } from '../src/net/protocol';
+import type { ClientMessage, ServerMessage, ChatLine } from '../src/net/protocol';
 import { ServerWorld } from './world';
+import { ChatModerator } from './chat';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const SNAPSHOT_HZ = Number(process.env.SNAPSHOT_HZ ?? 10);
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337); // fixed -> the same mob layout every boot
+const CHAT_MAX_LEN = Number(process.env.CHAT_MAX_LEN ?? 200);
+const CHAT_RATE_PER_SEC = Number(process.env.CHAT_RATE_PER_SEC ?? 3);
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
 const world = new ServerWorld(WORLD_SEED);
+const chat = new ChatModerator(CHAT_MAX_LEN, CHAT_RATE_PER_SEC);
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
+const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known, for chat)
 
 // One HTTP server hosts BOTH the healthcheck (plain GET) and the WebSocket upgrade.
 const httpServer = createServer(handleHttp);
@@ -72,7 +79,9 @@ function handleMessage(ws: WebSocket, data: RawData): void {
     const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim().slice(0, 24) : 'Jogador';
     const id = world.addPlayer(name);
     clientIds.set(ws, id);
+    clientNames.set(ws, name);
     send(ws, { t: 'welcome', id, snapshotHz: SNAPSHOT_HZ });
+    broadcastChat({ from: '', text: `${name} entrou`, ts: Date.now(), system: true });
     console.log(`[server] ${name} joined as #${id} (${world.playerCount()} online)`);
   } else if (msg.t === 'move-intent') {
     const id = clientIds.get(ws);
@@ -80,14 +89,39 @@ function handleMessage(ws: WebSocket, data: RawData): void {
   } else if (msg.t === 'cmd') {
     const id = clientIds.get(ws);
     if (id != null) world.command(id, msg.cmd); // server whitelists + the sim validates
+  } else if (msg.t === 'chat') {
+    handleChat(ws, msg.text);
+  }
+}
+
+// A chat message from a client. We trust ONLY the text (sanitized + rate-limited by the
+// moderator); the sender name is whatever the server already knows for this connection.
+function handleChat(ws: WebSocket, rawText: unknown): void {
+  const id = clientIds.get(ws);
+  const name = clientNames.get(ws);
+  if (id == null || name == null) return; // not joined yet
+  const text = chat.accept(id, rawText, Date.now());
+  if (text == null) return; // empty or over the rate limit -> drop
+  broadcastChat({ from: name, text, ts: Date.now() });
+}
+
+// Send a chat line to every connected client (player messages + system notices).
+function broadcastChat(line: ChatLine): void {
+  const payload = JSON.stringify({ t: 'chat', line } satisfies ServerMessage);
+  for (const ws of clientIds.keys()) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(payload);
   }
 }
 
 function dropClient(ws: WebSocket): void {
   const id = clientIds.get(ws);
   if (id == null) return;
+  const name = clientNames.get(ws);
   world.removePlayer(id);
   clientIds.delete(ws);
+  clientNames.delete(ws);
+  chat.forget(id);
+  if (name != null) broadcastChat({ from: '', text: `${name} saiu`, ts: Date.now(), system: true });
   console.log(`[server] #${id} left (${world.playerCount()} online)`);
 }
 
