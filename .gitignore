@@ -7,6 +7,9 @@ ecosystem.config.cjs
 .DS_Store
 tmp/
 
+# Stray non-project file that can appear in the working tree — never commit it.
+/CLAUDE-FABLE-5.md
+
 # Raw 3D asset downloads — NOT versioned (hundreds of source files: fbx/obj/blend/
 # textures). Only the curated, ready-to-use files in public/models/ are committed.
 /KayKit_Adventurers_2.0_FREE/
