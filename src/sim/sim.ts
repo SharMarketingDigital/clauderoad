@@ -27,8 +27,17 @@ import {
   MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
 } from './content/enhance';
 import {
-  SKILL_MAX_RANK, skillUpgradeCost, rankDamageMult, rankEffectMult,
+  SKILL_MAX_RANK, skillUpgradeCost, rankEffectMult,
 } from './content/skill_ranks';
+// Combat is split into two modules so the two v0.3 fronts never edit the same damage code:
+// OFFENSE (how damage is generated — Gabriel) and DEFENSE (how it's reduced — Kevin). The
+// sim only composes them: final = defense.mitigate(offense.compute(...)). See each module.
+import * as offense from './combat_offense';
+import * as defense from './combat_defense';
+import type { Damage } from './combat_offense';
+// Back-compat: these pure helpers moved INTO combat_offense; re-export so existing importers
+// (tests, content) keep `import { meleeDamage, ... } from '../sim/sim'` working unchanged.
+export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat_offense';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
@@ -48,7 +57,6 @@ export const PLAYER_SPEED = 6; // units/sec (also reused by the authoritative se
 export const ENEMY_SPEED = 2.4; // units/sec
 export const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
-export const CRIT_MULT = 2.0; // a critical hit deals this multiple (Spear's Fúria buff)
 // Highest action-bar slot any mastery uses — the hash fingerprints cooldowns for
 // slots 1..N so it stays complete regardless of which kit is active.
 const MAX_ABILITY_SLOTS = 8;
@@ -847,13 +855,21 @@ export class Sim implements IWorld {
     }
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
     p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
-    this.hitEnemy(t, this.rollCrit(p, meleeDamage(p.str, p.weaponDamage)), p);
+    // Auto-attack: a basic physical weapon swing (no ability). compute() does the same crit
+    // roll the old rollCrit did; defense.mitigate (inside hitEnemy) is passthrough today.
+    this.hitEnemy(t, offense.compute({
+      attacker: p, rank: 1, damageType: 'physical', critChance: this.critChance(p), rng: this.rng,
+    }), p);
   }
 
   // Apply a hit to an enemy: subtract HP, surface the floating damage number,
   // fire the boss's minion summons when its HP crosses a threshold, and kill it
   // at 0. Centralized so every damage source goes through the same path.
-  private hitEnemy(t: Entity, dmg: number, killer: Entity): void {
+  private hitEnemy(t: Entity, hit: Damage, killer: Entity): void {
+    // Reduce the outgoing hit by the target's defense, then apply it. Enemies have no
+    // mitigation today, so mitigate() is a passthrough (dmg === hit.amount) — identical
+    // numbers to before. Kevin's K3 can give enemies armor here without touching this call.
+    const dmg = defense.mitigate({ hit, target: t });
     t.hp -= dmg;
     // Captured at the target's current position so the number shows even on a kill.
     this.events.push({
@@ -1556,12 +1572,6 @@ export class Sim implements IWorld {
     p.skillRanks[def.id] = rank + 1;
   }
 
-  // An ability's hit, scaled by its current rank (rank 1 == the base value, so this
-  // is a no-op for an un-ranked ability). Higher ranks hit harder.
-  private rankedAbilityDamage(p: Entity, def: AbilityDef): number {
-    return Math.round(abilityDamage(def, p.str, p.weaponDamage) * rankDamageMult(this.skillRank(p, def)));
-  }
-
   // ---------- vendor (shop) ----------
   // Buy one of a vendor stock item. Requires being near the vendor and enough
   // gold; the item is added Normal/+0. Refuses (no charge) if the bag is full.
@@ -1686,7 +1696,12 @@ export class Sim implements IWorld {
       p.facing = Math.atan2(t.x - p.x, t.z - p.z); // face the target so the cone is predictable
       this.commitCast(p, def, slot);
       for (const e of this.enemiesInCone(p)) {
-        this.hitEnemy(e, this.rollCrit(p, this.rankedAbilityDamage(p, def)), p);
+        // One compute() per enemy => one crit roll per enemy, exactly as the old per-enemy
+        // rollCrit. Same rng draw order, so the hash is unchanged.
+        this.hitEnemy(e, offense.compute({
+          attacker: p, ability: def, rank: this.skillRank(p, def), damageType: 'physical',
+          critChance: this.critChance(p), rng: this.rng,
+        }), p);
         if (e.hp > 0) this.applyCastEffects(e, def, p);
       }
       return;
@@ -1719,7 +1734,10 @@ export class Sim implements IWorld {
       }
     }
     this.commitCast(p, def, slot);
-    this.hitEnemy(t, this.rollCrit(p, this.rankedAbilityDamage(p, def)), p);
+    this.hitEnemy(t, offense.compute({
+      attacker: p, ability: def, rank: this.skillRank(p, def), damageType: 'physical',
+      critChance: this.critChance(p), rng: this.rng,
+    }), p);
     // Debuff the target — only if it survived the hit.
     if (t.hp > 0) this.applyCastEffects(t, def, p);
   }
@@ -1924,7 +1942,11 @@ export class Sim implements IWorld {
       const dist = Math.hypot(dx, dz);
       if (dist <= reach && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
-        this.hitPlayer(target, meleeDamage(e.str, e.weaponDamage));
+        // An enemy bite: a basic physical hit. critChance 0 => no crit roll (enemies never
+        // crit today), so it draws NO rng — identical to the old direct meleeDamage call.
+        this.hitPlayer(target, offense.compute({
+          attacker: e, rank: 1, damageType: 'physical', critChance: 0, rng: this.rng,
+        }));
         this.applyEnemyOnHit(e, target); // chance to inflict a status (slow / bleed / stun)
       }
       if (!rooted && !this.isRooted(e) && dist > stopDist) {
@@ -1959,11 +1981,14 @@ export class Sim implements IWorld {
   // Apply a melee hit to the player. Emits the same 'damage' event the player's
   // own swings use (so the renderer flashes the player and pops the number), and
   // downs the player when HP hits 0.
-  private hitPlayer(p: Entity, dmg: number): void {
-    if (dmg <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
-    // Postura Defensiva (and any future mitigation buff) reduces the hit. Floor
-    // at 1 so a mitigated blow still registers, and show the ACTUAL HP lost.
-    const taken = Math.max(1, Math.round(dmg * this.defenseFactor(p)));
+  private hitPlayer(p: Entity, hit: Damage): void {
+    if (hit.amount <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
+    // Gear/armor mitigation (Kevin's combat_defense): passthrough today (no armor yet), so
+    // `incoming` === hit.amount. Then the Postura Defensiva BUFF — a temporary STATUS, not
+    // gear — applies here at the apply step (GDD option A), floored at 1 so a mitigated blow
+    // still registers; the event shows the ACTUAL HP lost.
+    const incoming = defense.mitigate({ hit, target: p });
+    const taken = Math.max(1, Math.round(incoming * this.defenseFactor(p)));
     p.hp = Math.max(0, p.hp - taken);
     this.events.push({
       seq: this.nextEventSeq++,
@@ -2047,13 +2072,6 @@ export class Sim implements IWorld {
     for (const s of e.effects) if (s.kind === 'crit' && s.magnitude > 0) c += s.magnitude;
     return c > 1 ? 1 : c;
   }
-  // A player-dealt hit, with a crit roll folded in. The Rng is touched ONLY when a
-  // crit buff is up, so an unbuffed world's random stream (and hash) is unchanged.
-  private rollCrit(p: Entity, dmg: number): number {
-    const chance = this.critChance(p);
-    if (chance <= 0) return dmg;
-    return this.rng.next() < chance ? Math.round(dmg * CRIT_MULT) : dmg;
-  }
 
   // Tick an entity's status effects: apply any DoT damage due this tick, then drop
   // expired effects. Called for every entity at the start of each tick.
@@ -2077,14 +2095,18 @@ export class Sim implements IWorld {
   // source for XP/loot, and trigger boss summons on HP thresholds).
   private applyDotDamage(e: Entity, dmg: number, source: number): void {
     if (dmg <= 0) return;
+    // A DoT tick is a FIXED magnitude (no attacker-stat generation, no crit), so it does NOT
+    // go through offense.compute. We wrap it in a Damage and route it through the SAME apply
+    // path (so it still mitigates on the player, can kill, and credits the source for loot).
+    const hit: Damage = { amount: dmg, type: 'physical', crit: false };
     if (e.kind === 'player') {
-      this.hitPlayer(e, dmg);
+      this.hitPlayer(e, hit);
     } else if (e.kind === 'enemy') {
       // Credit the source if it still exists; otherwise credit no one (use the
       // victim as a non-player "killer" so killEnemy grants no XP/loot) rather
       // than handing the local player free credit for a kill it didn't cause.
       const killer = this.ents.get(source) ?? e;
-      this.hitEnemy(e, dmg, killer);
+      this.hitEnemy(e, hit, killer);
     }
   }
 
@@ -2216,21 +2238,6 @@ export class Sim implements IWorld {
     mix(this.tick);
     return h.toString(16);
   }
-}
-
-// Provisional melee hit. Grounded loosely in WoW Classic, where a swing deals
-// weapon damage plus a contribution from attack power, and Strength feeds AP
-// (~1 AP per STR for warriors). Simplified here to weapon + floor(STR * k).
-// No RNG, so it's deterministic; tune the curve later (see GDD §B1).
-export const STR_TO_DAMAGE = 0.5;
-export function meleeDamage(str: number, weaponDamage: number): number {
-  return weaponDamage + Math.floor(str * STR_TO_DAMAGE);
-}
-
-// An ability's hit: the base melee swing scaled up, so it always out-damages
-// the auto-attack. Pure & deterministic (no RNG); tune the multiplier later.
-export function abilityDamage(def: AbilityDef, str: number, weaponDamage: number): number {
-  return Math.round(meleeDamage(str, weaponDamage) * (def.damageMultiplier ?? 0));
 }
 
 function rarityDef(id: Rarity): RarityDef {
