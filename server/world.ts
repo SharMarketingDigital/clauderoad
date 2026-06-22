@@ -11,6 +11,7 @@ import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
 import type { Command } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap } from '../src/net/protocol';
+import type { PlayerSave } from '../src/sim/save';
 import { Weather } from './weather';
 
 export class ServerWorld {
@@ -31,6 +32,15 @@ export class ServerWorld {
 
   removePlayer(id: number): void {
     this.sim.removePlayer(id);
+  }
+
+  // Persistence passthrough: the server orchestrates the DB; the Sim does the data work.
+  // serialize is read-only; restore is defensive (it sanitizes the untrusted DB JSON).
+  serializePlayer(id: number): PlayerSave | null {
+    return this.sim.serializePlayer(id);
+  }
+  restorePlayer(id: number, raw: unknown): void {
+    this.sim.restorePlayer(id, raw);
   }
 
   // A movement INTENT: sanitize to a finite, unit-ish DIRECTION (never a position) and

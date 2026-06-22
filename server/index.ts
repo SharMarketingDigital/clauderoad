@@ -1,11 +1,15 @@
-// Authoritative game server (presence + movement foundation). Accepts WebSocket
-// connections, runs ONE shared world at a fixed tick (reusing src/sim/), and streams
-// snapshots to everyone. The server decides all positions; clients only send intent.
+// Authoritative game server. Accepts WebSocket connections, runs ONE shared Sim (players
+// + mobs + combat) at a fixed tick (reusing src/sim/), syncs weather + chat, PERSISTS each
+// character to Postgres, and streams snapshots to everyone. The server decides everything;
+// clients only send intent.
 //
 // Config is via environment variables (nothing sensitive in code — see .env.example):
 //   PORT             (default 8080)      — TCP port to listen on
 //   HOST             (default 0.0.0.0)   — bind address (0.0.0.0 accepts external conns)
 //   SNAPSHOT_HZ      (default 10)        — snapshots broadcast per second
+//   DATABASE_URL     (optional)          — Postgres for character persistence. UNSET =>
+//                                          in-memory (no save). A SECRET — never logged.
+//   SAVE_INTERVAL_SECONDS       (30)     — how often connected characters are saved
 //   CHAT_MAX_LEN     (default 200)       — max chat message length (chars)
 //   CHAT_RATE_PER_SEC(default 3)         — anti-flood: max chat messages per player per second
 //   WEATHER_DAY_SECONDS         (240)    — full day/night cycle length (seconds)
@@ -25,6 +29,7 @@ import type { ClientMessage, ServerMessage, ChatLine } from '../src/net/protocol
 import { ServerWorld } from './world';
 import { ChatModerator } from './chat';
 import { Weather } from './weather';
+import { createStore, MemoryStore, type CharacterStore } from './store';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -60,8 +65,13 @@ const weather = new Weather(
 );
 const world = new ServerWorld(WORLD_SEED, weather);
 const chat = new ChatModerator(CHAT_MAX_LEN, CHAT_RATE_PER_SEC);
+const SAVE_INTERVAL_SECONDS = posNum(process.env.SAVE_INTERVAL_SECONDS, 30);
+// Character persistence. Starts as memory (no-op) and is replaced by the real store
+// BEFORE we listen (see the bottom), so a returning player loads correctly.
+let store: CharacterStore = new MemoryStore();
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
-const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known, for chat)
+const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known)
+const joining = new Set<WebSocket>(); // sockets mid-join (awaiting the async DB load) — guards the gap
 
 // One HTTP server hosts BOTH the healthcheck (plain GET) and the WebSocket upgrade.
 const httpServer = createServer(handleHttp);
@@ -90,12 +100,12 @@ function originAllowed(origin: string | undefined): boolean {
 }
 
 wss.on('connection', (ws) => {
-  ws.on('message', (data) => handleMessage(ws, data));
+  ws.on('message', (data) => void handleMessage(ws, data).catch((e) => console.error('[server] message error:', e)));
   ws.on('close', () => dropClient(ws));
   ws.on('error', () => dropClient(ws)); // a socket error -> treat like a disconnect
 });
 
-function handleMessage(ws: WebSocket, data: RawData): void {
+async function handleMessage(ws: WebSocket, data: RawData): Promise<void> {
   let msg: ClientMessage;
   try {
     msg = JSON.parse(data.toString());
@@ -103,14 +113,21 @@ function handleMessage(ws: WebSocket, data: RawData): void {
     return; // ignore malformed input — never trust a client
   }
   if (msg.t === 'join') {
-    if (clientIds.has(ws)) return; // already joined; ignore a repeat
+    if (clientIds.has(ws) || joining.has(ws)) return; // already joined / mid-join — ignore repeats
+    joining.add(ws);
     const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim().slice(0, 24) : 'Jogador';
+    // Load any saved character BEFORE spawning, so a returning player starts where it left off.
+    const saved = await store.load(name);
+    if (ws.readyState !== WebSocket.OPEN) { joining.delete(ws); return; } // disconnected while loading
     const id = world.addPlayer(name);
+    if (saved != null) world.restorePlayer(id, saved); // restore is DEFENSIVE — the sim sanitizes it
     clientIds.set(ws, id);
     clientNames.set(ws, name);
+    joining.delete(ws);
     send(ws, { t: 'welcome', id, snapshotHz: SNAPSHOT_HZ });
     broadcastChat({ from: '', text: `${name} entrou`, ts: Date.now(), system: true });
-    console.log(`[server] ${name} joined as #${id} (${world.playerCount()} online)`);
+    if (saved == null) { const fresh = world.serializePlayer(id); if (fresh) void store.save(name, fresh); } // persist the new char
+    console.log(`[server] ${name} joined as #${id} (${world.playerCount()} online) [${saved != null ? 'loaded' : 'new'}]`);
   } else if (msg.t === 'move-intent') {
     const id = clientIds.get(ws);
     if (id != null) world.setIntent(id, msg.dx, msg.dz);
@@ -142,9 +159,13 @@ function broadcastChat(line: ChatLine): void {
 }
 
 function dropClient(ws: WebSocket): void {
+  joining.delete(ws); // in case it disconnected mid-join
   const id = clientIds.get(ws);
   if (id == null) return;
   const name = clientNames.get(ws);
+  // Persist the latest progress BEFORE the entity is removed (serialize needs it alive).
+  const save = world.serializePlayer(id);
+  if (name != null && save != null) void store.save(name, save);
   world.removePlayer(id);
   clientIds.delete(ws);
   clientNames.delete(ws);
@@ -173,10 +194,28 @@ setInterval(() => {
   }
 }, 1000 / SNAPSHOT_HZ);
 
-httpServer.listen(PORT, HOST, () => {
-  const mode = ALLOWED_ORIGINS.length > 0 ? `origins=[${ALLOWED_ORIGINS.join(', ')}]` : 'dev (localhost origins)';
-  console.log(
-    `[server] openrealm on ${HOST}:${PORT} — tick ${Math.round(1 / DT)}Hz, snapshots ${SNAPSHOT_HZ}Hz, ${mode}`,
-  );
-  console.log(`[server] health: GET http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/health`);
-});
+// Periodically persist every connected character (in addition to on-disconnect), so a
+// crash/kill loses at most SAVE_INTERVAL_SECONDS of progress. No-op in memory mode.
+setInterval(() => {
+  if (!store.ready || clientIds.size === 0) return;
+  for (const [ws, id] of clientIds) {
+    const name = clientNames.get(ws);
+    const save = world.serializePlayer(id);
+    if (name != null && save != null) void store.save(name, save);
+  }
+}, SAVE_INTERVAL_SECONDS * 1000);
+
+// Connect the database (if any) BEFORE accepting players, so a returning player loads
+// correctly. createStore falls back to in-memory if there's no DATABASE_URL or it can't
+// connect — the server always starts. (Errors are handled inside createStore.)
+void (async () => {
+  store = await createStore(process.env.DATABASE_URL);
+  httpServer.listen(PORT, HOST, () => {
+    const mode = ALLOWED_ORIGINS.length > 0 ? `origins=[${ALLOWED_ORIGINS.join(', ')}]` : 'dev (localhost origins)';
+    const persist = store.ready ? 'persistence ON (Postgres)' : 'persistence OFF (in-memory)';
+    console.log(
+      `[server] openrealm on ${HOST}:${PORT} — tick ${Math.round(1 / DT)}Hz, snapshots ${SNAPSHOT_HZ}Hz, ${mode}, ${persist}`,
+    );
+    console.log(`[server] health: GET http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}/health`);
+  });
+})();

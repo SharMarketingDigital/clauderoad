@@ -36,13 +36,14 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-# A minimal manifest so Node treats the bundle as ESM (esbuild emits ESM).
-RUN echo '{ "name": "clauderoad-server", "private": true, "type": "module" }' > package.json
+# Production deps only: ws + pg (+ their transitive deps). The bundle keeps these external,
+# so they must be on disk at runtime. (three is a prod dep too but is client-only/unused by
+# the server.) The real package.json also gives Node "type": "module" to run the ESM bundle.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# The compiled server + the ONLY package it needs at runtime. ws has no runtime deps of
-# its own; three is a prod dep too, but it's CLIENT-only — the server never imports it.
+# The compiled server bundle.
 COPY --from=build /app/dist-server ./dist-server
-COPY --from=build /app/node_modules/ws ./node_modules/ws
 
 # Run as the image's built-in unprivileged user (the copied files are world-readable).
 USER node

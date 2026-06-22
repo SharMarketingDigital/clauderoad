@@ -35,6 +35,7 @@ import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
 import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
+import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
 } from './content/vendor';
@@ -205,6 +206,29 @@ export class Sim implements IWorld {
   // The ids of all players currently in the world (server snapshot helper).
   players(): ReadonlyArray<number> {
     return this.playerIds;
+  }
+
+  // ---------- persistence (server only; offline single-player never calls these) ----------
+  // Serialize a player's persistent progression (level/XP/attrs/SP/ranks/bag/equip/gold)
+  // to a plain, JSON-safe object for the DB. READ-ONLY — pure data export, never touches
+  // gameplay/RNG/tick, so it can't affect a same-seed simulation. Null for a missing id.
+  serializePlayer(id: number): PlayerSave | null {
+    const p = this.ents.get(id);
+    return p && p.kind === 'player' ? toSave(p) : null;
+  }
+
+  // Restore a saved character onto a player (the server calls this on join, right after
+  // addPlayer, when a save exists). `raw` is UNTRUSTED DB JSON: applySave validates every
+  // field and keeps the fresh-spawn value for anything invalid, so a corrupt save can
+  // never break the sim. Then derived stats are recomputed and HP/MP topped up. No RNG and
+  // no gameplay change — determinism of a same-seed run is unaffected.
+  restorePlayer(id: number, raw: unknown): void {
+    const p = this.ents.get(id);
+    if (!p || p.kind !== 'player') return;
+    applySave(p, raw);
+    this.recomputeStats(p);
+    p.hp = p.maxHp;
+    p.mp = p.maxMp;
   }
 
   // ---------- spawning ----------

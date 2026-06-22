@@ -19,11 +19,13 @@
     "typecheck:server": "tsc --noEmit -p server/tsconfig.json"
   },
   "dependencies": {
+    "pg": "^8.13.1",
     "three": "^0.169.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
+    "@types/pg": "^8.11.10",
     "@types/three": "^0.169.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.24.2",
