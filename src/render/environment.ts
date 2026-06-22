@@ -309,12 +309,13 @@ async function populateGrass(scene: THREE.Scene): Promise<void> {
   scene.add(group);
 }
 
-// Server-driven sky state (multiplayer): the time of day (0..1) + whether it's raining.
-// When passed to update(), it overrides the local clock + R/T keys so every client
-// shows the SAME sky. Offline this is omitted and the local cycle runs.
+// Server-driven sky state (multiplayer): the time of day (0..1) + a continuous rain
+// INTENSITY (0..1) the server already ramps smoothly. When passed to update(), it
+// overrides the local clock + R/T keys so every client shows the SAME, gradually-changing
+// sky. Offline this is omitted and the local cycle (with the R/T keys) runs.
 export interface WeatherState {
   time: number;
-  raining: boolean;
+  rain: number;
 }
 
 export interface Environment {
@@ -435,10 +436,13 @@ export function setupEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRender
     },
     update(dt, px, pz, py, server = null) {
       if (server) {
-        // MULTIPLAYER: time + rain are the server's — everyone shares one sky. The local
-        // clock and the R/T test keys are overridden each frame (so R/T do nothing in MP).
+        // MULTIPLAYER: time + rain are the server's — everyone shares one sky. The rain
+        // intensity is ALREADY a smooth ramp from the server, so apply it directly (set
+        // the target equal too, so the local ease below is a no-op). The local clock and
+        // the R/T test keys are overridden each frame (so R/T do nothing in MP).
         timeOfDay = server.time;
-        rainTarget = server.raining ? 1 : 0;
+        rainAmt = server.rain;
+        rainTarget = server.rain;
       } else if (timeOverride === null) {
         // SINGLE-PLAYER: advance the local clock (the R/T keys + clip override still apply).
         timeOfDay = (timeOfDay + dt / DAY_LENGTH) % 1;

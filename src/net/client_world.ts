@@ -33,11 +33,12 @@ export class ClientWorld implements IWorld {
   private events: SimEvent[] = []; // combat events from the LATEST snapshot (drawn once, by seq)
   private nowMs = 0; // a local clock advanced by update(dt)
   private lastSnapMs = 0; // nowMs when `to` arrived
-  // Server-driven day/night + rain (so everyone sees the same sky). `time` is
-  // interpolated between snapshots; raining is the latest (the renderer eases the fade).
+  // Server-driven day/night + rain (so everyone sees the same sky). Both `time` and the
+  // rain INTENSITY (0..1) are interpolated between snapshots for a smooth, gradual sky.
   private fromTime = 0;
   private toTime = 0;
-  private raining = false;
+  private fromRain = 0;
+  private toRain = 0;
   private hasWeather = false; // false until the first snapshot arrives
 
   constructor(url: string, private readonly name: string) {
@@ -62,14 +63,14 @@ export class ClientWorld implements IWorld {
     return n;
   }
 
-  // The server-authoritative time-of-day (0..1, interpolated between snapshots) + rain
-  // flag. Null until the first snapshot. The renderer feeds this into the day/night
-  // system in MP so every client shows the SAME sky/weather. (Not part of IWorld — a
-  // concrete channel, like the chat — so render reads it via the MP loop, not the seam.)
-  weather(): { time: number; raining: boolean } | null {
+  // The server-authoritative time-of-day (0..1) + rain INTENSITY (0..1), BOTH interpolated
+  // between snapshots for a smooth, gradual sky. Null until the first snapshot. The renderer
+  // feeds this into the day/night system in MP so every client shows the SAME sky/weather.
+  // (Not part of IWorld — a concrete channel, like the chat — read via the MP loop, not the seam.)
+  weather(): { time: number; rain: number } | null {
     if (!this.hasWeather) return null;
     const t = this.snapIntervalMs > 0 ? clamp01((this.nowMs - this.lastSnapMs) / this.snapIntervalMs) : 1;
-    return { time: lerpTime(this.fromTime, this.toTime, t), raining: this.raining };
+    return { time: lerpTime(this.fromTime, this.toTime, t), rain: lerp(this.fromRain, this.toRain, t) };
   }
 
   // ---- IWorld ----
@@ -151,7 +152,8 @@ export class ClientWorld implements IWorld {
       this.events = msg.events.map((ev) => ({ ...ev, tick: 0 })); // tick is irrelevant remotely
       this.fromTime = this.hasWeather ? this.toTime : msg.time; // 1st snapshot: no source -> sit still
       this.toTime = msg.time;
-      this.raining = msg.raining;
+      this.fromRain = this.hasWeather ? this.toRain : msg.rain;
+      this.toRain = msg.rain;
       this.hasWeather = true;
     } else if (msg.t === 'self') {
       this.self = msg.self; // our own HUD/bag state

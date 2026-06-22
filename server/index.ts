@@ -9,8 +9,11 @@
 //   CHAT_MAX_LEN     (default 200)       — max chat message length (chars)
 //   CHAT_RATE_PER_SEC(default 3)         — anti-flood: max chat messages per player per second
 //   WEATHER_DAY_SECONDS         (240)    — full day/night cycle length (seconds)
-//   WEATHER_RAIN_CLEAR_SECONDS  (150)    — mean dry span before rain (auto-toggling weather)
-//   WEATHER_RAIN_WET_SECONDS    (45)     — mean rainy span before it clears
+//   WEATHER_RAIN_MIN_SECONDS    (120)    — shortest shower; each shower is random in [MIN,MAX]
+//   WEATHER_RAIN_MAX_SECONDS    (900)    — CAP on a shower (15 min)
+//   WEATHER_CLEAR_MIN_SECONDS   (300)    — shortest dry spell; each is random in [MIN,MAX]
+//   WEATHER_CLEAR_MAX_SECONDS   (3600)   — CAP on a dry spell (60 min)
+//   WEATHER_RAIN_RAMP_SECONDS   (15)     — seconds rain takes to gradually arrive/clear
 //   ALLOWED_ORIGINS  (default: empty)    — comma-separated list of allowed browser
 //                                          Origins. Set in PRODUCTION (e.g. the Vercel
 //                                          URL). When EMPTY we're in dev: only localhost
@@ -29,23 +32,32 @@ const SNAPSHOT_HZ = Number(process.env.SNAPSHOT_HZ ?? 10);
 const WORLD_SEED = Number(process.env.WORLD_SEED ?? 1337); // fixed -> the same mob layout every boot
 const CHAT_MAX_LEN = Number(process.env.CHAT_MAX_LEN ?? 200);
 const CHAT_RATE_PER_SEC = Number(process.env.CHAT_RATE_PER_SEC ?? 3);
-// Weather (synchronized day/night + rain): the full cycle length and the mean dry/rainy
-// spans of the auto-toggling rain. Defaults match the offline feel (240s day).
-// Positive-finite or fall back to the default: a misconfigured WEATHER_* (0 / "" / NaN)
-// must NOT reach the cycle math (dt/0 would NaN the synced time for everyone).
+// Weather (synchronized day/night + rain): full cycle length, plus the rain timing. Each
+// shower and each dry spell draws a UNIFORM-RANDOM duration between a min and a CAP, so
+// the weather is unpredictable but bounded: rain <= RAIN_MAX (default 15 min), dry <=
+// CLEAR_MAX (default 60 min). RAMP is the gradual fade in/out. posNum: positive-finite or
+// fall back to the default (a misconfigured WEATHER_* of 0 / "" / NaN must not reach the math).
 const posNum = (raw: string | undefined, def: number): number => {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : def;
 };
 const WEATHER_DAY_SECONDS = posNum(process.env.WEATHER_DAY_SECONDS, 240);
-const WEATHER_RAIN_CLEAR_SECONDS = posNum(process.env.WEATHER_RAIN_CLEAR_SECONDS, 150);
-const WEATHER_RAIN_WET_SECONDS = posNum(process.env.WEATHER_RAIN_WET_SECONDS, 45);
+const WEATHER_RAIN_MIN_SECONDS = posNum(process.env.WEATHER_RAIN_MIN_SECONDS, 120); // shortest shower (~2 min)
+const WEATHER_RAIN_MAX_SECONDS = posNum(process.env.WEATHER_RAIN_MAX_SECONDS, 900); // CAP on a shower (15 min)
+const WEATHER_CLEAR_MIN_SECONDS = posNum(process.env.WEATHER_CLEAR_MIN_SECONDS, 300); // shortest dry spell (~5 min)
+const WEATHER_CLEAR_MAX_SECONDS = posNum(process.env.WEATHER_CLEAR_MAX_SECONDS, 3600); // CAP on a dry spell (60 min)
+const WEATHER_RAIN_RAMP_SECONDS = posNum(process.env.WEATHER_RAIN_RAMP_SECONDS, 15); // gradual fade in/out
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-const weather = new Weather(WEATHER_DAY_SECONDS, WEATHER_RAIN_CLEAR_SECONDS, WEATHER_RAIN_WET_SECONDS);
+const weather = new Weather(
+  WEATHER_DAY_SECONDS,
+  WEATHER_RAIN_MIN_SECONDS, WEATHER_RAIN_MAX_SECONDS,
+  WEATHER_CLEAR_MIN_SECONDS, WEATHER_CLEAR_MAX_SECONDS,
+  WEATHER_RAIN_RAMP_SECONDS,
+);
 const world = new ServerWorld(WORLD_SEED, weather);
 const chat = new ChatModerator(CHAT_MAX_LEN, CHAT_RATE_PER_SEC);
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)

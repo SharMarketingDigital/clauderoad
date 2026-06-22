@@ -21,7 +21,7 @@ export class ServerWorld {
   // every client renders the SAME sky/weather. Advanced on the tick, sent in the snapshot.
   // `weather` defaults to a standard cycle (handy for tests); the server passes one
   // configured from env. It's advanced on the tick and included in the snapshot.
-  constructor(seed: number, private readonly weather: Weather = new Weather(240, 150, 45)) {
+  constructor(seed: number, private readonly weather: Weather = new Weather(240, 120, 900, 300, 3600, 15)) {
     this.sim = new Sim(seed, /* spawnLocal */ false);
   }
 
@@ -152,7 +152,7 @@ export class ServerWorld {
   // The shared world (players + mobs + the town NPC), plus the combat events the sim
   // produced SINCE the last snapshot (so every client draws each damage number / death
   // exactly once). Numbers are rounded to keep the message small.
-  snapshot(): { entities: EntitySnap[]; events: NetEvent[]; time: number; raining: boolean } {
+  snapshot(): { entities: EntitySnap[]; events: NetEvent[]; time: number; rain: number } {
     const entities: EntitySnap[] = [];
     for (const e of this.sim.entities()) {
       entities.push({
@@ -184,9 +184,9 @@ export class ServerWorld {
         text: ev.text,
       });
     }
-    // Time-of-day (rounded) + rain flag — the same for every client, so the world's
-    // sky/weather is synchronized. The client interpolates `time` between snapshots.
-    return { entities, events, time: round(this.weather.timeOfDay), raining: this.weather.isRaining };
+    // Time-of-day + rain INTENSITY (0..1), both rounded — the same for every client, so
+    // the world's sky/weather is synchronized. The client interpolates both between snapshots.
+    return { entities, events, time: round(this.weather.timeOfDay), rain: round(this.weather.rainIntensity) };
   }
 
   playerCount(): number {
