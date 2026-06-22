@@ -691,11 +691,20 @@ export class Sim implements IWorld {
       expMode: party.expMode,
       lootMode: party.lootMode,
       maxMembers: maxPartySize(party.expMode),
-      members: party.members.map((mid) => ({
-        id: mid,
-        name: this.ents.get(mid)?.name ?? '',
-        leader: mid === party.leaderId,
-      })),
+      members: party.members.map((mid) => {
+        const m = this.ents.get(mid);
+        return {
+          id: mid,
+          name: m?.name ?? '',
+          leader: mid === party.leaderId,
+          hp: m ? Math.round(m.hp) : 0,
+          maxHp: m ? Math.round(m.maxHp) : 0,
+          mp: m ? Math.round(m.mp) : 0,
+          maxMp: m ? Math.round(m.maxMp) : 0,
+          level: m?.level ?? 1,
+          dead: m ? m.deadUntil !== 0 : false,
+        };
+      }),
     };
   }
 

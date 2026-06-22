@@ -15,6 +15,7 @@ import { makeCombatFeedback } from './ui/combat_feedback';
 import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
+import { PartyHud } from './ui/party_hud';
 import { ChatBox } from './ui/chat';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -81,6 +82,7 @@ function startOnline(url: string, name: string): void {
   const world = new ClientWorld(url, name); // a network-backed IWorld
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
+  const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const chat = new ChatBox((text) => world.sendChat(text)); // text chat (Enter to open)
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
   const combatText = new CombatText();
@@ -102,6 +104,7 @@ function startOnline(url: string, name: string): void {
     drawCombatFeedback(world); // after render: damage numbers from the server's events
     hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
+    partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

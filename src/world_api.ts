@@ -135,11 +135,18 @@ export interface ShopView {
 export type PartyExpMode = 'each-get' | 'auto-share';
 export type PartyLootMode = 'distribution' | 'auto-share';
 
-// One party member as the UI sees it. Look up live HP/position in entities() by id.
+// One party member as the UI sees it (the server fills the live vitals so the frames
+// don't need the shared entity snapshot). `id` still matches an entities() id for position.
 export interface PartyMemberView {
   readonly id: number;
   readonly name: string;
   readonly leader: boolean;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly mp: number;
+  readonly maxMp: number;
+  readonly level: number;
+  readonly dead: boolean; // a downed (spirit) member — drawn dimmed
 }
 
 // The local player's party (members + modes), for the frames + party window.
