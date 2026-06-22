@@ -21,10 +21,7 @@ import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier, pickSpecies, S
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
-import {
-  BOSS_TEMPLATE, BOSS_SPAWN_X, BOSS_SPAWN_Z, BOSS_FIRST_SPAWN_TICK, BOSS_RESPAWN_TICKS,
-  MINION_SPAWN_RADIUS,
-} from './content/bosses';
+import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
 import {
   MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
 } from './content/enhance';
@@ -123,13 +120,10 @@ export class Sim implements IWorld {
   private playerIds: number[] = [];
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
   private respawnQueue: number[] = [];
-  // World boss: the live boss entity id (null when none) and the tick at which
-  // the next boss should spawn (Infinity while one is alive). Tick-driven only.
-  private bossId: number | null = null;
-  private bossSpawnAt = BOSS_FIRST_SPAWN_TICK;
-  // How many HP-threshold minion summons the current boss has already fired
-  // (reset when a new boss spawns). Indexes BOSS_TEMPLATE.summonThresholds.
-  private bossSummonsFired = 0;
+  // World bosses: one runtime slot per entry in BOSS_DEFS (same order). Each tracks
+  // the live entity id (null when dead), the tick its next spawn is due (Infinity
+  // while alive), and how many summon waves it has fired this life. Tick-driven; no Rng.
+  private bossState = BOSS_DEFS.map((d) => ({ entityId: null as number | null, spawnAt: d.firstSpawnTick, summonsFired: 0 }));
   // Recent presentation events (damage numbers, hit flashes). Bounded by age
   // (EVENT_TTL_TICKS) so it never grows unbounded; `seq` is monotonic forever.
   private events: SimEvent[] = [];
@@ -322,14 +316,15 @@ export class Sim implements IWorld {
     return id;
   }
 
-  // Spawn the world boss at its fixed point. No Rng (fixed position), so it
-  // doesn't perturb the loot stream. Announces via a 'boss-spawn' event.
-  private spawnBoss(): void {
+  // Spawn boss `i` (an index into BOSS_DEFS) at its fixed point. No Rng (fixed
+  // position), so it never perturbs the loot/position stream. Announces via 'boss-spawn'.
+  private spawnBoss(i: number): void {
+    const def = BOSS_DEFS[i];
+    const t = def.template;
     const id = this.nextId++;
-    const t = BOSS_TEMPLATE;
     this.ents.set(id, {
       id, kind: 'enemy', name: t.name,
-      x: BOSS_SPAWN_X, z: BOSS_SPAWN_Z, facing: 0,
+      x: def.spawnX, z: def.spawnZ, facing: 0,
       hp: t.hp, maxHp: t.hp,
       targetId: null,
       str: t.str, weaponDamage: t.weaponDamage,
@@ -339,48 +334,51 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
-      species: t.id,
+      species: t.id, // the boss id, so kill/summon/render resolve its def
       boss: true, summoned: false,
-      homeX: BOSS_SPAWN_X, homeZ: BOSS_SPAWN_Z,
-      targetX: BOSS_SPAWN_X, targetZ: BOSS_SPAWN_Z, repickAt: 0,
+      homeX: def.spawnX, homeZ: def.spawnZ,
+      targetX: def.spawnX, targetZ: def.spawnZ, repickAt: 0,
     });
-    this.bossId = id;
-    this.bossSpawnAt = Infinity; // don't schedule another while this one lives
-    this.bossSummonsFired = 0; // fresh boss -> can summon all its waves again
+    const s = this.bossState[i];
+    s.entityId = id;
+    s.spawnAt = Infinity; // don't schedule another of THIS boss while it lives
+    s.summonsFired = 0; // fresh boss -> can summon all its waves again
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
       kind: 'boss-spawn',
       targetId: id,
       amount: 0,
-      x: BOSS_SPAWN_X,
-      z: BOSS_SPAWN_Z,
+      x: def.spawnX,
+      z: def.spawnZ,
       text: t.name,
     });
   }
 
   // Fire a minion-summon wave for each HP threshold the boss has NEWLY crossed.
-  // Thresholds are descending and fire once each (bossSummonsFired advances), so
-  // one big hit crossing several fires several. HP only drops, so no un-firing.
+  // Resolves the boss's own def via its `species` (= boss id). Thresholds are
+  // descending and fire once each, so one big hit crossing several fires several.
   private checkBossSummons(boss: Entity): void {
-    const thresholds = BOSS_TEMPLATE.summonThresholds;
-    while (
-      this.bossSummonsFired < thresholds.length &&
-      boss.hp <= boss.maxHp * thresholds[this.bossSummonsFired]
-    ) {
-      this.summonMinions(boss);
-      this.bossSummonsFired++;
+    const i = BOSS_DEFS.findIndex((d) => d.template.id === boss.species);
+    if (i < 0) return;
+    const def = BOSS_DEFS[i];
+    const s = this.bossState[i];
+    const thresholds = def.template.summonThresholds;
+    while (s.summonsFired < thresholds.length && boss.hp <= boss.maxHp * thresholds[s.summonsFired]) {
+      this.summonMinions(boss, def);
+      s.summonsFired++;
     }
   }
 
-  // Spawn a ring of minions around the boss and announce the call.
-  private summonMinions(boss: Entity): void {
-    const n = BOSS_TEMPLATE.minionCount;
+  // Spawn a ring of this boss's minions around it and announce the call.
+  private summonMinions(boss: Entity, def: BossDef): void {
+    const n = def.template.minionCount;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       this.spawnMinion(
-        clamp(boss.x + Math.cos(a) * MINION_SPAWN_RADIUS, -WORLD_HALF, WORLD_HALF),
-        clamp(boss.z + Math.sin(a) * MINION_SPAWN_RADIUS, -WORLD_HALF, WORLD_HALF),
+        clamp(boss.x + Math.cos(a) * def.minionSpawnRadius, -WORLD_HALF, WORLD_HALF),
+        clamp(boss.z + Math.sin(a) * def.minionSpawnRadius, -WORLD_HALF, WORLD_HALF),
+        def,
       );
     }
     this.events.push({
@@ -391,27 +389,32 @@ export class Sim implements IWorld {
       amount: 0,
       x: boss.x,
       z: boss.z,
-      text: BOSS_TEMPLATE.name,
+      text: def.template.name,
     });
   }
 
   // A boss minion: a common-mob-like enemy (selectable/attackable) but ephemeral
-  // (summoned:true) so killing it doesn't feed the common respawn queue.
-  private spawnMinion(x: number, z: number): void {
+  // (summoned:true) so killing it doesn't feed the common respawn queue. Uses the
+  // base wolf's combat with the def's minion HP/name/render-species.
+  private spawnMinion(x: number, z: number, def: BossDef): void {
     const id = this.nextId++;
+    // Combat matches the minion's render species (a wolf minion bites like a wolf, a
+    // bandit mercenary like a bandit) so movement and bite are consistent — the Alfa's
+    // grey_wolf minion resolves to ENEMY_TEMPLATE, byte-identical to before.
+    const ms = SPECIES_BY_ID[def.minionSpecies] ?? ENEMY_TEMPLATE;
     this.ents.set(id, {
-      id, kind: 'enemy', name: BOSS_TEMPLATE.minionName,
+      id, kind: 'enemy', name: def.template.minionName,
       x, z, facing: 0,
-      hp: BOSS_TEMPLATE.minionHp, maxHp: BOSS_TEMPLATE.minionHp,
+      hp: def.template.minionHp, maxHp: def.template.minionHp,
       targetId: null,
-      str: ENEMY_TEMPLATE.str, weaponDamage: ENEMY_TEMPLATE.weaponDamage,
-      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: BOSS_TEMPLATE.minionHp, baseMaxMp: 0,
-      swingTicks: Math.round(ENEMY_TEMPLATE.swingTime * TICK_RATE), nextSwingAt: 0,
+      str: ms.str, weaponDamage: ms.weaponDamage,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: def.template.minionHp, baseMaxMp: 0,
+      swingTicks: Math.round(ms.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
-      species: ENEMY_TEMPLATE.id,
+      species: def.minionSpecies,
       boss: false, summoned: true,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
@@ -701,11 +704,14 @@ export class Sim implements IWorld {
 
   private killEnemy(dead: Entity, killer: Entity): void {
     this.ents.delete(dead.id);
-    if (dead.boss) {
-      // The boss reschedules on its OWN timer (not the common-mob queue) and
-      // announces its defeat.
-      this.bossId = null;
-      this.bossSpawnAt = this.tick + BOSS_RESPAWN_TICKS;
+    // Which boss died (if any), resolved from its species id (= boss id).
+    const bossDef = dead.boss ? (BOSS_DEF_BY_ID[dead.species] ?? BOSS_DEFS[0]) : null;
+    if (bossDef) {
+      // This boss reschedules on its OWN timer (not the common-mob queue) and
+      // announces its defeat WITH the name of whoever landed the kill.
+      const s = this.bossState[BOSS_DEFS.indexOf(bossDef)];
+      s.entityId = null;
+      s.spawnAt = this.tick + bossDef.respawnTicks;
       this.events.push({
         seq: this.nextEventSeq++,
         tick: this.tick,
@@ -714,7 +720,9 @@ export class Sim implements IWorld {
         amount: 0,
         x: dead.x,
         z: dead.z,
-        text: BOSS_TEMPLATE.name,
+        text: killer.kind === 'player'
+          ? `${killer.name} derrotou ${bossDef.template.name}`
+          : `${bossDef.template.name} foi derrotado`,
       });
     } else if (!dead.summoned) {
       // Common enemies respawn after a delay; summoned minions are ephemeral.
@@ -723,11 +731,10 @@ export class Sim implements IWorld {
     if (killer.kind === 'player') {
       const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
       const st = SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE; // the dead mob's species (xp/sp baseline)
-      this.gainXp(killer, dead.boss ? BOSS_TEMPLATE.xp : Math.round(st.xp * tier.xpMult));
-      // SP (skill points) — the second currency. Scales with the tier like XP; the
-      // boss pays a big lump. Spent later to rank up the mastery's abilities (GDD B4).
-      killer.sp += dead.boss ? BOSS_TEMPLATE.sp : Math.round(st.sp * tier.xpMult);
-      this.rollLoot(killer, dead, dead.boss ? 1 : tier.goldMult);
+      // A boss pays its big flat XP/SP lump; a common mob scales by tier (GDD B4).
+      this.gainXp(killer, bossDef ? bossDef.template.xp : Math.round(st.xp * tier.xpMult));
+      killer.sp += bossDef ? bossDef.template.sp : Math.round(st.sp * tier.xpMult);
+      this.rollLoot(killer, dead, bossDef ? 1 : tier.goldMult);
     }
   }
 
@@ -738,8 +745,9 @@ export class Sim implements IWorld {
     // Gold + drop table come from the dead mob: the boss table for a boss, else the
     // killed species' own table (a bandit drops bandit loot). The Rng draw order is
     // unchanged (gold int, then per-drop), so the wolf's loot stream is preserved.
-    const t = dead.boss ? BOSS_TEMPLATE : (SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE);
-    const rarities = dead.boss ? BOSS_TEMPLATE.rarities : RARITIES;
+    const bt = dead.boss ? (BOSS_DEF_BY_ID[dead.species]?.template ?? BOSS_DEFS[0].template) : null;
+    const t = bt ?? (SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE);
+    const rarities = bt ? bt.rarities : RARITIES;
     // Same Rng draw as before (so the loot stream is unchanged), scaled by tier.
     p.gold += Math.round(this.rng.int(t.goldMin, t.goldMax + 1) * goldMult);
     for (const drop of t.drops) {
@@ -794,9 +802,12 @@ export class Sim implements IWorld {
     this.respawnQueue = remaining;
   }
 
-  // Spawn the world boss once its scheduled tick arrives (and none is alive).
+  // Spawn each world boss once its scheduled tick arrives (and it isn't already alive).
   private updateBoss(): void {
-    if (this.bossId === null && this.tick >= this.bossSpawnAt) this.spawnBoss();
+    for (let i = 0; i < BOSS_DEFS.length; i++) {
+      const s = this.bossState[i];
+      if (s.entityId === null && this.tick >= s.spawnAt) this.spawnBoss(i);
+    }
   }
 
   // ---------- target selection (tab-target) ----------
@@ -1578,13 +1589,17 @@ export class Sim implements IWorld {
 
   private stepEnemy(e: Entity): void {
     if (this.isIncapacitated(e)) return; // stunned / knocked down -> does nothing this tick
-    // Per-species behavior. `sp` is the species template (undefined for the boss,
-    // which is rooted/melee). reach/move default to the baseline wolf (MELEE_RANGE /
-    // ENEMY_SPEED), so a species that omits them behaves exactly like the old wolf.
+    // Per-species / per-boss behavior. `sp` is the species template (undefined for a
+    // boss); `bdef` is the boss def (undefined for a common mob). reach/move default to
+    // the baseline wolf (MELEE_RANGE / ENEMY_SPEED), so a species that omits them behaves
+    // exactly like the old wolf. A rooted boss (Alfa) never chases; a non-rooted boss
+    // (Warlord) chases at its def speed. Bosses never wander, so they stay Rng-free.
     const sp = e.boss ? undefined : (SPECIES_BY_ID[e.species] ?? ENEMY_TEMPLATE);
-    const tmpl = sp ?? BOSS_TEMPLATE; // for the aggro/leash radii (both templates carry them)
-    const reach = sp?.attackRange ?? MELEE_RANGE; // strike when the target is within this
-    const moveSpeed = (sp?.speed ?? ENEMY_SPEED) * this.slowFactor(e); // slow -> slower chase
+    const bdef = e.boss ? (BOSS_DEF_BY_ID[e.species] ?? BOSS_DEFS[0]) : undefined;
+    const tmpl = sp ?? bdef!.template; // for the aggro/leash radii (both shapes carry them)
+    const rooted = bdef ? bdef.rooted : false; // a rooted boss holds its ground
+    const reach = sp?.attackRange ?? MELEE_RANGE; // strike when the target is within this (boss = melee)
+    const moveSpeed = (sp?.speed ?? (bdef ? bdef.speed : ENEMY_SPEED)) * this.slowFactor(e); // slow -> slower chase
     // A ranged species holds its distance (stop just inside its reach); a meleer
     // closes to CONTACT_DIST, byte-identical to the original wolf.
     const stopDist = reach > MELEE_RANGE ? reach - 0.5 : CONTACT_DIST;
@@ -1641,9 +1656,10 @@ export class Sim implements IWorld {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         this.hitPlayer(target, meleeDamage(e.str, e.weaponDamage));
       }
-      if (!e.boss && !this.isRooted(e) && dist > stopDist) {
-        // the boss is rooted, so it bites in melee but never chases; a rooted enemy can't move either.
-        // A ranged species stops at stopDist (just inside its reach) and shoots from there.
+      if (!rooted && !this.isRooted(e) && dist > stopDist) {
+        // A rooted boss (and a stunned/rooted enemy) holds position — it only bites in
+        // melee. Everything else closes the gap; a ranged species stops at stopDist
+        // (just inside its reach) and shoots from there.
         const len = dist < 1e-4 ? 1 : dist;
         e.x = clamp(e.x + (dx / len) * moveSpeed * DT, -WORLD_HALF, WORLD_HALF);
         e.z = clamp(e.z + (dz / len) * moveSpeed * DT, -WORLD_HALF, WORLD_HALF);
@@ -1888,10 +1904,12 @@ export class Sim implements IWorld {
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const at of this.respawnQueue) mix(at);
-    // Boss schedule (Infinity while alive -> sentinel) + summon progress.
-    mix(this.bossId ?? -1);
-    mix(Number.isFinite(this.bossSpawnAt) ? this.bossSpawnAt : -1);
-    mix(this.bossSummonsFired);
+    // Each boss's schedule (Infinity while alive -> sentinel) + summon progress.
+    for (const s of this.bossState) {
+      mix(s.entityId ?? -1);
+      mix(Number.isFinite(s.spawnAt) ? s.spawnAt : -1);
+      mix(s.summonsFired);
+    }
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);
     mix(this.tick);

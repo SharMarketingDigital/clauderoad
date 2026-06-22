@@ -51,6 +51,12 @@ const TIER_TINT: Record<string, number | undefined> = {
 const BOSS_SCALE = 2.3;
 const BOSS_TINT = 0x9b3bd0; // purple — "reads as boss"
 
+// Per-boss model + tint, keyed by the boss id carried in EntityView.species.
+const BOSS_VARIANT: Record<string, { variant: string; tint: number }> = {
+  pack_alpha: { variant: 'mage', tint: BOSS_TINT }, // Alfa da Matilha — purple skeleton mage
+  warlord: { variant: 'brute', tint: 0xb83232 }, // Senhor da Guerra — dark-red barbarian
+};
+
 interface Style {
   variant: string;
   scale: number;
@@ -59,7 +65,10 @@ interface Style {
 
 // Pick the model + size + tint from the entity's boss/species/tier/id.
 function styleFor(e: EntityView): Style {
-  if (e.boss) return { variant: 'mage', scale: BOSS_SCALE, tint: BOSS_TINT };
+  if (e.boss) {
+    const b = BOSS_VARIANT[e.species] ?? { variant: 'mage', tint: BOSS_TINT };
+    return { variant: b.variant, scale: BOSS_SCALE, tint: b.tint };
+  }
   const scale = TIER_SCALE[e.tier] ?? 1;
   const tint = TIER_TINT[e.tier];
   // A humanoid species keeps its OWN model at every tier; champion/elite just

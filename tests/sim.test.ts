@@ -42,6 +42,8 @@ import {
 import { RARITIES } from '../src/sim/content/rarity';
 import {
   BOSS_TEMPLATE,
+  WARLORD_TEMPLATE,
+  BOSS_DEFS,
   BOSS_RARITIES,
   BOSS_FIRST_SPAWN_TICK,
   BOSS_RESPAWN_TICKS,
@@ -2194,7 +2196,9 @@ describe('alchemy ("+N")', () => {
 });
 
 describe('world boss', () => {
-  const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss);
+  // The world now has more than one boss; these tests are about the Alfa specifically,
+  // so resolve it by its species id (the Warlord spawns later and far away).
+  const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss && e.species === 'pack_alpha');
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
   const minionCount = (sim: Sim): number =>
     sim.entities().filter((e) => e.name === BOSS_TEMPLATE.minionName).length;
@@ -2406,6 +2410,67 @@ describe('world boss', () => {
       }
     }
     expect(summons).toBe(BOSS_TEMPLATE.summonThresholds.length);
+  });
+
+  it('the defeat announcement names who landed the kill', () => {
+    const sim = new Sim(7);
+    while (!findBoss(sim)) sim.step();
+    killBoss(sim); // the local player ("Hero") beats the Alfa to death
+    const ev = sim.recentEvents().find((e) => e.kind === 'boss-defeat');
+    expect(ev).toBeDefined();
+    expect(ev!.text).toContain('Hero'); // the killer's name...
+    expect(ev!.text).toContain(BOSS_TEMPLATE.name); // ...and the boss it slew
+  });
+});
+
+// A SECOND world boss proves the registry is N-boss: it has its own template, a later
+// schedule, a far spawn point, and — unlike the rooted Alfa — it CHASES the player.
+describe('second boss (Senhor da Guerra)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const findWarlord = (sim: Sim) => sim.entities().find((e) => e.boss && e.species === 'warlord');
+  const wdef = BOSS_DEFS.find((d) => d.template.id === 'warlord')!;
+
+  it('spawns on its OWN later schedule, at its own far location, with its own identity', () => {
+    const sim = new Sim(7);
+    expect(wdef.firstSpawnTick).toBeGreaterThan(BOSS_FIRST_SPAWN_TICK); // after the Alfa
+    for (let i = 0; i < wdef.firstSpawnTick - 1; i++) sim.step();
+    expect(findWarlord(sim)).toBeUndefined(); // not yet
+    sim.step(); // reaches its scheduled tick
+    const w = findWarlord(sim);
+    expect(w).toBeDefined();
+    expect(w!.name).toBe(WARLORD_TEMPLATE.name);
+    expect(w!.maxHp).toBe(WARLORD_TEMPLATE.hp);
+    expect(Math.hypot(w!.x - 0, w!.z - 30)).toBeGreaterThan(40); // far from the Alfa's spot (0,30)
+  });
+
+  it('is a MOVING boss: it leaves its spawn to chase a nearby player (the Alfa never would)', () => {
+    const sim = new Sim(7);
+    while (!findWarlord(sim)) sim.step();
+    const spawnX = findWarlord(sim)!.x;
+    const spawnZ = findWarlord(sim)!.z;
+    // walk the player up to within the warlord's aggro range
+    for (let i = 0; i < 800; i++) {
+      const p = player(sim);
+      const w = findWarlord(sim);
+      if (!w || Math.hypot(w.x - p.x, w.z - p.z) < 10) break;
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+    }
+    // stand still; an aggroed MOVING boss closes the gap, drifting off its spawn point
+    sim.sendCommand({ t: 'stop' });
+    for (let i = 0; i < 40; i++) sim.step();
+    const w = findWarlord(sim)!;
+    expect(Math.hypot(w.x - spawnX, w.z - spawnZ)).toBeGreaterThan(2);
+  });
+
+  it('runs deterministically alongside the Alfa (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      for (let i = 0; i < wdef.firstSpawnTick + 400; i++) sim.step(); // past BOTH bosses' spawns
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(99));
   });
 });
 

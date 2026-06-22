@@ -50,7 +50,8 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
       } else if (ev.kind === 'boss-spawn') {
         announcer.announce(`Um chefe surgiu: ${ev.text ?? 'Chefe'}!`);
       } else if (ev.kind === 'boss-defeat') {
-        announcer.announce(`${ev.text ?? 'O chefe'} foi derrotado!`);
+        // The sim composes the full line ("Fulano derrotou [Chefe]"); show it as-is.
+        announcer.announce(ev.text ?? 'Um chefe foi derrotado!');
       } else if (ev.kind === 'boss-summon') {
         announcer.announce(`${ev.text ?? 'O chefe'} chama a matilha!`);
       } else if (ev.kind === 'death') {
