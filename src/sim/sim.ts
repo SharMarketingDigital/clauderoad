@@ -29,15 +29,14 @@ import {
 import {
   SKILL_MAX_RANK, skillUpgradeCost, rankEffectMult,
 } from './content/skill_ranks';
-// Combat is split into two modules so the two v0.3 fronts never edit the same damage code:
-// OFFENSE (how damage is generated — Gabriel) and DEFENSE (how it's reduced — Kevin). The
-// sim only composes them: final = defense.mitigate(offense.compute(...)). See each module.
-import * as offense from './combat_offense';
-import * as defense from './combat_defense';
-import type { Damage } from './combat_offense';
-// Back-compat: these pure helpers moved INTO combat_offense; re-export so existing importers
+// Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
+// so the old offense/defense split has no purpose. The sim only composes the two halves:
+// final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
+import * as combat from './combat';
+import type { Damage } from './combat';
+// Back-compat: these pure helpers live IN combat; re-export so existing importers
 // (tests, content) keep `import { meleeDamage, ... } from '../sim/sim'` working unchanged.
-export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat_offense';
+export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
@@ -856,8 +855,8 @@ export class Sim implements IWorld {
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
     p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
     // Auto-attack: a basic physical weapon swing (no ability). compute() does the same crit
-    // roll the old rollCrit did; defense.mitigate (inside hitEnemy) is passthrough today.
-    this.hitEnemy(t, offense.compute({
+    // roll the old rollCrit did; combat.mitigate (inside hitEnemy) is passthrough today.
+    this.hitEnemy(t, combat.compute({
       attacker: p, rank: 1, damageType: 'physical', critChance: this.critChance(p), rng: this.rng,
     }), p);
   }
@@ -868,8 +867,8 @@ export class Sim implements IWorld {
   private hitEnemy(t: Entity, hit: Damage, killer: Entity): void {
     // Reduce the outgoing hit by the target's defense, then apply it. Enemies have no
     // mitigation today, so mitigate() is a passthrough (dmg === hit.amount) — identical
-    // numbers to before. Kevin's K3 can give enemies armor here without touching this call.
-    const dmg = defense.mitigate({ hit, target: t });
+    // numbers to before. Giving enemies armor later happens here without touching this call.
+    const dmg = combat.mitigate({ hit, target: t });
     t.hp -= dmg;
     // Captured at the target's current position so the number shows even on a kill.
     this.events.push({
@@ -1698,7 +1697,7 @@ export class Sim implements IWorld {
       for (const e of this.enemiesInCone(p)) {
         // One compute() per enemy => one crit roll per enemy, exactly as the old per-enemy
         // rollCrit. Same rng draw order, so the hash is unchanged.
-        this.hitEnemy(e, offense.compute({
+        this.hitEnemy(e, combat.compute({
           attacker: p, ability: def, rank: this.skillRank(p, def), damageType: 'physical',
           critChance: this.critChance(p), rng: this.rng,
         }), p);
@@ -1734,7 +1733,7 @@ export class Sim implements IWorld {
       }
     }
     this.commitCast(p, def, slot);
-    this.hitEnemy(t, offense.compute({
+    this.hitEnemy(t, combat.compute({
       attacker: p, ability: def, rank: this.skillRank(p, def), damageType: 'physical',
       critChance: this.critChance(p), rng: this.rng,
     }), p);
@@ -1944,7 +1943,7 @@ export class Sim implements IWorld {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         // An enemy bite: a basic physical hit. critChance 0 => no crit roll (enemies never
         // crit today), so it draws NO rng — identical to the old direct meleeDamage call.
-        this.hitPlayer(target, offense.compute({
+        this.hitPlayer(target, combat.compute({
           attacker: e, rank: 1, damageType: 'physical', critChance: 0, rng: this.rng,
         }));
         this.applyEnemyOnHit(e, target); // chance to inflict a status (slow / bleed / stun)
@@ -1983,11 +1982,11 @@ export class Sim implements IWorld {
   // downs the player when HP hits 0.
   private hitPlayer(p: Entity, hit: Damage): void {
     if (hit.amount <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
-    // Gear/armor mitigation (Kevin's combat_defense): passthrough today (no armor yet), so
+    // Gear/armor mitigation (combat.mitigate): passthrough today (no armor yet), so
     // `incoming` === hit.amount. Then the Postura Defensiva BUFF — a temporary STATUS, not
     // gear — applies here at the apply step (GDD option A), floored at 1 so a mitigated blow
     // still registers; the event shows the ACTUAL HP lost.
-    const incoming = defense.mitigate({ hit, target: p });
+    const incoming = combat.mitigate({ hit, target: p });
     const taken = Math.max(1, Math.round(incoming * this.defenseFactor(p)));
     p.hp = Math.max(0, p.hp - taken);
     this.events.push({
@@ -2096,7 +2095,7 @@ export class Sim implements IWorld {
   private applyDotDamage(e: Entity, dmg: number, source: number): void {
     if (dmg <= 0) return;
     // A DoT tick is a FIXED magnitude (no attacker-stat generation, no crit), so it does NOT
-    // go through offense.compute. We wrap it in a Damage and route it through the SAME apply
+    // go through combat.compute. We wrap it in a Damage and route it through the SAME apply
     // path (so it still mitigates on the player, can kill, and credits the source for loot).
     const hit: Damage = { amount: dmg, type: 'physical', crit: false };
     if (e.kind === 'player') {
