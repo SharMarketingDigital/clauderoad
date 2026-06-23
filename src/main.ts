@@ -10,6 +10,7 @@ import { Sim, DT } from './sim/sim';
 import { Renderer } from './render/renderer';
 import { Input } from './game/input';
 import { Hud } from './ui/hud';
+import { WorldMap } from './ui/map';
 import { CombatText } from './ui/combat_text';
 import { makeCombatFeedback } from './ui/combat_feedback';
 import { Recorder, ClipRecorder } from './ui/recorder';
@@ -35,6 +36,7 @@ function startOffline(): void {
   const renderer = new Renderer(canvas);
   const input = new Input(canvas, renderer);
   const hud = new Hud();
+  const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
   const combatText = new CombatText();
   new Recorder(canvas); // in-game ● REC button (captures the 3D canvas to .webm)
   // 🎬 Clipe: one-click auto-clip in three files (clean + with-HUD + vertical 9:16).
@@ -71,6 +73,7 @@ function startOffline(): void {
     renderer.render(sim);
     drawCombatFeedback(sim); // after render: project with this frame's updated camera
     hud.update(sim);
+    map.update(sim);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -82,6 +85,7 @@ function startOnline(url: string, name: string): void {
   const input = new Input(canvas, renderer);
   const world = new ClientWorld(url, name); // a network-backed IWorld
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
+  const map = new WorldMap(); // world map (tecla M) — same module as SP, reads IWorld
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
@@ -105,6 +109,7 @@ function startOnline(url: string, name: string): void {
     renderer.render(world, world.weather()); // local player = Knight, others = Knights, mobs = avatars
     drawCombatFeedback(world); // after render: damage numbers from the server's events
     hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
+    map.update(world); // world map (M) — player position on the zones
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
