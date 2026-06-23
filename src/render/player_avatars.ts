@@ -1,8 +1,9 @@
 // Animated 3D characters for the OTHER (remote) players in multiplayer — presentation only,
-// never touches the sim. Each remote player is skinned to ITS OWN class (weapon mastery):
-// Knight/Barbarian/Ranger/Mage. The shared clips + weapons load ONCE; a per-class TEMPLATE is
-// built lazily on first need; each remote player gets its OWN skinned clone of the right
-// template (SkeletonUtils.clone — a plain .clone() does not rebuild the skeleton) with its own
+// never touches the sim. Each remote player is skinned to ITS OWN class (weapon mastery) and
+// holds that class's weapon: Knight+sword/shield, Barbarian+spear, Ranger+bow, Mage+staff. The
+// shared Idle/Walk clips load ONCE; a per-class TEMPLATE (body + its weapon) is built lazily on
+// first need; each remote player gets its OWN skinned clone of the right template
+// (SkeletonUtils.clone — a plain .clone() does not rebuild the skeleton) with its own
 // AnimationMixer and material instances. So 20 players across 4 classes = 4 loaded templates
 // cloned per id, not 20 reloads.
 //
@@ -13,7 +14,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { MasteryId } from '../world_api';
-import { MASTERY_MODEL } from './class_models';
+import { MASTERY_MODEL, MASTERY_WEAPON } from './class_models';
 
 const TARGET_HEIGHT = 1.9; // world units — matches the local avatar's auto-fit height
 const MODEL_FORWARD_Y = 0; // KayKit Rig_Medium faces +Z (sim facing=0)
@@ -101,49 +102,48 @@ class RemotePlayer {
   }
 }
 
-// Owns the shared clips/weapons, the per-class templates, and the live per-remote avatars.
+// Owns the shared clips, the per-class templates (body + weapon), and the live per-remote avatars.
 export class PlayerAvatars {
-  ready = false; // the SHARED assets (clips + weapons) are loaded — templates then load lazily per class
+  ready = false; // the shared Idle/Walk clips are loaded — templates then load lazily per class
   private loading = false; // whether the one-time shared load has been kicked off yet
   private idleClip?: THREE.AnimationClip;
   private walkClip?: THREE.AnimationClip;
-  private sword?: THREE.Object3D; // loaded weapon scenes, cloned into each class template
-  private shield?: THREE.Object3D;
-  private templates = new Map<MasteryId, THREE.Object3D>(); // auto-fit class model (with weapons), built once each
+  private templates = new Map<MasteryId, THREE.Object3D>(); // auto-fit class model (with weapon), built once each
   private templateLoading = new Set<MasteryId>(); // classes whose template load is in flight
   private avatars = new Map<number, RemotePlayer>();
 
-  // No eager load: the shared clips/weapons load LAZILY on the first remote player (see
-  // rootFor), and each class template loads on the first remote player OF THAT CLASS. So
-  // single-player — which never has a remote player — never fetches or decodes any of them.
+  // No eager load: the shared clips load LAZILY on the first remote player (see rootFor), and
+  // each class template loads on the first remote player OF THAT CLASS. So single-player —
+  // which never has a remote player — never fetches or decodes any of them.
 
   private async loadShared(): Promise<void> {
     const loader = new GLTFLoader();
-    // Clips + weapons shared by EVERY class template (all four share the Rig_Medium rig).
-    const [general, movement, sword, shield] = await Promise.all([
+    // Idle/Walk clips shared by EVERY class template (all four share the Rig_Medium rig).
+    const [general, movement] = await Promise.all([
       loader.loadAsync('/models/Rig_Medium_General.glb'), // Idle_A
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'), // Walking_A
-      loader.loadAsync('/models/sword_1handed.gltf'),
-      loader.loadAsync('/models/shield_round.gltf'),
     ]);
     const clips = [...general.animations, ...movement.animations];
     this.idleClip = clips.find((c) => c.name === 'Idle_A');
     this.walkClip = clips.find((c) => c.name === 'Walking_A');
-    this.sword = sword.scene;
-    this.shield = shield.scene;
-    this.ready = !!(this.idleClip && this.walkClip && this.sword && this.shield);
+    this.ready = !!(this.idleClip && this.walkClip);
   }
 
-  // Build (once) the auto-fit character template for a class: load its GLB, scale to
-  // TARGET_HEIGHT, seat the feet on y=0, face +Z, and parent its OWN weapon instances
-  // (cloned, so each template owns its meshes) under the hand-slot bones. The per-class
-  // weapon model is a LATER fatia; for now every class carries the sword + shield, matching
-  // the local avatar so no class regresses.
+  // Build (once) the auto-fit template for a class: load its body GLB + its weapon(s), scale to
+  // TARGET_HEIGHT, seat the feet on y=0, face +Z, and parent the weapon(s) under the hand-slot
+  // bones — the right hand always, the left hand only when the class has an off-hand (Sword &
+  // Shield). These scenes belong to the template; SkeletonUtils then clones them along with each
+  // player's character, so every remote clone gets its own weapon instances.
   private async loadTemplate(mastery: MasteryId): Promise<void> {
     if (this.templates.has(mastery) || this.templateLoading.has(mastery)) return;
     this.templateLoading.add(mastery);
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(MASTERY_MODEL[mastery]);
+    const weapon = MASTERY_WEAPON[mastery];
+    const [gltf, right, left] = await Promise.all([
+      loader.loadAsync(MASTERY_MODEL[mastery]),
+      loader.loadAsync(weapon.rightHand),
+      weapon.leftHand ? loader.loadAsync(weapon.leftHand) : Promise.resolve(null),
+    ]);
     const obj = gltf.scene;
     // Auto-fit: scale to TARGET_HEIGHT and seat the feet on y=0, face +Z (like the local avatar).
     let box = new THREE.Box3().setFromObject(obj);
@@ -152,10 +152,8 @@ export class PlayerAvatars {
     box = new THREE.Box3().setFromObject(obj);
     obj.position.y = -box.min.y;
     obj.rotation.y = MODEL_FORWARD_Y;
-    // Weapons -> the hand-slot bones. Cloned so this template owns them; SkeletonUtils then
-    // clones them along with each player's character (each clone gets its own sword + shield).
-    if (this.sword) findNode(obj, 'handslot.r')?.add(this.sword.clone());
-    if (this.shield) findNode(obj, 'handslot.l')?.add(this.shield.clone());
+    findNode(obj, 'handslot.r')?.add(right.scene);
+    if (left) findNode(obj, 'handslot.l')?.add(left.scene);
     this.templates.set(mastery, obj);
     this.templateLoading.delete(mastery);
   }

@@ -1,8 +1,8 @@
-// Loads the local player's CLASS model (GLB) and drives it: Rig_Medium idle/walk clips
-// via an AnimationMixer, sword + shield parented to the hand-slot bones, and a procedural
-// attack swing layered on top of the clip pose. The model URL comes from the player's class
-// (Knight/Barbarian/Ranger/Mage — see class_models.ts); all four share the Rig_Medium rig,
-// so this code is identical for every skin.
+// Loads the local player's CLASS model (GLB) and drives it: Rig_Medium idle/walk clips via an
+// AnimationMixer, the class weapon(s) parented to the hand-slot bones (sword+shield, bow, staff
+// or spear), and a procedural attack swing layered on top of the clip pose. The body skin and
+// weapons both come from the player's class (see class_models.ts); all four skins share the
+// Rig_Medium rig, so this code is identical for every one.
 //
 // Presentation only. It reads nothing from the world — the renderer tells it when
 // the player moves/attacks (derived from IWorld) and feeds it the host delta time.
@@ -14,6 +14,8 @@
 // set, so the attack is a small procedural swing (see update()).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { MasteryId } from '../world_api';
+import { MASTERY_MODEL, MASTERY_WEAPON } from './class_models';
 
 const TARGET_HEIGHT = 1.9; // world units — the Knight is auto-scaled to roughly the old capsule's height
 const MODEL_FORWARD_Y = 0; // the Knight mesh already faces +Z (sim facing=0); a 180° offset made it run backward
@@ -114,8 +116,9 @@ export class PlayerAvatar {
   private swingFlip = false; // toggles \ <-> / each swing
   private readonly tmpQ = new THREE.Quaternion();
 
-  // `modelUrl` is the class skin to load (e.g. /models/Mage.glb) — see class_models.ts.
-  constructor(private readonly modelUrl: string) {
+  // `mastery` is the player's class; it picks the body skin (MASTERY_MODEL) and the weapon(s)
+  // attached to the hand-slot bones (MASTERY_WEAPON) — see class_models.ts.
+  constructor(private readonly mastery: MasteryId) {
     // Fire-and-forget async load; the game keeps running on the capsule fallback
     // until `ready` flips true. A failure just logs and leaves the capsule in place.
     this.load().catch((err) => console.error('[PlayerAvatar] failed to load', err));
@@ -123,19 +126,20 @@ export class PlayerAvatar {
 
   private async load(): Promise<void> {
     const loader = new GLTFLoader();
-    const [char, general, movement, sword, shield] = await Promise.all([
-      loader.loadAsync(this.modelUrl),
-      loader.loadAsync('/models/Rig_Medium_General.glb'), // Idle_A, Hit_A, ... (same rig as the Knight)
+    const weapon = MASTERY_WEAPON[this.mastery];
+    const [char, general, movement, right, left] = await Promise.all([
+      loader.loadAsync(MASTERY_MODEL[this.mastery]),
+      loader.loadAsync('/models/Rig_Medium_General.glb'), // Idle_A, Hit_A, ... (same rig as every skin)
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'), // Walking_A/B/C, Running_A/B
-      loader.loadAsync('/models/sword_1handed.gltf'),
-      loader.loadAsync('/models/shield_round.gltf'),
+      loader.loadAsync(weapon.rightHand),
+      weapon.leftHand ? loader.loadAsync(weapon.leftHand) : Promise.resolve(null),
     ]);
     if (this.disposed) {
       // Replaced (the class changed) before the model finished loading: drop the just-decoded
       // GPU resources instead of leaking them on an orphaned root that is never shown.
       disposeAvatar(char.scene);
-      disposeAvatar(sword.scene);
-      disposeAvatar(shield.scene);
+      disposeAvatar(right.scene);
+      if (left) disposeAvatar(left.scene);
       return;
     }
 
@@ -165,11 +169,13 @@ export class PlayerAvatar {
     }
     if (walkClip) this.walk = this.mixer.clipAction(walkClip);
 
-    // Weapons -> KayKit's dedicated hand-slot bones (modeled for identity attach).
+    // Weapon(s) -> KayKit's dedicated hand-slot bones (modeled for identity attach). The right
+    // hand always holds the class weapon; the left hand gets an off-hand only when the class has
+    // one (Sword & Shield) — bow/staff/spear wield a single weapon and carry nothing off-hand.
     const handR = findNode(charObj, 'handslot.r');
     const handL = findNode(charObj, 'handslot.l');
-    if (handR) handR.add(sword.scene);
-    if (handL) handL.add(shield.scene);
+    if (handR) handR.add(right.scene);
+    if (handL && left) handL.add(left.scene);
     this.swingBone = findNode(charObj, 'upperarm.r');
 
     // A skinned mesh's static bounding box doesn't track the animated pose, so it

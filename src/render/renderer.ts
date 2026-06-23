@@ -3,7 +3,6 @@
 import * as THREE from 'three';
 import type { IWorld, EntityKind, EntityView, MasteryId } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
-import { MASTERY_MODEL } from './class_models';
 import { PlayerAvatars } from './player_avatars';
 import { EnemyAvatars } from './enemy_avatars';
 import { NpcAvatar } from './npc_avatar';
@@ -249,7 +248,7 @@ export class Renderer {
       // Retire the current avatar (don't dispose yet — it stays on screen until the new one
       // finishes loading; sync() swaps the root). The new one starts loading immediately.
       if (this.playerAvatar) this.outgoingAvatars.push(this.playerAvatar);
-      this.playerAvatar = new PlayerAvatar(MASTERY_MODEL[p.mastery]);
+      this.playerAvatar = new PlayerAvatar(p.mastery);
     }
     // Once the replacement is ready, sync() (later THIS frame) removes the old root from the
     // scene, so the retired avatars can be disposed — freeing their GPU resources.

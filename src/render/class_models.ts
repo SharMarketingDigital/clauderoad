@@ -13,3 +13,19 @@ export const MASTERY_MODEL: Record<MasteryId, string> = {
   bow: '/models/Ranger.glb', // Arqueiro
   mage: '/models/Mage.glb', // Mago
 };
+
+// The weapon model(s) a class wields, attached to the Rig_Medium hand-slot bones — GDD G1
+// Visual Fatia 2. `rightHand` (handslot.r) is the wielded weapon (always present); `leftHand`
+// (handslot.l) is an off-hand carried ONLY by Sword & Shield — bow/staff/spear are single-weapon
+// and leave the left hand empty. Each .gltf ships with its own .bin + atlas in public/models/.
+export interface ClassWeapon {
+  rightHand: string; // model attached to handslot.r
+  leftHand?: string; // model attached to handslot.l — only Sword & Shield has one
+}
+
+export const MASTERY_WEAPON: Record<MasteryId, ClassWeapon> = {
+  sword: { rightHand: '/models/sword_1handed.gltf', leftHand: '/models/shield_round.gltf' },
+  spear: { rightHand: '/models/spear_A.gltf' }, // lança — sem escudo
+  bow: { rightHand: '/models/bow.gltf' }, // arco — sem escudo
+  mage: { rightHand: '/models/staff.gltf' }, // cajado — sem escudo
+};
