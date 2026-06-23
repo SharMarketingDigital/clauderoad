@@ -10,9 +10,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VILLAGE_CX, VILLAGE_CZ, VILLAGE_CLEAR } from './village';
 import { terrainHeight } from './environment';
+import { WORLD_HALF } from '../sim/zones';
 
-const DENSITY = 1.0; // global multiplier on every count below — lower it if the scene feels heavy
-const SPREAD = 68; // half-extent of the scatter area (the ground plane is ~70 from centre)
+const DENSITY = 3.0; // global multiplier on every count below — scaled up to fill the larger world
+const SPREAD = WORLD_HALF; // half-extent of the scatter area — covers the whole world (the rings)
 const CLEAR = 7; // keep a clear radius around the spawn point (origin) — the walkable start area
 
 interface Kind {

@@ -8,6 +8,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VILLAGE_CX, VILLAGE_CZ } from './village';
+// The world's half-extent (sim source of truth). The visual ground + scenery derive from
+// it so they ALWAYS cover the playable world — no magic size to drift out of sync.
+import { WORLD_HALF } from '../sim/zones';
 
 // ===================== TUNABLES =====================
 // -- day/night cycle --
@@ -57,23 +60,23 @@ const SHADOW_MAP_SIZE = 2048;
 const SHADOW_AREA = 40;
 // -- fog (clear-weather far) --
 const FOG_NEAR = 58;
-const FOG_FAR = 140;
+const FOG_FAR = 200; // see farther across the larger world (camera far plane is 600)
 // -- terrain relief (visual) --
 const TERRAIN_AMP = 1.6;
 const TERRAIN_SCALE = 0.013;
 const FLAT_RADIUS = 26;
 const FLAT_RAMP = 16;
 const VILLAGE_FLAT = 13;
-const GROUND_SIZE = 152;
-const GROUND_SEGS = 200;
+const GROUND_SIZE = WORLD_HALF * 2 + 40; // covers the whole world (±WORLD_HALF) + a margin
+const GROUND_SEGS = 300; // terrain mesh resolution across the (now larger) ground
 const GRASS_DARK = 0x3c6b2c;
 const GRASS_LIGHT = 0x74a049;
 const DIRT = 0x6f5a3c;
 const DIRT_THRESHOLD = 0.7;
 // -- grass tufts (instanced) --
 const GRASS_MODELS = ['Grass_1_A_Color1', 'Grass_1_C_Color1', 'Grass_2_A_Color1'];
-const GRASS_COUNT = 900;
-const GRASS_SPREAD = 64;
+const GRASS_COUNT = 2000; // more tufts to cover the wider world (instanced; tune if heavy)
+const GRASS_SPREAD = WORLD_HALF; // grass scatters across the whole world, not just the centre
 const GRASS_TARGET_H = 0.7;
 const GRASS_TINT_LO = 0x6f9a45;
 const GRASS_TINT_HI = 0xa9c66a;
