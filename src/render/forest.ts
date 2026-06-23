@@ -8,13 +8,11 @@
 // time. Per-instance scale + rotation keep it from reading as a tiled grid.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { VILLAGE_CX, VILLAGE_CZ, VILLAGE_CLEAR } from './village';
 import { terrainHeight } from './environment';
-import { WORLD_HALF } from '../sim/zones';
+import { WORLD_HALF, zoneAt } from '../sim/zones';
 
 const DENSITY = 3.0; // global multiplier on every count below — scaled up to fill the larger world
 const SPREAD = WORLD_HALF; // half-extent of the scatter area — covers the whole world (the rings)
-const CLEAR = 7; // keep a clear radius around the spawn point (origin) — the walkable start area
 
 interface Kind {
   files: string[];
@@ -102,8 +100,7 @@ export async function populateForest(scene: THREE.Scene): Promise<void> {
     for (let i = 0; i < n; i++) {
       const x = (rnd() * 2 - 1) * SPREAD;
       const z = (rnd() * 2 - 1) * SPREAD;
-      if (Math.hypot(x, z) < CLEAR) continue; // keep the spawn / start area clear
-      if (Math.hypot(x - VILLAGE_CX, z - VILLAGE_CZ) < VILLAGE_CLEAR) continue; // no trees inside the village
+      if (zoneAt(x, z).safe) continue; // no forest inside the central safe-zone (the town); only the wild rings
       const file = kind.files[Math.floor(rnd() * kind.files.length)];
       const model = models.get(file);
       if (!model) continue;

@@ -6,14 +6,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-// Where the town sits: clustered around a small plaza, next to the vendor NPC
-// (10,6) and well clear of the player spawn (0,0). forest.ts keeps this circle
-// free of trees so nothing grows inside the buildings.
-export const VILLAGE_CX = 10;
-export const VILLAGE_CZ = 6;
-export const VILLAGE_CLEAR = 14; // radius kept free of forest scatter (covers the bigger town)
-const PLAZA_X = 10;
-const PLAZA_Z = 6;
+// The town sits on the central SAFE-ZONE, centered on the spawn (0,0): a brick plaza at the
+// centre, four streets in a cross, cottages lining them, and guard towers at the corners.
+// forest.ts keeps the whole safe-zone free of trees, so nothing grows inside the city.
+export const VILLAGE_CX = 0; // town centre = spawn / safe-zone centre (environment's terrain-flatten anchor)
+export const VILLAGE_CZ = 0;
+const PLAZA_X = 0;
+const PLAZA_Z = 0;
 
 const MOD = 2.0; // wall module width (measured from the kit); house footprint = 2*MOD per side
 const ROOF_Y_NUDGE = 0.0; // raise/lower the roof if it floats or sinks into the walls
@@ -52,15 +51,17 @@ const CORNERS: [number, number, number][] = [
 ];
 const FLOORS: [number, number][] = [[-HALF, -HALF], [HALF, -HALF], [HALF, HALF], [-HALF, HALF]];
 
-// Cottages: [x, z] — they RING the vendor (10,6) in the arc away from the spawn (0,0),
-// so the SW approach (where the gate + street are) stays open. Doors auto-aim at the plaza.
+// Cottages lining the four streets — two per side of each street, doors auto-aimed at the
+// central plaza. Spread across the safe-zone; footprints stay well inside cheb 30.
 const HOUSES: [number, number][] = [
-  [16, 9], [8, 13], [15, 2], // original three
-  [20, 11], [13, 16], [3, 11], // three more, denser town
+  [-8, 16], [8, 16], [-8, 24], [8, 24], // north street (+Z)
+  [-8, -16], [8, -16], [-8, -24], [8, -24], // south street (-Z)
+  [16, -8], [16, 8], [24, -8], [24, 8], // east street (+X)
+  [-16, -8], [-16, 8], [-24, -8], [-24, 8], // west street (-X)
 ];
 
-// Two corner towers flanking the town (read as guard towers). [x, z].
-const TOWERS: [number, number][] = [[18, 3], [4, 14]];
+// Guard towers at the four corners of the town. [x, z].
+const TOWERS: [number, number][] = [[24, 24], [-24, 24], [24, -24], [-24, -24]];
 
 type Templates = Map<string, THREE.Object3D>;
 
@@ -155,44 +156,58 @@ export async function populateVillage(scene: THREE.Scene): Promise<void> {
   const village = new THREE.Group();
   village.name = 'village';
 
-  // --- ground: a brick-paved plaza + a street leading in from the SW approach ---
-  paveRect(village, tpl.get(FILES.brick), PLAZA_X, PLAZA_Z, 4, 4, brickStep, 0.02); // the plaza
-  paveRect(village, tpl.get(FILES.brick), 5, 2, 3, 1.5, brickStep, 0.02); // street toward the spawn
+  // --- central plaza on the spawn (0,0): the town square + spawn/revive point ---
+  paveRect(village, tpl.get(FILES.brick), PLAZA_X, PLAZA_Z, 11, 8, brickStep, 0.02); // ~22x16 plaza
 
-  // --- cottages — door auto-aimed at the plaza ---
+  // --- four main streets in a cross, out toward the ring gates (inside the safe-zone) ---
+  paveRect(village, tpl.get(FILES.brick), 0, 17, 2, 9, brickStep, 0.02); // north (+Z): z 8..26
+  paveRect(village, tpl.get(FILES.brick), 0, -17, 2, 9, brickStep, 0.02); // south (-Z)
+  paveRect(village, tpl.get(FILES.brick), 18, 0, 8, 2, brickStep, 0.02); // east (+X): x 10..26
+  paveRect(village, tpl.get(FILES.brick), -18, 0, 8, 2, brickStep, 0.02); // west (-X)
+
+  // --- cottages lining the streets — door auto-aimed at the central plaza ---
   for (const [x, z] of HOUSES) {
     const house = buildHouse(tpl, wallH);
     house.position.set(x, 0, z);
-    house.rotation.y = Math.atan2(x - PLAZA_X, z - PLAZA_Z); // local –Z (door) faces the plaza
+    house.rotation.y = Math.atan2(x - PLAZA_X, z - PLAZA_Z); // local -Z (door) faces the plaza
     village.add(house);
   }
 
-  // --- two corner towers ---
+  // --- guard towers at the four corners of the town ---
   for (const [x, z] of TOWERS) {
     const tower = buildTower(tpl, wallH);
     tower.position.set(x, 0, z);
     village.add(tower);
   }
 
-  // --- vendor stall at (10,6) — open front aimed back toward the spawn / player approach ---
+  // --- vendor stall at (10,6), on the plaza — open side aimed at the spawn / plaza centre ---
   const stall = buildStall(tpl, wallH);
   stall.position.set(10, 0, 6);
-  stall.rotation.y = Math.atan2(10, 6); // local –Z (open side) faces the origin
+  stall.rotation.y = Math.atan2(10, 6); // local -Z (open side) faces the origin
   village.add(stall);
 
-  // --- an arch gateway on the SW street, framing the approach ---
-  place(village, tpl.get(FILES.arch), 5, 0, 1, Math.atan2(PLAZA_X - 5, PLAZA_Z - 1));
+  // --- arch gateways framing each street's exit to the wilds (at the safe-zone edge) ---
+  place(village, tpl.get(FILES.arch), 0, 0, 27, 0); // north gate
+  place(village, tpl.get(FILES.arch), 0, 0, -27, 0); // south gate
+  place(village, tpl.get(FILES.arch), 27, 0, 0, PI / 2); // east gate
+  place(village, tpl.get(FILES.arch), -27, 0, 0, PI / 2); // west gate
 
-  // --- an ornamental-fence perimeter along the N and E edges (SW left open for the gate) ---
-  fenceRun(village, tpl.get(FILES.metalFence), 6, 17, 1, 0, 9, fenceW, 0); // north edge (+Z)
-  fenceRun(village, tpl.get(FILES.metalFence), 22, 16, 0, -1, 8, fenceW, PI / 2); // east edge (+X)
+  // --- ornamental fences flanking each street gate (town border; the gates stay open) ---
+  fenceRun(village, tpl.get(FILES.metalFence), 4, 26, 1, 0, 3, fenceW, 0); // N gate, east flank
+  fenceRun(village, tpl.get(FILES.metalFence), -4, 26, -1, 0, 3, fenceW, 0); // N gate, west flank
+  fenceRun(village, tpl.get(FILES.metalFence), 4, -26, 1, 0, 3, fenceW, 0); // S gate
+  fenceRun(village, tpl.get(FILES.metalFence), -4, -26, -1, 0, 3, fenceW, 0);
+  fenceRun(village, tpl.get(FILES.metalFence), 26, 4, 0, 1, 3, fenceW, PI / 2); // E gate
+  fenceRun(village, tpl.get(FILES.metalFence), 26, -4, 0, -1, 3, fenceW, PI / 2);
+  fenceRun(village, tpl.get(FILES.metalFence), -26, 4, 0, 1, 3, fenceW, PI / 2); // W gate
+  fenceRun(village, tpl.get(FILES.metalFence), -26, -4, 0, -1, 3, fenceW, PI / 2);
 
-  // --- intentional props around the vendor's plaza ---
-  place(village, tpl.get(FILES.wagon), 7, 0, 3, 0.6); // by the open SW approach
-  place(village, tpl.get(FILES.crate), 12, 0, 8, 0.3); // near the stall
-  place(village, tpl.get(FILES.crate), 12.7, 0, 8.4, 1.1);
-  place(village, tpl.get(FILES.wagon), 14, 0, 11, 2.2); // a second wagon by the NE houses
-  for (let i = 0; i < 4; i++) place(village, tpl.get(FILES.fence), 5, 0, 4 + i * MOD, PI / 2); // a wooden fence run on the west edge
+  // --- intentional props around the plaza (off the spawn centre + the street mouths) ---
+  place(village, tpl.get(FILES.wagon), -9, 0, -6, 0.6);
+  place(village, tpl.get(FILES.crate), 8, 0, -7, 0.3);
+  place(village, tpl.get(FILES.crate), 8.7, 0, -6.6, 1.1);
+  place(village, tpl.get(FILES.wagon), -8, 0, 7, 2.2);
+  place(village, tpl.get(FILES.crate), 12, 0, 6, 0.4); // by the vendor stall
 
   scene.add(village);
 }
