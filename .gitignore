@@ -12,6 +12,7 @@ tmp/
 
 # Raw 3D asset downloads — NOT versioned (hundreds of source files: fbx/obj/blend/
 # textures). Only the curated, ready-to-use files in public/models/ are committed.
+/KayKit/
 /KayKit_Adventurers_2.0_FREE/
 /KayKit Character Animations 1.2/
 /Medieval Weapons Pack by @Quaternius*/
