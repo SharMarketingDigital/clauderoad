@@ -23,4 +23,15 @@ export const VENDOR_STOCK: VendorStockEntry[] = [
   { itemId: 'elixir_weapon', price: 40 },
   { itemId: 'elixir_armor', price: 40 },
   { itemId: 'lucky_powder', price: 60 },
+  // --- K2 degrees: armas de 2º/3º grau. Comprar é LIVRE em qualquer nível; só EQUIPAR é
+  // gated por nível (ver Sim.equip / degrees.ts). O bot não compra arma (botTrade compra só
+  // ids fixos), então adicionar aqui é inerte para o autoplay e o determinismo.
+  { itemId: 'iron_sword', price: 160 },
+  { itemId: 'steel_sword', price: 300 },
+  { itemId: 'steel_spear', price: 240 },
+  { itemId: 'halberd', price: 430 },
+  { itemId: 'hunters_bow', price: 270 },
+  { itemId: 'composite_bow', price: 470 },
+  { itemId: 'adept_staff', price: 300 },
+  { itemId: 'sorcerer_staff', price: 510 },
 ];

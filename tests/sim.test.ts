@@ -3197,3 +3197,30 @@ describe('degrees — gate de nível para equipar', () => {
     expect(weapon(sim).itemId).toBe('old_sword'); // the wearable lesser item — not null, not the D3
   });
 });
+
+// --- K2: the vendor stocks degree gear (Slice 3) ---
+describe('degrees — mercador vende equipamento por grau', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('sells a degree weapon into the bag; equipping it is still gated by level', () => {
+    const sim = new Sim(7);
+    const id = sim.localPlayerId()!;
+    // seed gold so we skip grinding; level 1 keeps the equip gated
+    sim.restorePlayer(id, { level: 1, gold: 1000, bag: [], equipment: { weapon: null, armor: null } });
+    for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
+      sim.step();
+    }
+    expect(sim.shop().inRange).toBe(true);
+    expect(sim.shop().stock.some((e) => e.itemId === 'steel_sword')).toBe(true); // vendor stocks the D3
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'buy', itemId: 'steel_sword' });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'steel_sword')).toBe(true); // bought into the bag
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 }); // refused at lvl 1
+    sim.step();
+    expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBeNull();
+  });
+});
