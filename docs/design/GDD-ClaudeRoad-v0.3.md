@@ -6,233 +6,205 @@
 
 ## 0. Como ler este documento
 
-- **Pilar do v0.3:** transformar "1 área jogável" num **mundo progressivo estilo Silkroad** — múltiplas regiões com mobs por nível, mais variação de classes/habilidades e os sistemas sociais/PvP que dão alma ao Silkroad.
-- **Divisão de trabalho:** o v0.3 está dividido em **duas frentes — Gabriel e Kevin** — por **sistema completo** (cada um toca todas as camadas — sim, servidor, render, UI, conteúdo — de um conjunto de sistemas). A divisão foi desenhada pra **não dar conflito de commit**: cada frente trabalha em **arquivos majoritariamente próprios**, e os poucos arquivos compartilhados (`protocol.ts`, `sim.ts`, `IWorld`) têm **regras de coordenação** explícitas (seção 3.0) pra os dois nunca editarem as mesmas linhas.
-- **As prioridades do Shar pro Gabriel** (no topo): (1) variação de classes — Arqueiro, Mago, Espada&Escudo, Lança; (2) habilidades visuais à distância e curta (ex.: fogo); (3) expansão do mapa-múndi com mobs por nível; (4) expansão da cidade estilo Silkroad (Jangan como exemplo). Estão detalhadas na **Frente Gabriel**.
-- **Fora do escopo (congelado até aviso do Shar):** Trade entre jogadores (P2P de itens) e Login/contas. **Não confundir** o "Trade entre jogadores" congelado com o **Job System trader/hunter/thief** (que é o transporte de mercadorias com PvP — esse SIM entra, se escolhido).
-- **Status:** cada item marcado 🔵 (proposto) — você prioriza o que entra de fato. Não é pra fazer tudo; é o cardápio fiel ao Silkroad pra você escolher.
+- **Pilar do v0.3:** transformar "1 área jogável" num **mundo progressivo estilo Silkroad** — múltiplas regiões com mobs por nível, mais variação de classes/habilidades e profundidade de gear.
+- **Divisão de trabalho — frentes INDEPENDENTES:** o v0.3 está dividido em **duas frentes — Gabriel e Kevin**. O princípio nº1 (aprendido na prática): **as tarefas das duas frentes NÃO podem depender uma da outra, nem tocar os mesmos sistemas.** Cada frente é dona de **sistemas inteiros** que vivem em **arquivos próprios e disjuntos** — cada um trabalha, testa e commita sozinho, como se o outro não existisse, sem nunca quebrar o jogo do outro. Os detalhes da separação estão na seção 3.
+- **As prioridades do Shar pro Gabriel** (no topo): (1) variação de classes — Arqueiro, Mago, Espada&Escudo, Lança; (2) habilidades visuais à distância e curta (ex.: fogo); (3) expansão do mapa-múndi com mobs por nível; (4) expansão da cidade estilo Silkroad (Jangan como exemplo).
+- **Fora do escopo (congelado até aviso do Shar):** Trade entre jogadores (P2P de itens) e Login/contas. **Não confundir** o "Trade entre jogadores" congelado com o **Job System trader/hunter/thief** (transporte de mercadorias com PvP — esse SIM entra, se escolhido, numa leva futura).
 
 ---
 
-## 1. Os sistemas do Silkroad (pesquisa) — o cardápio do v0.3
+## 1. Os sistemas do Silkroad (referência) — o cardápio do v0.3
 
-Resumo fiel do que o Silkroad tem, pra embasar a priorização. Cada um vira um candidato a "sistema" do v0.3.
+Resumo fiel do que o Silkroad tem, pra embasar a priorização. (Referência — não é tudo pra fazer agora.)
 
-### 1.1 Sistema de Zonas / Mundo progressivo 🔵 **(o vetor central)**
-No Silkroad, o mundo é uma **progressão linear de regiões**, cada uma com sua faixa de nível de monstros:
-- Jangan (China) — níveis ~1–20 · Donwhang (China Ocidental) — ~21–30 (caverna 60–70) · Hotan (Reino Oásis) — ~31–60 · Taklamakan (deserto sem cidade) — ~60–80.
-- Cada região tem **cidade-hub** (vendor, armazém, revive, teleporte), **pontos de caça definidos** (spots), monstros próprios, e **bosses únicos** (Tiger Girl, Uruchi, Isyutaru...).
-- O jogador **se desloca** pra áreas mais difíceis conforme fica mais forte — o **mapa é a progressão**.
-- **Teleporte** entre cidades (pago), e **mapa/minimapa** pra navegar.
+### 1.1 Zonas / Mundo progressivo (o vetor central)
+Mundo é uma **progressão linear de regiões**, cada uma com sua faixa de nível de monstros: Jangan ~1–20, Donwhang ~21–30 (caverna 60–70), Hotan ~31–60, Taklamakan ~60–80. Cada região tem cidade-hub (vendor, armazém, revive, teleporte), pontos de caça definidos, monstros e bosses próprios. O jogador se desloca pra áreas mais difíceis conforme fica mais forte — **o mapa é a progressão.** Teleporte entre cidades e mapa/minimapa pra navegar.
 
-**Por que é o centro do v0.3:** hoje o ClaudeRoad tem 1 zona plana. Este sistema é o que transforma o jogo em "mundo". Tudo mais (job, mais bosses, mais gear) ganha sentido com regiões.
+### 1.2 Job System — Trader / Hunter / Thief (leva futura)
+A partir de certo nível, o jogador escolhe um papel: **Trader** transporta mercadorias numa caravana entre cidades pra lucrar; **Thief** rouba traders; **Hunter** protege traders e caça thieves. Triângulo de conflito = PvP emergente com propósito econômico. Job EXP/nível separado. *(PvP de transporte — NÃO é o trade P2P de itens congelado.)*
 
-### 1.2 Job System — Trader / Hunter / Thief 🔵 **(a identidade do Silkroad)**
-O sistema mais único do Silkroad. A partir de certo nível, o jogador escolhe um papel:
-- **Trader (Mercador):** compra mercadorias numa cidade, carrega num **animal de carga (caravana)** e transporta pra outra cidade pra vender com lucro. Quanto mais longe / maior o "grau" da carga, maior o lucro — e maior o risco (NPCs ladrões mais fortes, e thieves jogadores).
-- **Thief (Ladrão):** ataca traders, rouba a mercadoria, leva pro "covil dos ladrões" pra vender. Inimigo do hunter.
-- **Hunter (Caçador):** protege traders e caça thieves. Ganha XP de job matando thieves (NPC ou jogador) e quando o trader entrega a carga.
-- **Triângulo de conflito:** trader ⟶ precisa de hunter ⟶ caça thief ⟶ rouba trader. PvP emergente com propósito econômico.
-- **Job EXP/nível** separado do nível normal; desbloqueia caravanas melhores, roupas de job, consumíveis.
+### 1.3 Guildas / 1.4 Union / 1.5 Fortress War (leva futura — endgame PvP)
+Guildas (criar, cargos, armazém, chat). Union (combina parties em raid de até 32; aliança de guildas). Fortress War: cerco guild-vs-guild por fortalezas (portão → torres → coração); vencedor controla a taxa da cidade.
 
-**Nota:** isto é PvP de transporte com economia — NÃO é o "trade P2P de itens" congelado. É o coração da identidade Silkroad.
+### 1.6 Quests (leva futura)
+Missões narrativas + side quests; dão XP/SP/recompensa, apresentam zonas, apontam objetivos.
 
-### 1.3 Guildas 🔵
-- Organização de jogadores: criar guilda (mestre), convidar, hierarquia de cargos, **armazém de guilda**, chat de guilda.
-- Base pra conteúdo de grupo grande e pra Fortress War.
-- Tecla G (no Silkroad) abre a janela de guilda.
+### 1.7 Profundidade de gear / Seals & Degrees
+**Seal System** (SOS/SOM/SUN) — **já temos no v0.2.** **Degrees** (graus de gear por faixa de nível, com armadura por peças, escudo, acessórios). **Alquimia profunda** (quebrar item, item de proteção, queda múltipla na falha).
 
-### 1.4 Union (aliança de parties/guildas) 🔵
-- **Union Party:** combina até 4 parties numa só (raid de até 32 jogadores) — pra farm em massa e Fortress War.
-- **Union de guildas:** aliança de guildas pra Fortress War.
-
-### 1.5 Fortress War (guerra de fortaleza) 🔵 **(endgame PvP)**
-- Evento PvP em larga escala, guild-vs-guild, por controle de **fortalezas** (ex.: Jangan).
-- Mecânica: registrar a guilda (mestre, em janela de tempo), montar posições (engenheiros, hammerers, clérigos), destruir **portão → torres → coração da fortaleza** (nessa ordem; o sistema bloqueia o coração antes).
-- Vencedor controla a fortaleza por um período, **cobra taxa** (% do que jogadores gastam nos NPCs daquela cidade), e pode abrir dungeon exclusiva da union.
-- **Command Post** = ponto de spawn no cerco; estruturas defensivas (portões/torres) que se faz upgrade.
-
-### 1.6 Quests 🔵
-- Missões narrativas (a história segue a rota da seda, de Jangan a Constantinopla) + side quests com NPCs regionais.
-- Dão XP + SP + recompensas; apresentam zonas e apontam objetivos.
-
-### 1.7 Profundidade de gear / Seals & Degrees 🔵
-- **Seal System (raridade por "selo"):** itens "nascem" com Seal of Star (SOS, leve), Seal of Moon (SOM, médio) ou Seal of Sun (SUN, forte). Drop raríssimo. **(Já temos isto no v0.2!)**
-- **Degrees (graus de gear):** equipamento em tiers por faixa de nível (1st degree, 2nd... até 9th+), cada grau melhor e pra nível mais alto. Inclui armadura por **peças** (capacete, peito, mãos, pernas, pés), **escudo**, **acessórios** (colar, brinco, anel), além de arma.
-- **Alquimia profunda:** "+N" (já temos), mas com **elixir + sorte (já temos)**, e o que falta: **quebrar item em + alto, item de proteção, queda de múltiplos níveis na falha** — a tensão real do Silkroad.
-
-### 1.8 Dungeons / Áreas instanciadas 🔵
-- Cavernas e tumbas (Donwhang Cave, Qin-Shi Tomb) com faixas de nível altas e bosses — par natural do sistema de zonas.
-
-### 1.9 Mounts / Transporte 🔵
-- Montarias (cavalo de corrida pra velocidade) e animais de carga (caravana, pro job de trader). Acompanha zonas (viagem entre regiões).
-
-### 1.10 PvP livre / Battle Arena 🔵
-- Zonas free-for-all e arena de batalha (PvP consensual fora do job/fortress).
+### 1.8 Dungeons / 1.9 Mounts / 1.10 PvP arena (leva futura)
+Áreas instanciadas com bosses; montarias e animais de carga; zonas free-for-all e arena.
 
 ---
 
-## 2. Proposta de escopo do v0.3 — o que faz sentido AGORA
+## 2. Escopo do v0.3 — Leva 1 (frentes independentes)
 
-Tentar tudo de uma vez seria irreal. O **núcleo do v0.3** é dividido entre as duas frentes (detalhe na seção 3), priorizando o que o Shar pediu + o que dá o maior salto de "ser Silkroad":
+O núcleo é dividido em duas frentes que **não se cruzam**:
 
-### Núcleo do v0.3 (Leva 1)
-- **GABRIEL — Mundo & Combate visível:** variação de classes (Mago/Arqueiro/Espada&Escudo/Lança), habilidades visuais (VFX de fogo/distância/curta), expansão do mapa-múndi com mobs por nível, e expansão da cidade estilo Jangan.
-- **KEVIN — Itens & Progressão de Gear:** degrees (graus de gear por nível), peças de armadura + escudo + acessórios, defesa/mitigação de verdade, alquimia com risco real, armazém/banco.
+- **GABRIEL — Mundo & Combate:** variação de classes (Mago/Arqueiro/Espada&Escudo/Lança), habilidades visuais (VFX de fogo/distância/curta), expansão do mapa-múndi com mobs por nível, expansão da cidade estilo Jangan. **Gabriel é dono do combate inteiro** (ofensivo E defensivo) — porque as classes são dele e mexem no cálculo de dano.
+- **KEVIN — Itens & Inventário:** slots de equipamento completos (peças de armadura, escudo, acessórios), degrees (graus por nível), alquimia com risco real, armazém/banco, ficha de personagem. **Kevin NÃO toca combate** — só sistemas de item/inventário, que são auto-contidos.
 
-Os dois se complementam: o **Gabriel constrói o mundo onde caçar e como lutar**; o **Kevin constrói o que vestir e ganhar**. E foram separados pra **não colidir nos commits** (seção 3.0).
+**Por que essas duas frentes são independentes:** o Gabriel mexe em combate, habilidades, mundo, render. O Kevin mexe em definição de itens, equipar/desequipar, alquimia, banco, UI de inventário. **Nenhum arquivo de lógica é compartilhado, e nenhum sistema é dividido entre os dois.** O Kevin define os itens e como equipá-los; o Gabriel define como o combate usa os stats — mas o ponto de junção (stats afetam dano) já existe no jogo hoje e não precisa ser tocado pelos dois ao mesmo tempo (ver seção 3.1).
 
-### Leva 2 (depois da fundação)
-**Um grande sistema social/PvP:** **Job System** (trader/hunter/thief — identidade Silkroad) OU **Guildas + Fortress War** (endgame PvP de cerco). São ambos grandes; fazer um bem-feito por vez, dividido entre os dois.
-
-### Deixar pra v0.4+
-Quests (camada de conteúdo), Dungeons instanciadas, Union de 32, PvP arena, Mounts completos (a não ser que o Job exija a caravana). Áudio entra como suporte conforme as zonas pedirem.
+### Levas futuras (depois da fundação)
+- **Leva 2 — Social/PvP:** Job System OU Guildas+Fortress War.
+- **Leva 3+:** Quests, Dungeons, Union, Mounts, Áudio, PvP arena.
 
 ---
 
-## 3. Divisão de trabalho — Gabriel × Kevin (anti-conflito de commit)
+## 3. Divisão de trabalho — Gabriel × Kevin (INDEPENDÊNCIA TOTAL)
 
-> Princípio do Shar: **dividir de forma que NÃO dê conflito entre tarefas e commits.** A divisão abaixo segue isso: cada frente é dona de um conjunto de sistemas que vivem em **arquivos próprios**, e os poucos arquivos compartilhados têm regra de coordenação. Conflito no Git acontece quando dois editam o mesmo arquivo nas mesmas linhas — a estrutura abaixo evita isso por design.
+> **O princípio nº1 do Shar:** as tarefas não podem depender uma da outra, nem tocar os mesmos sistemas/arquivos. Cada frente trabalha, testa e commita isolada, sem quebrar o jogo do outro. A divisão abaixo garante isso: **sistemas inteiros, arquivos disjuntos, zero dependência cruzada.**
 
-### 3.0 Estratégia anti-conflito (LEItura obrigatória pros dois)
+### 3.0 Regras de engenharia (valem pros dois)
+- **Uma sim, vários hosts:** todo sistema roda igual em SP e MP, autoritativo no servidor. Lógica de jogo no `src/sim/` (determinística).
+- **Determinismo sagrado:** os 111 testes de determinismo do sim DEVEM continuar passando sem mudança. Qualquer sorteio usa **RNG separado**, nunca o `this.rng` principal.
+- **Cada sistema no seu módulo:** o `src/sim/sim.ts` NÃO recebe lógica nova inline — cada sistema cria seu arquivo (`src/sim/<sistema>.ts`) e o `sim.ts` só **chama**.
+- **Fatias pequenas:** cada uma → typecheck + testes verdes → revisão adversarial → commit com mensagem exata → próxima. Sem push (o Shar faz).
 
-**A regra de ouro: cada sistema novo mora no seu próprio módulo.** O `sim.ts` (o coração) NÃO deve receber lógica nova inline — cada sistema cria seu arquivo (`src/sim/<sistema>.ts`) e o `sim.ts` só **chama** uma função. Assim Gabriel e Kevin nunca editam as mesmas linhas do `sim.ts`.
+### 3.1 Como as duas frentes NÃO se cruzam (o ponto crítico)
 
-**O ponto de atrito mais perigoso: o cálculo de dano.** O Gabriel adiciona **dano ofensivo** (dano mágico do Mago, VFX). O Kevin adiciona **defesa/mitigação** (armadura reduz dano). Ambos querem mexer no mesmo cálculo. Solução:
-- Gabriel é dono de **`src/sim/combat_offense.ts`** (como o dano é gerado: físico/mágico, por classe).
-- Kevin é dono de **`src/sim/combat_defense.ts`** (como o dano é reduzido: armadura, defesa, mitigação).
-- O `sim.ts` chama os dois em sequência: `dano_final = defense.mitigate(offense.compute(...))`. Cada um edita só o seu arquivo. **Combinem a assinatura dessa função juntos, uma vez, no começo** — depois trabalham isolados.
+**A lição da tentativa anterior:** dividir o COMBATE entre os dois (ofensivo no Gabriel, defensivo no Kevin) criou dependência — o Kevin não andava sem o Gabriel, e ambos tocavam o cálculo de dano. **Corrigido:** o combate inteiro é do Gabriel.
 
-**Arquivos compartilhados (zonas de coordenação) — regras:**
-- `src/net/protocol.ts` — adicionar mensagens **sempre no fim**, nunca renumerar/reordenar o que existe. Avisar o outro ao adicionar.
-- `src/sim/sim.ts` — só **chamadas** pros módulos de cada um; evitar lógica inline. Cada comando novo numa linha própria.
-- `src/world_api.ts` (`IWorld`) — adicionar métodos no fim; avisar.
-- `src/sim/save.ts` — schema do save: Gabriel adiciona campos de equip/itens, Kevin... (na verdade Kevin é quem mexe em gear — ver abaixo). Coordenar quem toca o save.
-- `CLAUDE.md` — manter atualizado.
+**O único ponto onde itens e combate "se encontram" é:** os stats do equipamento (que o Kevin define) afetam o dano/defesa (que o Gabriel calcula). **Mas isso NÃO gera dependência de trabalho**, porque:
+- O jogo **hoje** já lê os stats do equipamento no cálculo (weapon damage, etc.). O Kevin **adiciona novos stats aos itens** (defesa, stats de peças/acessórios) no schema de item — isso é trabalho dele, no arquivo dele.
+- O Gabriel, quando for mexer em como o combate usa os stats (ex.: defesa reduz dano), lê os stats que **já existem na entidade** — não precisa esperar o Kevin nem editar os arquivos de item do Kevin.
+- Ou seja: o Kevin enche os itens de stats (frente dele); o Gabriel decide como o combate usa stats (frente dele). Cada um no seu arquivo, sem ordem obrigatória entre eles.
 
-**Ritmo de commit:** cada um commita suas fatias na ordem que terminar; como os arquivos são disjuntos, `git pull`/merge raramente conflita. Quando for mexer numa zona de coordenação, avisar no chat do time antes.
+**Tabela de domínios — arquivos 100% disjuntos:**
 
----
-
-### FRENTE GABRIEL — "Mundo & Combate Visível" ⭐ (prioridades do Shar no topo)
-
-O Gabriel cuida do que o jogador **vê e sente**: as classes, os efeitos visuais, o mundo e a cidade. Os 4 pontos que o Shar pediu estão no topo, em ordem.
-
-#### G1 — Variação de classes (Arqueiro, Mago, Espada&Escudo, Lança) ⭐ PRIORIDADE 1
-Hoje há 3 maestrias (Espada, Lança, Arco). Expandir pra um sistema de **classes** com identidade clara:
-- **Arqueiro** (já existe como Arco — formalizar): dano físico à distância.
-- **Mago** (NOVO): dano **mágico** à distância — introduz o conceito de dano mágico no jogo (hoje só há físico). É a maior novidade desta frente.
-- **Espada & Escudo** (formalizar a partir da Espada): tank — mais defesa/bloqueio, dano corpo-a-corpo.
-- **Lança**: dano corpo-a-corpo em área/perfurante (já existe — manter/ajustar).
-- Cada classe com seu kit de habilidades e papel. (Como o Silkroad faz mastery; manter o estilo de subir por SP que já existe.)
-- **Arquivos:** `src/sim/content/abilities*.ts`, `src/sim/combat_offense.ts` (dano físico vs mágico — coordenar com Kevin a assinatura). UI: livro de skills (já existe).
-
-#### G2 — Habilidades visuais à distância e curta (VFX) ⭐ PRIORIDADE 2
-Hoje todas as skills usam o mesmo flash genérico. Dar **efeitos visuais distintos** por habilidade:
-- Efeito de **fogo** (ex.: bola de fogo do Mago à distância), efeito de **projétil** (flecha do Arqueiro), efeito **corpo-a-corpo** (slash/cone da Espada/Lança).
-- Pode começar simples (um efeito de fogo bem feito já agrega muito) e expandir.
-- **Arquivos:** `src/render/vfx/*` (novo módulo de efeitos), chamado pelo render quando uma skill é usada. Não toca a lógica do sim (VFX é cosmético) → zero risco de conflito com o Kevin.
-
-#### G3 — Expansão do mapa-múndi (mobs por nível) ⭐ PRIORIDADE 3
-O vetor central do Silkroad: **múltiplas regiões, cada uma com mobs de uma faixa de nível** (igual Jangan 1–20, Donwhang 21–30...).
-- **Modelo de zonas** (`src/sim/zones.ts`): regiões como dados (id, faixa de nível, bounds, hub, spots de spawn).
-- **Spawn por zona:** mobs nascem nos spots de cada região, com as espécies/níveis daquela zona (reusa as espécies que já temos + novas). RNG separado por spot (determinismo).
-- **Mundo maior + biomas:** expandir o terreno (hoje 120×120) pra regiões distintas (campina → outra → outra). Render reusa floresta/pedra que sobram + assets novos se baixados.
-- **Aggro por nível:** mob muito acima do jogador fica mais perigoso/agressivo.
-- **Arquivos:** `src/sim/zones.ts`, `src/render/world/*`. Coordenação: `sim.ts` (chamada de spawn por zona — função própria), `protocol.ts` (zona no snapshot).
-
-#### G4 — Expansão da cidade estilo Silkroad (Jangan) ⭐ PRIORIDADE 4
-Transformar o hub atual numa **cidade de verdade** estilo Jangan: muralhas, portões, mais estruturas, NPCs, layout de cidade. Reusa o MegaKit (95% sobrando) + assets novos.
-- Cada região do G3 tem sua cidade-hub (vendor, revive, ponto de teleporte entre cidades).
-- **Teleporte** entre cidades (comando + custo de ouro).
-- **Arquivos:** `src/render/world/cities/*`, `src/sim/zones.ts` (hub como dado). UI de teleporte.
-
-#### G5 (suporte, se couber) — Mapa / minimapa
-Tela de mapa (tecla M) mostrando as regiões e a posição do jogador. (UI — `src/ui/map.ts`.)
-
-**Resumo de arquivos do Gabriel (próprios):** `src/sim/content/abilities*`, `src/sim/combat_offense.ts`, `src/sim/zones.ts`, `src/render/vfx/*`, `src/render/world/*`, `src/ui/map.ts`. **Coordenação:** `sim.ts` (chamadas próprias), `protocol.ts` (fim), `combat_offense×combat_defense` (assinatura combinada com Kevin).
-
----
-
-### FRENTE KEVIN — "Itens & Progressão de Gear"
-
-O Kevin cuida do que o jogador **ganha e veste**: a profundidade de equipamento que dá sentido a farmar nas zonas do Gabriel. Fecha também as ressalvas de "alquimia suave" do v0.2.
-
-#### K1 — Slots de equipamento completos (set Silkroad)
-De weapon+armor pro set completo: arma, **peças de armadura** (capacete, peito, mãos, pernas, pés), **escudo** (par com a classe Espada&Escudo do Gabriel), **acessórios** (colar, brinco, anel).
-- **Arquivos:** schema de item (`src/sim/content/items*`), `src/sim/equip*`, recompute de stats. UI: tela de equip (`src/ui/inventory.ts`/equip).
-
-#### K2 — Degrees (graus de gear por faixa de nível)
-Equipamento em tiers (1º grau, 2º grau...), cada grau melhor e pra uma faixa de nível, com requisito de nível pra equipar. Dá o "que vestir" progressivo nas zonas do Gabriel.
-- **Arquivos:** conteúdo de itens como dados (`src/sim/content/items*`) + regras de requisito.
-
-#### K3 — Defesa / mitigação de verdade
-Introduzir **armadura que reduz dano** (fecha a fórmula que falta do v0.2). Ligar Força→HP/defesa física, Int→defesa mágica (a defesa mágica casa com o Mago do Gabriel).
-- **Arquivo:** **`src/sim/combat_defense.ts`** (dono). Coordena com o `combat_offense.ts` do Gabriel só na assinatura combinada (seção 3.0). **Este é o ponto de contato com o Gabriel — combinar a função juntos uma vez, depois isolado.**
-
-#### K4 — Alquimia com risco real
-Na falha: **quebra** o item em "+" alto, **item de proteção** (piso na falha), **queda de múltiplos níveis**. Fecha a ressalva do v0.2 (a tensão "arrisco meu gear?" vira real, como no Silkroad).
-- **Arquivo:** `src/sim/enhance.ts` (já existe, estender).
-
-#### K5 — Armazém / banco na cidade
-Depósito/saque de itens num NPC de armazém (entra aqui porque é sobre itens/inventário). Persiste no save.
-- **Arquivos:** `src/sim/storage*`, `src/ui/storage.ts`. Coordenação: `save.ts` (novo schema — Kevin é o dono do schema de itens/banco no save).
-
-#### K6 (suporte) — Ficha de personagem como tela própria
-Tela dedicada de stats do personagem (hoje é uma linha na bolsa).
-- **Arquivo:** `src/ui/character_sheet.ts`.
-
-**Resumo de arquivos do Kevin (próprios):** `src/sim/content/items*`, `src/sim/equip*`, `src/sim/enhance.ts`, `src/sim/combat_defense.ts`, `src/sim/storage*`, `src/ui/inventory.ts`, `src/ui/storage.ts`, `src/ui/character_sheet.ts`. **Coordenação:** `combat_defense×combat_offense` (com Gabriel), `save.ts` (schema de itens), `protocol.ts` (fim).
-
----
-
-### Por que essa divisão não colide
-
-| Domínio | Gabriel | Kevin |
+| Domínio | GABRIEL | KEVIN |
 |---|---|---|
-| Combate | ofensivo (`combat_offense.ts`) | defensivo (`combat_defense.ts`) |
-| Mundo | zonas, cidades, render | — |
-| Visual | VFX, render | — |
-| Itens | — | gear, degrees, alquimia, banco |
-| UI | mapa, livro de skills | inventário, equip, ficha, banco |
+| Combate (ofensivo + defensivo) | `src/sim/combat*.ts` (dono total) | — (não toca) |
+| Habilidades / classes | `src/sim/content/abilities*` | — |
+| Mundo / zonas / spawn | `src/sim/zones.ts`, `src/render/world/*` | — |
+| Visual / VFX | `src/render/vfx/*` | — |
+| Definição de itens | — | `src/sim/content/items*` |
+| Equipar / stats de gear | — | `src/sim/equip*` |
+| Alquimia | — | `src/sim/enhance.ts` |
+| Banco / armazém | — | `src/sim/storage*` |
+| UI | `src/ui/map.ts`, livro de skills | `src/ui/inventory.ts`, `src/ui/storage.ts`, `src/ui/character_sheet.ts` |
 
-Os arquivos próprios são **disjuntos**. O único contato real é a **função de dano** (offense × defense), resolvida com módulos separados e uma assinatura combinada uma vez. Tudo o mais, cada um toca o seu — `git merge` flui sem conflito.
-
----
-
-## 4. Ordem sugerida de execução do v0.3
-
-1. **Combinar a assinatura do dano** (Gabriel + Kevin, juntos, 10 min): definir como `combat_offense.compute()` e `combat_defense.mitigate()` se encaixam no `sim.ts`. É o único ponto onde os dois se tocam — resolver primeiro, depois trabalham isolados.
-2. **Leva 1 — Fundação, em paralelo:**
-   - **Gabriel:** G1 classes (Mago/dano mágico) → G2 VFX → G3 mapa-múndi/zonas → G4 cidade.
-   - **Kevin:** K1 slots → K2 degrees → K3 defesa → K4 alquimia → K5 banco.
-   - Os dois fluem em paralelo; arquivos disjuntos.
-3. **Integração** (encontro Gabriel × Kevin): mobs por zona (Gabriel) dropam gear por grau coerente (Kevin) — loot tables por zona. E a defesa mágica (Kevin) casa com o dano mágico do Mago (Gabriel).
-4. **Pente-fino prioritário:** **crédito de boss por dano** (não último golpe) — fecha a ressalva do v0.2 de "derrubar juntos". (A alquimia com risco já está no K4.)
-5. **Leva 2 — Social/PvP:** escolher Job System OU Guildas+Fortress War, dividir entre os dois.
-6. **Leva 3+:** Quests, Dungeons, Union, Mounts, Áudio, Arena — conforme prioridade.
+### 3.2 Arquivos compartilhados — regra mínima
+Poucos arquivos são tocados pelos dois; regra: **adições sempre no fim, nunca reordenar, avisar o outro.**
+- `src/net/protocol.ts` — Gabriel adiciona msgs de zona/combate; Kevin de itens/banco. Sempre no fim.
+- `src/world_api.ts` (`IWorld`) — métodos novos no fim.
+- `src/sim/save.ts` — **Kevin é o dono** do schema de itens/gear/banco no save. Gabriel avisa só se precisar persistir zona atual.
+- `src/sim/sim.ts` — cada um adiciona só **chamadas** pro seu módulo, em linhas próprias (Gabriel: combate/zonas; Kevin: equip/alquimia/banco). Como são seções diferentes do arquivo e linhas próprias, não colidem.
 
 ---
 
-## 5. Princípios de engenharia (herdados do v0.2, mantidos)
+## 4. FRENTE GABRIEL — Mundo & Combate (prioridades do Shar no topo)
 
-- **Uma sim, vários hosts:** todo sistema novo roda igual em SP e MP, autoritativo no servidor. Estado de jogo no `src/sim/` determinístico; estado de lobby/sessão (como o matching) pode ficar no servidor.
-- **Determinismo sagrado:** os testes de determinismo do sim devem continuar passando. Sorteios usam RNG separado, nunca o principal. Offline nunca aciona sistemas multiplayer.
-- **Fidelidade primeiro:** clonar o comportamento do Silkroad, depois ajustar. (Como foi feito no Party.)
-- **Fatias pequenas, commit por fatia, revisão adversarial, teste do Shar com screenshots.**
-- **Coordenação de Git:** zonas de coordenação (protocol/sim/IWorld) com mudanças pequenas e avisadas; cada sistema no seu módulo.
+Gabriel cuida do que o jogador **vê e sente**: classes, efeitos, mundo, cidade — e é dono do **combate inteiro**. Ordem de prioridade (P1 → P4).
+
+### G1 — Variação de classes (PRIORIDADE 1)
+Transformar as 3 maestrias atuais (Espada/Lança/Arco) num sistema de **4 classes** com identidade:
+- **Arqueiro:** dano físico à distância (formaliza o Arco).
+- **Mago (NOVO):** dano **mágico** à distância — introduz o conceito de dano mágico no jogo (hoje só há físico). Maior novidade da frente.
+- **Espada & Escudo:** corpo-a-corpo tank/defensivo (formaliza a Espada).
+- **Lança:** corpo-a-corpo perfurante/área (mantém/ajusta).
+- Cada classe com kit de habilidades e papel; mantém o subir-por-SP (rank) que já existe.
+- **Como o combate é do Gabriel:** o Mago introduz `damageType: 'magical'` e, junto, a defesa mágica correspondente — tudo dentro dos arquivos de combate do Gabriel. Não depende do Kevin.
+- **Arquivos:** `src/sim/content/abilities*.ts`, `src/sim/combat*.ts` (dono). `world_api.ts` (adicionar 'mage' ao MasteryId, no fim).
+- **Commits:** `feat(sim): classe Mago e dano mágico` · `feat(content): kits de habilidade por classe`.
+
+### G2 — Habilidades visuais à distância e curta / VFX (PRIORIDADE 2)
+Efeito visual distinto por habilidade (hoje tudo usa o mesmo flash):
+- **Fogo** (bola de fogo do Mago) — começar por aqui. Depois **projétil** (flecha) e **corpo-a-corpo** (slash/cone).
+- **Arquivos:** `src/render/vfx/*` (novo). VFX é cosmético, não toca o sim — zero risco.
+- **Commit:** `feat(render): efeitos visuais de habilidades`.
+
+### G3 — Expansão do mapa-múndi com mobs por nível (PRIORIDADE 3)
+Múltiplas regiões, cada uma com mobs de uma faixa de nível (Jangan 1–20, Donwhang 21–30...):
+- **Modelo de zonas** (`src/sim/zones.ts`): regiões como dados (id, faixa de nível, bounds, hub, spots de spawn).
+- **Spawn por zona:** mobs nascem nos spots de cada região, com espécies/níveis daquela zona (RNG separado por spot).
+- **Mundo maior + biomas:** expandir o terreno (hoje 120×120) pra regiões distintas.
+- **Aggro por nível:** mob muito acima do jogador é mais perigoso.
+- **Sugestão de escopo:** 2–3 regiões pra começar (ajustável).
+- **Arquivos:** `src/sim/zones.ts`, `src/render/world/*`. Coordenação: `sim.ts` (spawn por zona — função própria), `protocol.ts` (zona no snapshot, no fim).
+- **Commits:** `feat(sim): sistema de zonas com mobs por nível` · `feat(render): biomas e mundo expandido`.
+
+### G4 — Expansão da cidade estilo Silkroad / Jangan (PRIORIDADE 4)
+Hub virando cidade de verdade (muralhas, portões, estruturas, layout):
+- Reusa o MegaKit (95% sobrando). Cada região tem cidade-hub (vendor, revive, teleporte).
+- Teleporte entre cidades (comando + custo de ouro).
+- **Arquivos:** `src/render/world/cities/*`, `src/sim/zones.ts` (hub como dado), UI de teleporte.
+- **Commits:** `feat(render): cidade-hub estilo Silkroad` · `feat(sim): teleporte entre cidades`.
+
+### G5 — Mapa / minimapa (suporte)
+Tela de mapa (tecla M) com as regiões e a posição. `src/ui/map.ts`. Commit: `feat(ui): mapa do mundo`.
+
+**Arquivos do Gabriel:** `combat*.ts`, `content/abilities*`, `zones.ts`, `render/vfx/*`, `render/world/*`, `ui/map.ts`. Compartilhados (no fim): `sim.ts` (chamadas próprias), `protocol.ts`, `world_api.ts`.
 
 ---
 
-## 6. Decisões pendentes (pra você, Shar)
+## 5. FRENTE KEVIN — Itens & Inventário (NÃO toca combate)
 
-1. **Confirmar a divisão da Leva 1:** Gabriel = Mundo & Combate Visível (classes, VFX, mapa-múndi, cidade) ‖ Kevin = Itens & Gear (degrees, peças, defesa, alquimia, banco)? Ou ajustar?
-2. **As 4 classes do Gabriel (G1):** Arqueiro, Mago, Espada&Escudo, Lança — confirma? O **Mago** introduz dano mágico (maior novidade). Alguma classe a mais/menos?
-3. **Quantas zonas** na primeira leva (G3)? Sugestão: 2–3 regiões (ex.: campina atual nv 1–10, 2ª região nv 10–20, talvez 3ª) — pra provar o sistema sem virar trabalho infinito de conteúdo.
-4. **Qual o 2º grande social** (Leva 2): Job System (trader/hunter/thief, PvP de caravana) ou Guildas+Fortress War (endgame PvP de cerco)?
-5. **Precisaremos baixar assets** pra biomas novos (deserto/caverna), efeitos de fogo, e talvez modelo do Mago — quer começar a garimpar (Quaternius/Poly Pizza/KayKit) em paralelo?
-6. **Cap de nível do v0.3:** até que nível o jogo vai? (Define quantas zonas e graus de gear.)
+Kevin cuida do que o jogador **ganha e veste** — sistemas de item/inventário auto-contidos. **Não toca combate, mundo, nem habilidades.**
+
+### K1 — Slots de equipamento completos (set Silkroad)
+De weapon+armor pro set completo: arma, **peças de armadura** (capacete, peito, mãos, pernas, pés), **escudo**, **acessórios** (colar, brinco, anel). Cada slot afeta os stats; recompute ao equipar/desequipar.
+- **Arquivos:** `src/sim/content/items*`, `src/sim/equip*`, UI `src/ui/inventory.ts`.
+- **Commit:** `feat(sim): slots de equipamento completos (armadura por peça, escudo, acessórios)`.
+
+### K2 — Degrees (graus de gear por faixa de nível)
+Equipamento em tiers (1º grau, 2º...), cada grau melhor e pra uma faixa de nível, com requisito de nível pra equipar.
+- **Arquivos:** `src/sim/content/items*` + regras de requisito.
+- **Commit:** `feat(content): graus de equipamento (degrees) por faixa de nível`.
+
+### K3 — Stats defensivos NOS ITENS (sem tocar o cálculo de combate)
+Os itens passam a ter **stat de defesa/armadura** (e stats de peças/acessórios). O Kevin **adiciona os stats ao schema do item e ao recompute da entidade** — NÃO mexe no cálculo de dano (isso é do Gabriel). Quando o Gabriel implementar "defesa reduz dano", ele lê o stat de defesa que o Kevin já pôs na entidade. Frentes independentes: Kevin enche o item de stats; Gabriel decide como o combate os usa.
+- **Arquivos:** `src/sim/content/items*`, `src/sim/equip*` (recompute). **NÃO toca `combat*.ts`.**
+- **Commit:** `feat(sim): stats defensivos no equipamento`.
+
+### K4 — Alquimia com risco real
+Na falha em "+" alto: **quebra** o item, **item de proteção** (piso), **queda de múltiplos níveis**. Fecha a ressalva do v0.2.
+- **Arquivo:** `src/sim/enhance.ts` (estender).
+- **Commit:** `feat(sim): alquimia com risco real (quebra, proteção, queda múltipla)`.
+
+### K5 — Armazém / banco na cidade
+Depósito/saque de itens num NPC de armazém. Persiste no save.
+- **Arquivos:** `src/sim/storage*`, `src/ui/storage.ts`. Coordenação: `save.ts` (Kevin é o dono do schema de itens/banco).
+- **Commit:** `feat(sim): armazém de itens na cidade`.
+
+### K6 — Ficha de personagem como tela própria (suporte)
+Tela dedicada de stats (hoje é uma linha na bolsa). `src/ui/character_sheet.ts`. Commit: `feat(ui): tela de ficha do personagem`.
+
+**Arquivos do Kevin:** `content/items*`, `equip*`, `enhance.ts`, `storage*`, `ui/inventory.ts`, `ui/storage.ts`, `ui/character_sheet.ts`. Compartilhados (no fim): `save.ts` (dono do schema de itens), `protocol.ts`, `sim.ts` (chamadas próprias de equip/alquimia/banco).
 
 ---
 
-*Fim do GDD v0.3 (rascunho para discussão). Nada implementado — é o mapa. Ajustamos as decisões da seção 6 e aí destravamos a Leva 1, com Gabriel em Mundo & Combate Visível e Kevin em Itens & Gear.*
+## 6. Ordem de execução (frentes em paralelo, sem dependência)
+
+**Não há "Ação Zero" nem ponto de sincronização obrigatório** — as frentes são independentes. Cada um segue sua ordem:
+
+- **Gabriel:** G1 classes (Mago + dano/defesa mágica, tudo no combate dele) → G2 VFX → G3 zonas → G4 cidade → G5 mapa.
+- **Kevin:** K1 slots → K2 degrees → K3 stats defensivos nos itens → K4 alquimia → K5 banco → K6 ficha.
+
+Cada um commita suas fatias quando terminar; como os arquivos são disjuntos, `git pull`/merge não conflita. **Integração natural (sem trabalho extra):** o stat de defesa que o Kevin põe nos itens (K3) é lido pelo combate do Gabriel quando ele implementar a mitigação — acontece sozinho, cada um no seu tempo.
+
+---
+
+## 7. Decisões do Shar (defaults marcados — ajustar se quiser)
+
+| # | Decisão | Default |
+|---|---|---|
+| 1 | Gabriel = Mundo & Combate (inteiro) · Kevin = Itens & Inventário (sem combate) | ✅ confirmada |
+| 2 | Classes do Gabriel | Arqueiro, Mago, Espada&Escudo, Lança |
+| 3 | Nº de zonas na Leva 1 (G3) | 2–3 regiões |
+| 4 | Cap de nível do v0.3 | *a definir* |
+| 5 | 2º grande social (Leva 2) | *a escolher:* Job System **ou** Guildas+Fortress War |
+| 6 | Baixar assets (biomas, fogo, modelo do Mago) | *a decidir* — Quaternius/Poly Pizza/KayKit |
+
+---
+
+## 8. Próximas fases (pós-Leva 1) — referência
+
+- **Leva 2 (social/PvP):** Job System (trader/hunter/thief) OU Guildas + Fortress War.
+- **Leva 3+:** Quests, Dungeons, Union (raid 32), Mounts, Áudio, PvP arena.
+- **Congelado (até aviso do Shar):** Trade P2P de itens, Login/contas. *(Job System trader/hunter/thief NÃO é o trade congelado.)*
+
+---
+
+*Plano de execução do v0.3 com frentes independentes. Gabriel (mundo & combate) e Kevin (itens & inventário) trabalham em paralelo, sem dependência cruzada, sem tocar os mesmos sistemas. Cada um commita no seu ritmo.*
