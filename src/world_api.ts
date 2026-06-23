@@ -20,7 +20,14 @@ export type Rarity = 'normal' | 'sos' | 'som' | 'sun';
 // Weapon mastery ("class") ids. The equipped weapon picks the active mastery
 // (its kit + passive + auto-attack reach); unarmed falls back to Sword. Defined
 // at the seam so weapon content, the sim, and the UI agree on the set.
-export type MasteryId = 'sword' | 'spear' | 'bow';
+export type MasteryId = 'sword' | 'spear' | 'bow' | 'mage';
+
+// How a hit is typed: 'physical' scales with Strength (sword/spear/bow), 'magical'
+// with Intelligence (the Mago's staff). The type drives BOTH which attribute
+// generates the damage and which defense reduces it (armor vs Int magic-resist).
+// Defined at the seam so content (masteries/abilities), the sim's combat, and the
+// UI agree on the set.
+export type DamageType = 'physical' | 'magical';
 
 // Enemy strength tier. Most mobs are 'normal'; tougher 'champion'/'elite' tiers
 // spawn occasionally with more HP/damage/reward and a bigger, distinct look.

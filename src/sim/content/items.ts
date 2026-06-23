@@ -43,6 +43,8 @@ export const ITEMS: Record<string, ItemDef> = {
   iron_spear: { id: 'iron_spear', name: 'Lança de Ferro', slot: 'weapon', mastery: 'spear', stats: { weaponDamage: 12 }, value: 45 },
   // a ranged weapon: switches to the Arco mastery (shoot from afar, kite, crit)
   short_bow: { id: 'short_bow', name: 'Arco Curto', slot: 'weapon', mastery: 'bow', stats: { weaponDamage: 8 }, value: 50 },
+  // a magical weapon: switches to the Mago mastery (ranged MAGICAL damage scaling with Int)
+  apprentice_staff: { id: 'apprentice_staff', name: 'Cajado de Aprendiz', slot: 'weapon', mastery: 'mage', stats: { weaponDamage: 9 }, value: 55 },
   // alchemy materials (no rarity; consumed to attempt a "+N" upgrade)
   elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', elixirFor: 'weapon', value: 15 },
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', elixirFor: 'armor', value: 15 },

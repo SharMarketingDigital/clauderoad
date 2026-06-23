@@ -19,6 +19,7 @@ export const VENDOR_STOCK: VendorStockEntry[] = [
   { itemId: 'health_potion', price: 25 },
   { itemId: 'iron_spear', price: 120 }, // switch to the Lança mastery (area + crit kit)
   { itemId: 'short_bow', price: 130 }, // switch to the Arco mastery (ranged + kiting kit)
+  { itemId: 'apprentice_staff', price: 130 }, // switch to the Mago mastery (ranged magical kit)
   { itemId: 'elixir_weapon', price: 40 },
   { itemId: 'elixir_armor', price: 40 },
   { itemId: 'lucky_powder', price: 60 },

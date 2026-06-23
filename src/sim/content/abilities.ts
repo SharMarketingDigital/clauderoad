@@ -4,7 +4,7 @@
 // the action bar and ability resolution. Numbers are provisional and grounded
 // loosely in a WoW-Classic profile (instant casts on the global cooldown that
 // cost resource and out-hit the auto-attack). Tune later.
-import type { StatusKind, MasteryId } from '../../world_api';
+import type { StatusKind, MasteryId, DamageType } from '../../world_api';
 import type { ItemStats } from './items';
 
 // A status effect an ability applies on cast. Durations in seconds (the sim
@@ -166,12 +166,57 @@ const BOW_ABILITIES: AbilityDef[] = [
   },
 ];
 
+// ---- Mago / Cajado: ranged MAGICAL damage scaling with Intelligence (G1). The first
+// class to deal magical damage (reduced by Int magic-resist, not armor). Reuses the
+// existing dot (burn) and slow (chill) effects — no new status kinds. (GDD: "Mago →
+// dano mágico à distância".)
+const MAGE_ABILITIES: AbilityDef[] = [
+  {
+    id: 'fireball',
+    name: 'Bola de Fogo',
+    slot: 1,
+    icon: '🔥', // fire — the Mago's signature ranged nuke
+    mpCost: 18,
+    cooldownSecs: 6,
+    kind: 'strike',
+    damageMultiplier: 3.0, // a big single-target hit (mirrors the bow's Tiro Carregado)
+    effects: [{ kind: 'dot', durationSecs: 2.0, magnitude: 3, periodSecs: 0.5 }], // lingering burn
+  },
+  {
+    id: 'flame_wave',
+    name: 'Onda de Chamas',
+    slot: 2,
+    icon: '🌋', // erupting flames — an arc that scorches everything in front
+    mpCost: 22,
+    cooldownSecs: 9,
+    kind: 'strike',
+    shape: 'cone',
+    damageMultiplier: 1.2, // per enemy caught in the wave
+    effects: [{ kind: 'dot', durationSecs: 2.0, magnitude: 2, periodSecs: 0.5 }], // burn on each
+  },
+  {
+    id: 'frost_bolt',
+    name: 'Lança de Gelo',
+    slot: 3,
+    icon: '❄', // frost — a chilling bolt that slows, the Mago's kiting tool
+    mpCost: 15,
+    cooldownSecs: 7,
+    kind: 'strike',
+    damageMultiplier: 1.5,
+    effects: [{ kind: 'slow', durationSecs: 3.0, magnitude: 0.5 }], // chill -> kiting
+  },
+];
+
 export interface MasteryDef {
   id: MasteryId;
   name: string;
   ranged: boolean; // ranged masteries shoot at distance (no frontal facing gate; pivot to fire)
   attackRange?: number; // units the auto-attack/abilities reach (undefined -> the sim's melee range)
   baseCrit?: number; // always-on crit chance (0..1) — the Arco "precision" passive
+  // Damage type this mastery's auto-attack and abilities deal (default 'physical').
+  // The Mago is 'magical' (scales with Int, reduced by magic-resist). Omitting it
+  // keeps the physical classes byte-identical.
+  damageType?: DamageType;
   passive: ItemStats; // always-on bonus folded into stats while this mastery is active
   abilities: AbilityDef[];
 }
@@ -201,6 +246,16 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     baseCrit: 0.15, // GDD: "Arco — passivo: aumenta precisão" (a steady chance to crit)
     passive: {},
     abilities: BOW_ABILITIES,
+  },
+  mage: {
+    id: 'mage',
+    name: 'Mago',
+    ranged: true, // casts from range, pivoting to fire (like the bow)
+    attackRange: 12, // staff reach — a bit shorter than the bow's 14
+    baseCrit: 0.05, // crit comes from the WEAPON (a small steady chance); Int does NOT add crit
+    damageType: 'magical', // staff hits scale with Int and are reduced by magic-resist
+    passive: { maxMp: 30 }, // a caster's deeper mana pool
+    abilities: MAGE_ABILITIES,
   },
 };
 

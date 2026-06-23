@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Entity, ItemStack } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
-  StatusKind, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
+  StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES } from './content/classes';
 import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID } from './content/enemies';
@@ -857,7 +857,7 @@ export class Sim implements IWorld {
     // Auto-attack: a basic physical weapon swing (no ability). compute() does the same crit
     // roll the old rollCrit did; combat.mitigate (inside hitEnemy) is passthrough today.
     this.hitEnemy(t, combat.compute({
-      attacker: p, rank: 1, damageType: 'physical', critChance: this.critChance(p), rng: this.rng,
+      attacker: p, rank: 1, damageType: this.damageTypeOf(p), critChance: this.critChance(p), rng: this.rng,
     }), p);
   }
 
@@ -1665,6 +1665,12 @@ export class Sim implements IWorld {
   private attackRange(p: Entity): number {
     return this.activeMastery(p).attackRange ?? MELEE_RANGE;
   }
+  // The damage type this attacker's hits deal — the active mastery's type (the Mago's
+  // staff is 'magical'; sword/spear/bow are 'physical'). Resolved here so the
+  // auto-attack and every cast of a given mastery agree.
+  private damageTypeOf(p: Entity): DamageType {
+    return this.activeMastery(p).damageType ?? 'physical';
+  }
 
   // Cast an action-bar ability from the active mastery's kit. Gated by the global
   // cooldown, the ability's own cooldown, MP, and (for targeted strikes) range —
@@ -1698,7 +1704,7 @@ export class Sim implements IWorld {
         // One compute() per enemy => one crit roll per enemy, exactly as the old per-enemy
         // rollCrit. Same rng draw order, so the hash is unchanged.
         this.hitEnemy(e, combat.compute({
-          attacker: p, ability: def, rank: this.skillRank(p, def), damageType: 'physical',
+          attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
           critChance: this.critChance(p), rng: this.rng,
         }), p);
         if (e.hp > 0) this.applyCastEffects(e, def, p);
@@ -1734,7 +1740,7 @@ export class Sim implements IWorld {
     }
     this.commitCast(p, def, slot);
     this.hitEnemy(t, combat.compute({
-      attacker: p, ability: def, rank: this.skillRank(p, def), damageType: 'physical',
+      attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
       critChance: this.critChance(p), rng: this.rng,
     }), p);
     // Debuff the target — only if it survived the hit.

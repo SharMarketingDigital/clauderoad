@@ -55,7 +55,9 @@ import {
   VENDOR_STOCK,
 } from '../src/sim/content/vendor';
 import type { Command } from '../src/world_api';
-import type { ItemStack } from '../src/sim/types';
+import type { ItemStack, Entity } from '../src/sim/types';
+import { spellDamage, spellAbilityDamage, INT_TO_DAMAGE, mitigate, MAGIC_DEF_PER_INT } from '../src/sim/combat';
+import type { Damage } from '../src/sim/combat';
 
 // Run a FIXED, scripted command sequence against a fresh Sim and return the
 // world fingerprint. This is how we prove the core invariant: determinism.
@@ -2990,5 +2992,139 @@ describe('sim invariants (static guard)', () => {
       }
       expect(forbiddenImport.test(code), `${f} must not import render/ui/game/net/three`).toBe(false);
     }
+  });
+});
+
+// Buy the Cajado de Aprendiz from the vendor (it isn't a drop) and equip it, switching
+// the character to the Mago mastery. Mirrors equipSpear; all deterministic.
+function equipStaff(sim: Sim): void {
+  const playerOf = () => sim.entities().find((e) => e.kind === 'player')!;
+  const price = VENDOR_STOCK.find((s) => s.itemId === 'apprentice_staff')!.price;
+  let guard = 0;
+  while (playerOf().gold < price && guard++ < 400) killNearestEnemy(sim);
+  for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
+    const p = playerOf();
+    sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
+    sim.step();
+  }
+  sim.sendCommand({ t: 'set-target', id: null });
+  sim.sendCommand({ t: 'buy', itemId: 'apprentice_staff' });
+  sim.sendCommand({ t: 'stop' });
+  sim.step();
+  const staff = sim.inventory().stacks.find((s) => s.itemId === 'apprentice_staff');
+  if (staff) {
+    sim.sendCommand({ t: 'equip', itemId: 'apprentice_staff', rarity: staff.rarity, plus: staff.plus });
+    sim.step();
+  }
+  restoreToFull(sim); // farming can leave the player hurt; reset to a clean full-HP baseline
+}
+
+// The Mago mastery (G1): the first class to deal MAGICAL damage, scaling with Intelligence
+// (the mirror of how physical scales with Strength). Crit still comes from the weapon.
+describe('mage mastery (Mago) — magical damage (Int)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const FIREBALL = MASTERIES.mage.abilities.find((a) => a.slot === 1)!;
+  const nearestWolf = (sim: Sim) => {
+    const p = player(sim);
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
+    wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    return wolves[0];
+  };
+
+  it('spellDamage scales with Int, mirroring meleeDamage/Str (INT_TO_DAMAGE === STR_TO_DAMAGE)', () => {
+    expect(INT_TO_DAMAGE).toBe(STR_TO_DAMAGE); // the two attributes scale damage identically by design
+    expect(spellDamage(0, 9)).toBe(9); // a fresh (Int 0) staff-user does just the staff's weapon damage
+    expect(spellDamage(20, 9)).toBe(9 + Math.floor(20 * INT_TO_DAMAGE));
+    expect(spellDamage(40, 9)).toBeGreaterThan(spellDamage(20, 9)); // more Int -> more magical damage
+    expect(spellDamage(20, 12)).toBeGreaterThan(spellDamage(20, 9)); // a better staff -> more damage
+    expect(spellDamage(20, 9)).toBe(meleeDamage(20, 9)); // exact mirror of the physical base (same k)
+    // a magical ability scales the spell base by its multiplier (mirror of abilityDamage)
+    expect(spellAbilityDamage(FIREBALL, 20, 9)).toBe(Math.round(spellDamage(20, 9) * (FIREBALL.damageMultiplier ?? 0)));
+  });
+
+  it('mitigate: Int magic-resist reduces magical damage; physical is untouched; Int 0 takes full', () => {
+    const t40 = { baseInt: 40 } as unknown as Entity; // mitigate only reads baseInt off the target
+    const t0 = { baseInt: 0 } as unknown as Entity; // every enemy today (Int 0)
+    const magical: Damage = { amount: 30, type: 'magical', crit: false };
+    const physical: Damage = { amount: 30, type: 'physical', crit: false };
+    expect(mitigate({ hit: magical, target: t40 })).toBe(Math.max(0, 30 - Math.floor(40 * MAGIC_DEF_PER_INT)));
+    expect(mitigate({ hit: magical, target: t40 })).toBeLessThan(30); // resisted
+    expect(mitigate({ hit: magical, target: t0 })).toBe(30); // Int 0 -> full magical damage (player nukes mobs)
+    expect(mitigate({ hit: physical, target: t40 })).toBe(30); // physical ignores magic-resist (passthrough)
+  });
+
+  it('equipping the staff swaps the action bar to the Mago kit; unequipping restores the sword', () => {
+    const sim = new Sim(7);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    equipStaff(sim);
+    expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('apprentice_staff');
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Bola de Fogo', 'Onda de Chamas', 'Lança de Gelo']);
+    sim.sendCommand({ t: 'unequip', slot: 'weapon' });
+    sim.step();
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+  });
+
+  it('Bola de Fogo deals magical (Int-scaled) damage in-game, distinct from the physical (Str) formula', () => {
+    const sim = new Sim(7);
+    equipStaff(sim);
+    // approach a wolf WITHOUT a target (no premature auto-attack) into staff range
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    let wid = -1;
+    for (let i = 0; i < 1500; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (!w) { sim.step(); continue; }
+      if (Math.hypot(w.x - p.x, w.z - p.z) <= MASTERIES.mage.attackRange!) { wid = w.id; break; }
+      sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+    }
+    expect(wid).not.toBe(-1);
+
+    const p = player(sim);
+    // p.int is the player's Intelligence (0 here — no points spent); p.weaponDamage includes the staff.
+    const expectedMagical = spellAbilityDamage(FIREBALL, p.int, p.weaponDamage);
+    const expectedPhysical = abilityDamage(FIREBALL, p.str, p.weaponDamage);
+    expect(expectedMagical).not.toBe(expectedPhysical); // meaningful: Int (0) and Str (20) paths differ
+
+    const before = sim.recentEvents();
+    const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+    sim.sendCommand({ t: 'set-target', id: wid });
+    sim.sendCommand({ t: 'use-ability', slot: 1 }); // Bola de Fogo
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+
+    const hits = sim.recentEvents()
+      .filter((e) => e.seq > lastSeq && e.kind === 'damage' && e.targetId === wid)
+      .map((e) => e.amount);
+    expect(hits.length).toBeGreaterThan(0); // the cast landed a damage event
+    const isMagical = (a: number) => a === expectedMagical || a === Math.round(expectedMagical * CRIT_MULT);
+    expect(hits.some(isMagical)).toBe(true); // used the MAGICAL (Int) formula (or its weapon-crit double)
+    expect(hits).not.toContain(expectedPhysical); // NOT the physical (Str) formula
+    expect(hits).not.toContain(Math.round(expectedPhysical * CRIT_MULT));
+  });
+
+  it('a Mago cast stream is deterministic (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      equipStaff(sim);
+      for (let i = 0; i < 400; i++) {
+        const p = player(sim);
+        const w = nearestWolf(sim);
+        if (w) {
+          sim.sendCommand({ t: 'set-target', id: w.id });
+          sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        }
+        sim.sendCommand({ t: 'use-ability', slot: 1 }); // press Bola de Fogo (no-op when not castable)
+        sim.step();
+      }
+      return sim.hash();
+    };
+    const h7a = run(7);
+    const h7b = run(7);
+    const h123 = run(123);
+    expect(h7a).toBe(h7b);
+    expect(h7a).not.toBe(h123);
   });
 });
