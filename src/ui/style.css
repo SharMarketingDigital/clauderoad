@@ -327,6 +327,7 @@ html, body {
   top: 80px;
   width: 240px;
   padding: 10px;
+  pointer-events: auto; /* HUD root is pointer-events:none; opt back in so vendor buttons get clicks */
   background: rgba(12, 16, 22, 0.92);
   border: 1px solid var(--gold);
   border-radius: 8px;
