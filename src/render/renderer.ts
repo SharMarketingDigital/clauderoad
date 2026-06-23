@@ -1,8 +1,9 @@
 // Three.js renderer. It READS the world (via IWorld) and draws it.
 // It must NEVER mutate the world or decide gameplay outcomes.
 import * as THREE from 'three';
-import type { IWorld, EntityKind, EntityView } from '../world_api';
+import type { IWorld, EntityKind, EntityView, MasteryId } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
+import { MASTERY_MODEL } from './class_models';
 import { PlayerAvatars } from './player_avatars';
 import { EnemyAvatars } from './enemy_avatars';
 import { NpcAvatar } from './npc_avatar';
@@ -34,10 +35,15 @@ export class Renderer {
   private lastRenderMs = 0;
   private projV = new THREE.Vector3(); // scratch for project()
 
-  // The local player's animated 3D avatar (KayKit Knight). Loads async; until it's
-  // ready the player stays a capsule. All state below is presentation-derived from
-  // IWorld each frame — the sim is never touched.
-  private playerAvatar = new PlayerAvatar();
+  // The local player's animated 3D avatar, skinned to its class (Knight/Barbarian/Ranger/
+  // Mage). Rebuilt when the class changes (the entry class-select); null + capsule until the
+  // local player's mastery is known. All state below is presentation-derived from IWorld each
+  // frame — the sim is never touched.
+  private playerAvatar: PlayerAvatar | null = null;
+  private playerAvatarMastery: MasteryId | null = null;
+  // Avatars replaced by a class change, kept until the new one is ready so the old skin stays
+  // visible during the swap; disposed (GPU resources freed) once the replacement is live.
+  private outgoingAvatars: PlayerAvatar[] = [];
   private lastCd = new Map<number, number>(); // per ability slot: last cooldown — a jump up means it was just cast
   private lastSeenSeq = 0; // cursor over sim events, to spot NEW hits we dealt (own, separate from main.ts)
   private playerPrevX = 0;
@@ -173,6 +179,7 @@ export class Renderer {
     const dt = this.lastRenderMs ? Math.min(0.1, (nowMs - this.lastRenderMs) / 1000) : 0;
     this.lastRenderMs = nowMs;
 
+    this.syncLocalAvatarModel(world);
     this.sync(world);
     this.applyFlashes(dt);
     this.updatePlayerAvatar(world, dt);
@@ -228,11 +235,36 @@ export class Renderer {
     }
   }
 
+  // Pick the local player's body skin from its class (weapon mastery), (re)building the
+  // PlayerAvatar when the class changes — e.g. the entry class-select swaps Sword -> Mago.
+  // The swap rides the existing sync() path: the old avatar stays visible until the new one
+  // finishes loading. Presentation only — reads IWorld, never mutates it.
+  private syncLocalAvatarModel(world: IWorld): void {
+    const id = world.localPlayerId();
+    if (id == null) return;
+    const p = world.entities().find((e) => e.id === id);
+    if (!p) return;
+    if (this.playerAvatarMastery !== p.mastery) {
+      this.playerAvatarMastery = p.mastery;
+      // Retire the current avatar (don't dispose yet — it stays on screen until the new one
+      // finishes loading; sync() swaps the root). The new one starts loading immediately.
+      if (this.playerAvatar) this.outgoingAvatars.push(this.playerAvatar);
+      this.playerAvatar = new PlayerAvatar(MASTERY_MODEL[p.mastery]);
+    }
+    // Once the replacement is ready, sync() (later THIS frame) removes the old root from the
+    // scene, so the retired avatars can be disposed — freeing their GPU resources.
+    if (this.outgoingAvatars.length && this.playerAvatar?.ready) {
+      for (const a of this.outgoingAvatars) a.dispose();
+      this.outgoingAvatars = [];
+    }
+  }
+
   // Drive the player's animated avatar from world state (presentation only):
   // idle vs walk by movement, and a one-shot attack swing on auto-attack / Golpe
   // Forte. Everything here READS IWorld; it never mutates the sim.
   private updatePlayerAvatar(world: IWorld, dt: number): void {
-    if (!this.playerAvatar.ready) return;
+    const av = this.playerAvatar;
+    if (!av?.ready) return;
     const id = world.localPlayerId();
     if (id == null) return;
     const p = world.entities().find((e) => e.id === id);
@@ -271,12 +303,12 @@ export class Renderer {
     // (Postura) -> no swing for now. Otherwise a plain auto-attack swings (gated so a
     // bleed tick can't spam it mid-swing).
     if (castSlot !== 0 && dealt) {
-      this.playerAvatar.triggerAttack(castSlot === 1);
-    } else if (dealt && !this.playerAvatar.isSwinging()) {
-      this.playerAvatar.triggerAttack(false);
+      av.triggerAttack(castSlot === 1);
+    } else if (dealt && !av.isSwinging()) {
+      av.triggerAttack(false);
     }
 
-    this.playerAvatar.update(dt, moving);
+    av.update(dt, moving);
   }
 
   // Drive each REMOTE player's Knight: idle vs walk from its interpolated position
@@ -312,9 +344,9 @@ export class Renderer {
   private desiredRoot(e: EntityView, localId: number | null): THREE.Object3D | null {
     if (e.kind === 'player') {
       // The single PlayerAvatar is the LOCAL player's (it carries the attack swing).
-      if (e.id === localId) return this.playerAvatar.ready ? this.playerAvatar.root : null;
-      // Every OTHER player gets its own cloned Knight (one loaded model, cloned per id).
-      return this.playerAvatars.rootFor(e.id, e.x, e.z);
+      if (e.id === localId) return this.playerAvatar?.ready ? this.playerAvatar.root : null;
+      // Every OTHER player gets its own cloned model for its class (one template per mastery).
+      return this.playerAvatars.rootFor(e.id, e.x, e.z, e.mastery);
     }
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
     if (e.kind === 'npc') return this.vendorAvatar.ready ? this.vendorAvatar.root : null; // the vendor

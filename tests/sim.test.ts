@@ -3158,6 +3158,23 @@ describe('class selection (G1)', () => {
     }
   });
 
+  it('each class exposes its mastery on the entity view (drives the per-class skin)', () => {
+    const localPlayer = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+    expect(localPlayer(new Sim(7)).mastery).toBe('sword'); // fresh/unarmed -> the default Sword skin (Knight)
+    const skins: Record<string, string> = {
+      swordshield: 'sword', // Knight
+      spear: 'spear', // Barbarian
+      archer: 'bow', // Ranger
+      mage: 'mage', // Mage
+    };
+    for (const [classId, mastery] of Object.entries(skins)) {
+      const sim = new Sim(7);
+      sim.sendCommand({ t: 'select-class', classId });
+      sim.step();
+      expect(localPlayer(sim).mastery).toBe(mastery);
+    }
+  });
+
   it('does NOT overwrite an already-equipped weapon (option b — protects upgraded gear)', () => {
     const sim = new Sim(7);
     sim.sendCommand({ t: 'select-class', classId: 'spear' }); // fresh -> equips the spear

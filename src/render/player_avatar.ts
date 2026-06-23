@@ -1,11 +1,13 @@
-// Loads the KayKit Knight (GLB) and drives it for the local player: Rig_Medium
-// idle/walk clips via an AnimationMixer, sword + shield parented to the hand-slot
-// bones, and a procedural attack swing layered on top of the clip pose.
+// Loads the local player's CLASS model (GLB) and drives it: Rig_Medium idle/walk clips
+// via an AnimationMixer, sword + shield parented to the hand-slot bones, and a procedural
+// attack swing layered on top of the clip pose. The model URL comes from the player's class
+// (Knight/Barbarian/Ranger/Mage — see class_models.ts); all four share the Rig_Medium rig,
+// so this code is identical for every skin.
 //
 // Presentation only. It reads nothing from the world — the renderer tells it when
 // the player moves/attacks (derived from IWorld) and feeds it the host delta time.
 //
-// NOTE on rigs: the Knight uses KayKit's "Rig_Medium" skeleton (bones upperarm.l,
+// NOTE on rigs: every class skin uses KayKit's "Rig_Medium" skeleton (bones upperarm.l,
 // handslot.r, ...). Its animations therefore come from the Adventurers pack's own
 // Rig_Medium_*.glb — NOT KayKit_AnimatedCharacter_v1.2.glb, which is a different,
 // incompatible 6-bone rig. There is no melee-attack clip in the free Rig_Medium
@@ -70,11 +72,32 @@ function findNode(root: THREE.Object3D, gltfName: string): THREE.Object3D | unde
   return found;
 }
 
+// Free a standalone avatar's GPU resources (geometry + materials + their textures). Used only
+// for the LOCAL PlayerAvatar, which OWNS everything it loads — unlike the remote clones, which
+// share geometry/textures with their template and so dispose only their cloned materials.
+function disposeAvatar(obj: THREE.Object3D): void {
+  obj.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry?.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      if (!mat) continue;
+      for (const key of Object.keys(mat)) {
+        const val = (mat as unknown as Record<string, unknown>)[key];
+        if (val && (val as { isTexture?: boolean }).isTexture) (val as THREE.Texture).dispose();
+      }
+      mat.dispose();
+    }
+  });
+}
+
 export class PlayerAvatar {
   // The renderer parents this into the scene and sets its position/rotation each
   // frame (like any other entity mesh). Empty until the GLB finishes loading.
   readonly root = new THREE.Group();
   ready = false;
+  private disposed = false; // set by dispose(); a load() still in flight then releases instead of attaching
 
   private mixer?: THREE.AnimationMixer;
   private idle?: THREE.AnimationAction;
@@ -91,7 +114,8 @@ export class PlayerAvatar {
   private swingFlip = false; // toggles \ <-> / each swing
   private readonly tmpQ = new THREE.Quaternion();
 
-  constructor() {
+  // `modelUrl` is the class skin to load (e.g. /models/Mage.glb) — see class_models.ts.
+  constructor(private readonly modelUrl: string) {
     // Fire-and-forget async load; the game keeps running on the capsule fallback
     // until `ready` flips true. A failure just logs and leaves the capsule in place.
     this.load().catch((err) => console.error('[PlayerAvatar] failed to load', err));
@@ -99,29 +123,37 @@ export class PlayerAvatar {
 
   private async load(): Promise<void> {
     const loader = new GLTFLoader();
-    const [knight, general, movement, sword, shield] = await Promise.all([
-      loader.loadAsync('/models/Knight.glb'),
+    const [char, general, movement, sword, shield] = await Promise.all([
+      loader.loadAsync(this.modelUrl),
       loader.loadAsync('/models/Rig_Medium_General.glb'), // Idle_A, Hit_A, ... (same rig as the Knight)
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'), // Walking_A/B/C, Running_A/B
       loader.loadAsync('/models/sword_1handed.gltf'),
       loader.loadAsync('/models/shield_round.gltf'),
     ]);
+    if (this.disposed) {
+      // Replaced (the class changed) before the model finished loading: drop the just-decoded
+      // GPU resources instead of leaking them on an orphaned root that is never shown.
+      disposeAvatar(char.scene);
+      disposeAvatar(sword.scene);
+      disposeAvatar(shield.scene);
+      return;
+    }
 
-    const knightObj = knight.scene;
+    const charObj = char.scene;
     // Auto-fit to the world: scale to TARGET_HEIGHT and drop the feet onto y=0,
     // so it works regardless of the model's native units.
-    let box = new THREE.Box3().setFromObject(knightObj);
+    let box = new THREE.Box3().setFromObject(charObj);
     const h = box.max.y - box.min.y || 1;
-    knightObj.scale.setScalar(TARGET_HEIGHT / h);
-    box = new THREE.Box3().setFromObject(knightObj);
-    knightObj.position.y = -box.min.y;
-    knightObj.rotation.y = MODEL_FORWARD_Y;
-    this.root.add(knightObj);
+    charObj.scale.setScalar(TARGET_HEIGHT / h);
+    box = new THREE.Box3().setFromObject(charObj);
+    charObj.position.y = -box.min.y;
+    charObj.rotation.y = MODEL_FORWARD_Y;
+    this.root.add(charObj);
 
-    // Animations bind by bone name; the Rig_Medium clips target the same bones the
-    // Knight skin uses, so the mixer drives the Knight even though the clips ship in
+    // Animations bind by bone name; the Rig_Medium clips target the same bones every
+    // class skin uses, so the mixer drives the character even though the clips ship in
     // separate GLBs.
-    this.mixer = new THREE.AnimationMixer(knightObj);
+    this.mixer = new THREE.AnimationMixer(charObj);
     const clips = [...general.animations, ...movement.animations];
     const byName = (name: string): THREE.AnimationClip | undefined => clips.find((c) => c.name === name);
     const idleClip = byName('Idle_A');
@@ -134,11 +166,11 @@ export class PlayerAvatar {
     if (walkClip) this.walk = this.mixer.clipAction(walkClip);
 
     // Weapons -> KayKit's dedicated hand-slot bones (modeled for identity attach).
-    const handR = findNode(knightObj, 'handslot.r');
-    const handL = findNode(knightObj, 'handslot.l');
+    const handR = findNode(charObj, 'handslot.r');
+    const handL = findNode(charObj, 'handslot.l');
     if (handR) handR.add(sword.scene);
     if (handL) handL.add(shield.scene);
-    this.swingBone = findNode(knightObj, 'upperarm.r');
+    this.swingBone = findNode(charObj, 'upperarm.r');
 
     // A skinned mesh's static bounding box doesn't track the animated pose, so it
     // can get wrongly frustum-culled; disable culling on the whole avatar.
@@ -148,6 +180,14 @@ export class PlayerAvatar {
     });
 
     this.ready = true;
+  }
+
+  // Free this avatar's GPU resources. The renderer calls this when the local player's class
+  // changes and a new PlayerAvatar replaces this one (after the new one is on screen).
+  dispose(): void {
+    this.disposed = true; // a load() still in flight will release what it decoded (see load())
+    this.mixer?.stopAllAction();
+    disposeAvatar(this.root);
   }
 
   isSwinging(): boolean {

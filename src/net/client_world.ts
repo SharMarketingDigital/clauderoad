@@ -230,6 +230,7 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
     level: 1, xp: 0, xpToNext: 1, attrPoints: 0,
     gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: s.weaponPlus,
     boss: s.boss, tier: s.tier, species: s.species, hostile: s.hostile, dead: s.dead, statuses: s.statuses,
+    mastery: s.mastery, // the remote player's class skin selector (from the snapshot)
   };
 }
 

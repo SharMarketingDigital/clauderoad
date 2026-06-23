@@ -361,6 +361,7 @@ export class ServerWorld {
         dead: e.dead,
         weaponPlus: e.weaponPlus, // so OTHER players' weapon glow renders (not just the local one)
         statuses: [...e.statuses], // so stun/slow/bleed indicators show on every entity in MP
+        mastery: e.mastery, // so each remote player renders with their class skin
       });
     }
     const events: NetEvent[] = [];

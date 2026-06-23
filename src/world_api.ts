@@ -71,6 +71,10 @@ export interface EntityView {
   readonly hostile: boolean; // an enemy currently aggroed on the player (chasing or, for the rooted boss, biting in melee)
   readonly dead: boolean; // a downed player in the "spirit" state, awaiting respawn
   readonly statuses: ReadonlyArray<StatusKind>; // active status-effect kinds (for the on-target indicator)
+  // The player's class skin selector: the active weapon mastery ('sword' when unarmed). The
+  // renderer maps this to the per-class character model (Knight/Barbarian/Ranger/Mage). Players
+  // carry their real mastery; enemies/NPCs report the default ('sword') and the renderer ignores it.
+  readonly mastery: MasteryId;
 }
 
 // One stack in the player's bag, with the item's display name resolved.

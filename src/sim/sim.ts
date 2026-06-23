@@ -790,6 +790,9 @@ export class Sim implements IWorld {
         hostile: e.kind === 'enemy' && e.targetId != null,
         dead: e.kind === 'player' && e.deadUntil !== 0,
         statuses: e.effects.map((s) => s.kind),
+        // The player's class skin = its active weapon mastery (unarmed -> Sword). Only players
+        // have one; enemies/NPCs report the default and the renderer ignores it for them.
+        mastery: e.kind === 'player' ? this.activeMastery(e).id : DEFAULT_MASTERY,
       });
     }
     return out;
