@@ -17,7 +17,7 @@ import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
-import { CLASSES } from './content/classes';
+import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
 import {
   ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID,
   levelHpMult, levelDamageMult, levelRewardMult,
@@ -1170,10 +1170,30 @@ export class Sim implements IWorld {
       case 'sell':
         this.sell(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
+      case 'select-class':
+        this.selectClass(p, cmd.classId);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
     }
+  }
+
+  // ---------- class selection (GDD G1) ----------
+  // Apply a chosen starter class: equip its starter weapon (which activates that class's
+  // mastery/kit) — but ONLY for a FRESH character with no weapon yet. A returning/equipped
+  // player keeps their gear (option b: the screen is then just "confirm your class", never
+  // wiping an upgraded +N weapon). Deterministic (no Rng); the player can swap weapons after.
+  private selectClass(p: Entity, classId: string): void {
+    const cls = PLAYER_CLASS_BY_ID[classId];
+    if (!cls) return; // unknown class -> ignore
+    if (p.equipment.weapon != null) return; // option (b): never overwrite an existing weapon
+    const def = ITEMS[cls.weaponId];
+    if (!def || def.slot !== 'weapon') return; // misconfigured class -> ignore
+    p.equipment.weapon = { itemId: cls.weaponId, rarity: 'normal', plus: 0, durability: MAX_DURABILITY };
+    this.recomputeStats(p); // fold the weapon (+ its mastery passive) into effective stats
+    p.hp = p.maxHp; // a fresh character starts at full with its class kit
+    p.mp = p.maxMp;
   }
 
   // ---------- equipment ----------

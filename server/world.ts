@@ -127,6 +127,13 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
         }
         return;
+      case 'select-class':
+        // The sim resolves the class -> starter weapon and only applies it to a fresh
+        // (unarmed) character, so this can't be abused to re-roll an equipped weapon.
+        if (typeof cmd.classId === 'string' && cmd.classId.length > 0 && cmd.classId.length <= 32) {
+          this.sim.sendCommandFor(id, { t: 'select-class', classId: cmd.classId });
+        }
+        return;
       // --- Layer 4: auto-play (each player toggles ITS OWN bot) ---
       case 'set-bot':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-bot', on: cmd.on });

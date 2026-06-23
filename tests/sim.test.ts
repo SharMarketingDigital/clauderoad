@@ -3130,3 +3130,59 @@ describe('mage mastery (Mago) — magical damage (Int)', () => {
     expect(h7a).not.toBe(h123);
   });
 });
+
+describe('class selection (G1)', () => {
+  const weaponOf = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId;
+
+  it('a fresh player picks a class and gets that class starter weapon + kit', () => {
+    const sim = new Sim(7);
+    expect(weaponOf(sim)).toBeNull(); // fresh: unarmed (default Sword kit)
+    sim.sendCommand({ t: 'select-class', classId: 'archer' });
+    sim.step();
+    expect(weaponOf(sim)).toBe('short_bow');
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento']);
+  });
+
+  it('each class maps to its mastery kit', () => {
+    const kits: Record<string, string[]> = {
+      swordshield: ['Golpe Forte', 'Postura Defensiva', 'Atordoamento'],
+      spear: ['Estocada', 'Varredura', 'Investida', 'Fúria'],
+      archer: ['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento'],
+      mage: ['Bola de Fogo', 'Onda de Chamas', 'Lança de Gelo'],
+    };
+    for (const [classId, names] of Object.entries(kits)) {
+      const sim = new Sim(7);
+      sim.sendCommand({ t: 'select-class', classId });
+      sim.step();
+      expect(sim.abilities().map((a) => a.name)).toEqual(names);
+    }
+  });
+
+  it('does NOT overwrite an already-equipped weapon (option b — protects upgraded gear)', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'select-class', classId: 'spear' }); // fresh -> equips the spear
+    sim.step();
+    expect(weaponOf(sim)).toBe('iron_spear');
+    sim.sendCommand({ t: 'select-class', classId: 'mage' }); // already armed -> ignored
+    sim.step();
+    expect(weaponOf(sim)).toBe('iron_spear'); // unchanged
+  });
+
+  it('ignores an unknown class id (stays unarmed)', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'select-class', classId: 'wizard999' });
+    sim.step();
+    expect(weaponOf(sim)).toBeNull();
+  });
+
+  it('class selection is deterministic (same seed => identical hash)', () => {
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      sim.sendCommand({ t: 'select-class', classId: 'mage' });
+      for (let i = 0; i < 50; i++) sim.step();
+      return sim.hash();
+    };
+    expect(run(7)).toBe(run(7));
+    expect(run(7)).not.toBe(run(123));
+  });
+});

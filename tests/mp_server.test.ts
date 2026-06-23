@@ -327,3 +327,15 @@ describe('ServerWorld — Layer 3: vendor buy (online path)', () => {
     expect(s2.inventory.stacks.some((x) => x.itemId === 'apprentice_staff')).toBe(true);
   });
 });
+
+describe('ServerWorld — class selection (G1)', () => {
+  it('select-class equips the class starter weapon for a fresh player', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const weapon = () => w.selfState(a).inventory.equipment.find((e) => e.slot === 'weapon')!.itemId;
+    expect(weapon()).toBeNull(); // fresh: unarmed
+    w.command(a, { t: 'select-class', classId: 'mage' });
+    w.step();
+    expect(weapon()).toBe('apprentice_staff'); // class kit applied via the server whitelist
+  });
+});

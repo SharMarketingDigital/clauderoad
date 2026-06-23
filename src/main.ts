@@ -11,6 +11,7 @@ import { Renderer } from './render/renderer';
 import { Input } from './game/input';
 import { Hud } from './ui/hud';
 import { WorldMap } from './ui/map';
+import { ClassSelect } from './ui/class_select';
 import { CombatText } from './ui/combat_text';
 import { makeCombatFeedback } from './ui/combat_feedback';
 import { Recorder, ClipRecorder } from './ui/recorder';
@@ -37,6 +38,8 @@ function startOffline(): void {
   const input = new Input(canvas, renderer);
   const hud = new Hud();
   const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
+  // Class selection on entry (G1): pick a starter class -> the sim equips its weapon/kit.
+  new ClassSelect((classId) => sim.sendCommand({ t: 'select-class', classId }));
   const combatText = new CombatText();
   new Recorder(canvas); // in-game ● REC button (captures the 3D canvas to .webm)
   // 🎬 Clipe: one-click auto-clip in three files (clean + with-HUD + vertical 9:16).
@@ -86,6 +89,8 @@ function startOnline(url: string, name: string): void {
   const world = new ClientWorld(url, name); // a network-backed IWorld
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const map = new WorldMap(); // world map (tecla M) — same module as SP, reads IWorld
+  // Class selection on entry (G1): pick a starter class -> the server equips its weapon/kit.
+  new ClassSelect((classId) => world.sendCommand({ t: 'select-class', classId }));
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
