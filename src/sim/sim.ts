@@ -25,6 +25,7 @@ import {
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
+import { meetsLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
 import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
 import {
@@ -1182,6 +1183,7 @@ export class Sim implements IWorld {
   private equip(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
+    if (!meetsLevelReq(def, p.level)) return; // K2: gate de nível (degrees) — recusa silenciosa. (1 linha no topo de equip(); avisar K1/Gabriel.)
     if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
     const prev = p.equipment[def.slot];
     p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY }; // a freshly equipped item is in full repair
@@ -1362,6 +1364,7 @@ export class Sim implements IWorld {
         const def = ITEMS[s.itemId];
         if (!def || def.slot !== slot) continue;
         if (slot === 'weapon' && (def.mastery ?? DEFAULT_MASTERY) !== activeId) continue;
+        if (!meetsLevelReq(def, p.level)) continue; // K2: só considerar gear que o bot PODE equipar — senão o 'best' vira inalcançável e ele nunca troca pelo item vestível
         const score = botGearScore(s.itemId, s.rarity, s.plus);
         if (score > bestScore) { bestScore = score; best = s; }
       }

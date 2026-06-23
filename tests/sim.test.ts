@@ -3130,3 +3130,70 @@ describe('mage mastery (Mago) — magical damage (Int)', () => {
     expect(h7a).not.toBe(h123);
   });
 });
+
+// --- K2: equip level-requirement gate (degrees) ---
+// The gate is a pure `level >= reqLevel` check in Sim.equip; the bot's botEquipBest skips
+// gear it can't wear yet. We seed level + bag deterministically via restorePlayer (pure
+// data, like save.test.ts) so these tests need no farming/vendor and stay Rng-free.
+describe('degrees — gate de nível para equipar', () => {
+  function seed(sim: Sim, level: number, ...itemIds: string[]): void {
+    const id = sim.localPlayerId()!;
+    sim.restorePlayer(id, {
+      level,
+      gold: 0,
+      bag: itemIds.map((itemId) => ({ itemId, rarity: 'normal', plus: 0, qty: 1 })),
+      equipment: { weapon: null, armor: null },
+    });
+  }
+  const weapon = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'weapon')!;
+  const holds = (sim: Sim, itemId: string) => sim.inventory().stacks.some((s) => s.itemId === itemId);
+
+  it('refuses to equip a degree weapon below its required level (item stays in the bag)', () => {
+    const sim = new Sim(7);
+    seed(sim, 1, 'steel_sword'); // 3º grau, reqLevel 8
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(weapon(sim).itemId).toBeNull(); // nothing equipped
+    expect(holds(sim, 'steel_sword')).toBe(true); // still held — not consumed
+  });
+
+  it('equips the same degree weapon once the player meets the required level', () => {
+    const sim = new Sim(7);
+    seed(sim, 8, 'steel_sword'); // exactly at the floor (reqLevel 8)
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(weapon(sim).itemId).toBe('steel_sword');
+    expect(holds(sim, 'steel_sword')).toBe(false); // moved out of the bag into the slot
+  });
+
+  it('a legacy (degree-less) weapon is never gated — equips at level 1', () => {
+    const sim = new Sim(7);
+    seed(sim, 1, 'old_sword'); // no degree/reqLevel => req 0
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(weapon(sim).itemId).toBe('old_sword');
+  });
+
+  it('a run that exercises the gate stays deterministic (same seed => identical world)', () => {
+    const runGated = (s: number): string => {
+      const sim = new Sim(s);
+      seed(sim, 1, 'steel_sword');
+      sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 }); // refused (lvl 1 < 8)
+      for (let i = 0; i < 120; i++) { sim.sendCommand({ t: 'move', dx: 1, dz: 0 }); sim.step(); }
+      return sim.hash();
+    };
+    expect(runGated(2024)).toBe(runGated(2024));
+  });
+
+  it('the auto-play bot wears the wearable weapon, not the higher-degree one it cannot equip yet', () => {
+    const sim = new Sim(7);
+    // bag: a stronger-but-unwearable D3 (steel_sword, reqLevel 8, higher botGearScore) AND a
+    // wearable base (old_sword). If the bot filtered AFTER scoring, `best` would be the D3 and
+    // the equip would silently refuse, leaving the slot empty. Filtering BEFORE scoring makes
+    // it fall back to old_sword.
+    seed(sim, 1, 'steel_sword', 'old_sword');
+    sim.sendCommand({ t: 'set-bot', on: true });
+    for (let i = 0; i < 3; i++) sim.step(); // botEquipBest runs each botStep
+    expect(weapon(sim).itemId).toBe('old_sword'); // the wearable lesser item — not null, not the D3
+  });
+});
