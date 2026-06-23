@@ -27,9 +27,10 @@ import {
   BOT_HEAL_FRAC,
   BOT_MATERIAL_RESERVE,
   inFrontOf,
+  STARTING_ENEMY_COUNT,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
-import { ENEMY_COUNT, ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE } from '../src/sim/content/enemies';
+import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
@@ -246,7 +247,7 @@ describe('combat', () => {
     // its own timer, so it must not count toward the wolf-respawn check)
     const enemyCount = (): number =>
       sim.entities().filter((e) => e.kind === 'enemy' && !e.boss).length;
-    expect(enemyCount()).toBe(ENEMY_COUNT);
+    expect(enemyCount()).toBe(STARTING_ENEMY_COUNT);
 
     sim.sendCommand({ t: 'cycle-target' });
     sim.step();
@@ -261,15 +262,15 @@ describe('combat', () => {
     }
     expect(ticks).toBeLessThan(2000); // it actually died (didn't time out)
     expect(sim.localTargetId()).toBeNull(); // dead target clears the selection
-    expect(enemyCount()).toBe(ENEMY_COUNT - 1);
+    expect(enemyCount()).toBe(STARTING_ENEMY_COUNT - 1);
 
     // Pin the ~15s delay: still one short right up to the respawn tick, then back.
     const deathTick = sim.tick;
     sim.sendCommand({ t: 'stop' });
     while (sim.tick < deathTick + RESPAWN_TICKS - 1) sim.step();
-    expect(enemyCount()).toBe(ENEMY_COUNT - 1); // not yet
+    expect(enemyCount()).toBe(STARTING_ENEMY_COUNT - 1); // not yet
     sim.step(); // reaches deathTick + RESPAWN_TICKS
-    expect(enemyCount()).toBe(ENEMY_COUNT); // respawned
+    expect(enemyCount()).toBe(STARTING_ENEMY_COUNT); // respawned
     // ...and every respawned common mob is one of the known species (its name is
     // that species' base name, optionally with a Champion/Elite tier suffix).
     const names = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss).map((e) => e.name);
@@ -988,34 +989,34 @@ describe('spear mastery (Lança)', () => {
     const sim = new Sim(7);
     equipSpear(sim);
     const range = MASTERIES.spear.attackRange!;
+    // The rings spawn mobs in PACKS, so clusters exist. Walk into the nearest cluster (a
+    // mob that has a neighbor within cone range) and sweep — a single Varredura cast should
+    // damage 2+ distinct enemies. (Anchoring on any enemy is fine; the cone hits every
+    // enemy in front within reach, regardless of species.)
     let hits = 0;
-    for (let i = 0; i < 1500 && hits === 0; i++) {
+    for (let i = 0; i < 4000 && hits < 2; i++) {
       const p = player(sim);
-      const w = nearestWolf(sim);
-      if (!w) { sim.step(); continue; }
-      // The cone re-faces toward the target on cast, so count using THAT facing.
-      const facing = Math.atan2(w.x - p.x, w.z - p.z);
-      const inCone = sim.entities().filter((e) => {
-        if (e.kind !== 'enemy' || e.boss || e.hp <= 0) return false;
-        const dx = e.x - p.x;
-        const dz = e.z - p.z;
-        const d = Math.hypot(dx, dz);
-        return d <= range && (d <= 1.0 || inFrontOf(dx, dz, facing));
-      });
-      if (inCone.length >= 2) {
-        const before = sim.recentEvents();
-        const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
-        sim.sendCommand({ t: 'set-target', id: w.id }); // cone anchors on (and faces) this target
-        sim.sendCommand({ t: 'use-ability', slot: 2 }); // Varredura (cone)
-        sim.sendCommand({ t: 'stop' });
+      const live = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
+      // the nearest mob that is part of a cluster (has a neighbor within cone range)
+      const anchor = live
+        .filter((e) => live.some((o) => o.id !== e.id && Math.hypot(o.x - e.x, o.z - e.z) <= range))
+        .sort((a, b) => ((a.x - p.x) ** 2 + (a.z - p.z) ** 2) - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2))[0];
+      if (!anchor) { sim.step(); continue; }
+      if (Math.hypot(anchor.x - p.x, anchor.z - p.z) > 1.0) {
+        sim.sendCommand({ t: 'set-target', id: null }); // no auto-attack en route
+        sim.sendCommand({ t: 'move', dx: anchor.x - p.x, dz: anchor.z - p.z });
         sim.step();
-        const dmg = sim.recentEvents().filter((e) => e.seq > lastSeq && e.kind === 'damage');
-        hits = new Set(dmg.map((e) => e.targetId)).size; // distinct enemies damaged this tick
-      } else {
-        sim.sendCommand({ t: 'set-target', id: null });
-        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); // push into the pack
-        sim.step();
+        continue;
       }
+      // In contact with the cluster: anchor + sweep, then count distinct enemies hit.
+      const before = sim.recentEvents();
+      const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+      sim.sendCommand({ t: 'set-target', id: anchor.id }); // cone anchors on (and faces) this target
+      sim.sendCommand({ t: 'use-ability', slot: 2 }); // Varredura (cone)
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      const dmg = sim.recentEvents().filter((e) => e.seq > lastSeq && e.kind === 'damage');
+      hits = new Set(dmg.map((e) => e.targetId)).size; // distinct enemies damaged this tick
     }
     expect(hits).toBeGreaterThanOrEqual(2); // a cone, not a single-target strike
   });
@@ -1292,7 +1293,8 @@ describe('enemy tiers (champion & elite)', () => {
   it('the starting pack is all baseline; respawns introduce tougher tiers', () => {
     const sim = new Sim(7);
     expect(wolves(sim).every((w) => w.tier === 'normal')).toBe(true);
-    expect(wolves(sim).every((w) => w.maxHp === ENEMY_TEMPLATE.hp)).toBe(true);
+    // each wolf's max HP matches its RING's level scaling (ring1 = base 40; deeper rings scale up)
+    expect(wolves(sim).every((w) => w.maxHp === Math.round(ENEMY_TEMPLATE.hp * levelHpMult(w.level)))).toBe(true);
 
     // farm so the map churns reinforcements in; catch the first tiered wolf
     let tiered: { tier: string; maxHp: number; str: number } | undefined;

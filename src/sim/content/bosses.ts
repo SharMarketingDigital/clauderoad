@@ -129,7 +129,7 @@ export const WARLORD_TEMPLATE: BossTemplate = {
 // Alfa placement/timing — kept as named constants (tests + the registry reference them).
 export const MINION_SPAWN_RADIUS = 3; // how far the Alfa's minions appear
 export const BOSS_SPAWN_X = 0;
-export const BOSS_SPAWN_Z = 30;
+export const BOSS_SPAWN_Z = 50; // just outside the central safe-zone (cheb <= 30), in the first ring
 export const BOSS_FIRST_SPAWN_TICK = 150 * 20; // first Alfa ~2.5 min into the session
 export const BOSS_RESPAWN_TICKS = 3 * 60 * 20; // ~3 min after death
 

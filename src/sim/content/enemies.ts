@@ -212,6 +212,21 @@ export function pickSpecies(roll: number): EnemyTemplate {
 
 export const ENEMY_COUNT = 12;
 
+// Per-LEVEL scaling (GDD v0.3 §G3: "mobs por nível"). A mob's level comes from its zone
+// (ring): level 1 = the base template (no change), and deeper rings (higher level) are
+// tougher and more rewarding. Pure (the sim supplies the level), so content stays Rng-free.
+// Provisional curves — gentle, tune by playing. Level 1 always returns 1 (so the nearest
+// ring behaves exactly like the old baseline mobs).
+export function levelHpMult(level: number): number {
+  return 1 + 0.6 * (Math.max(1, level) - 1); // L1 1x · L2 1.6x · L4 2.8x · L10 6.4x
+}
+export function levelDamageMult(level: number): number {
+  return 1 + 0.35 * (Math.max(1, level) - 1); // L1 1x · L2 1.35x · L4 2.05x · L10 4.15x
+}
+export function levelRewardMult(level: number): number {
+  return 1 + 0.5 * (Math.max(1, level) - 1); // XP/SP/gold: L1 1x · L2 1.5x · L4 2.5x · L10 5.5x
+}
+
 // Enemy strength tiers. A spawn rolls one by weight: most mobs are 'normal', a
 // chunk are 'champion', and a few are 'elite' — each tougher, harder-hitting,
 // more rewarding, and drawn bigger. Multipliers apply to the base template; the

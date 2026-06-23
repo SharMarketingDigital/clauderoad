@@ -30,14 +30,14 @@ export interface ZoneDef {
 // Each ring (and the central safe-zone) spans this many units of Chebyshev distance.
 export const RING_WIDTH = 30;
 
-// Eight spawn anchors around a ring at its mid-radius: the 4 sides + 4 corners. Pure data
-// construction (no Rng) — every corner (r, r) still has Chebyshev distance r, so it lands
+// Four spawn anchors around a ring at its mid-radius (N/S/E/W). The sim spawns a small
+// PACK at each spot, so the ring has a handful of clusters to roam between. Pure data
+// construction (no Rng); each anchor's Chebyshev distance is exactly r, so it lands
 // squarely inside the ring's band.
 function ringSpots(inner: number, outer: number): SpawnSpot[] {
   const r = (inner + outer) / 2;
   return [
     { x: r, z: 0 }, { x: -r, z: 0 }, { x: 0, z: r }, { x: 0, z: -r },
-    { x: r, z: r }, { x: r, z: -r }, { x: -r, z: r }, { x: -r, z: -r },
   ];
 }
 

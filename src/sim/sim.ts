@@ -18,7 +18,11 @@ import type {
   StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES } from './content/classes';
-import { ENEMY_TEMPLATE, ENEMY_COUNT, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID } from './content/enemies';
+import {
+  ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID,
+  levelHpMult, levelDamageMult, levelRewardMult,
+} from './content/enemies';
+import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { RARITIES, type RarityDef } from './content/rarity';
@@ -50,12 +54,20 @@ const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
 
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
-export const WORLD_HALF = 60; // world spans -WORLD_HALF..WORLD_HALF on X and Z
+// The world half-extent comes from the zone model now (the outermost ring's edge -> a
+// 300x300 world). Re-exported so every existing importer (render, ui, tests) keeps
+// getting WORLD_HALF from sim unchanged.
+export { WORLD_HALF };
 
 export const PLAYER_SPEED = 6; // units/sec (also reused by the authoritative server)
 export const ENEMY_SPEED = 2.4; // units/sec
 export const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
+const SPAWN_JITTER = 2; // mobs spawn within ±this of their ring spot (a tight pack, well inside the ring)
+const WANDER_RADIUS = 12; // idle mobs wander within ±this of their current spot (roam the ring, not the world)
+const MOBS_PER_SPOT = 3; // a small pack at each spawn anchor (so AoE/cone abilities have clusters to hit)
+// Total starting mobs = (spots across all rings) x MOBS_PER_SPOT. Exported for tests.
+export const STARTING_ENEMY_COUNT = SPAWN_ZONES.reduce((n, z) => n + z.spots.length, 0) * MOBS_PER_SPOT;
 // Highest action-bar slot any mastery uses — the hash fingerprints cooldowns for
 // slots 1..N so it stays complete regardless of which kit is active.
 const MAX_ABILITY_SLOTS = 8;
@@ -123,6 +135,7 @@ export class Sim implements IWorld {
   private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
   private speciesRng: Rng; // independent substream for enemy-species rolls (see constructor)
   private procRng: Rng; // independent substream for enemy on-hit status procs (see constructor)
+  private spawnRng: Rng; // independent substream for zone spawn POSITIONS (see constructor)
   private partyRng: Rng; // independent substream for party loot auto-share recipient picks (see constructor)
   private ents = new Map<number, Entity>();
   private nextId = 1;
@@ -143,7 +156,7 @@ export class Sim implements IWorld {
   private partyOfPlayer = new Map<number, number>(); // playerId -> partyId (absent = solo)
   private pendingInvites = new Map<number, { fromId: number; partyId: number }>(); // inviteeId -> invite
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
-  private respawnQueue: number[] = [];
+  private respawnQueue: { at: number; zone: number }[] = []; // {when, which ring} to refill
   // World bosses: one runtime slot per entry in BOSS_DEFS (same order). Each tracks
   // the live entity id (null when dead), the tick its next spawn is due (Infinity
   // while alive), and how many summon waves it has fired this life. Tick-driven; no Rng.
@@ -180,13 +193,22 @@ export class Sim implements IWorld {
     // WHICH member gets an item never perturbs the main loot stream (the items that drop
     // are unchanged — only their owner differs).
     this.partyRng = new Rng((seed ^ 0x27d4eb2f) >>> 0);
+    // And zone spawn POSITIONS roll from their own substream, so scattering mobs across
+    // the rings never perturbs the main loot/position stream (determinism stays clean).
+    this.spawnRng = new Rng((seed ^ 0x165667b1) >>> 0);
     if (spawnLocal) {
       this.localId = this.spawnPlayer('Hero');
       this.registerPlayer(this.localId);
     } else {
       this.localId = 0; // server world: no local player (clients join via addPlayer)
     }
-    for (let i = 0; i < ENEMY_COUNT; i++) this.spawnEnemy(); // the starting pack is all baseline
+    // Populate every ring (the central safe-zone stays empty): a baseline PACK at each
+    // spawn spot, at that ring's level. Reinforcements (respawns) may roll tougher tiers.
+    for (let zi = 0; zi < SPAWN_ZONES.length; zi++) {
+      for (const spot of SPAWN_ZONES[zi].spots) {
+        for (let k = 0; k < MOBS_PER_SPOT; k++) this.spawnEnemy(zi, spot, false);
+      }
+    }
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
   }
 
@@ -282,46 +304,52 @@ export class Sim implements IWorld {
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       species: '',
-      boss: false, summoned: false,
+      boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
   }
 
-  // Spawn a common enemy. `tiered` respawns may roll a tougher Champion/Elite
-  // tier (more HP/damage/reward, drawn bigger); the starting pack passes false so
-  // construction stays baseline. The tier roll uses the independent tierRng, so
-  // the main loot/position stream is untouched whichever tier comes up.
-  private spawnEnemy(tiered = false): void {
+  // Spawn a common enemy in ring `zoneIndex` at `spot` (GDD §G3). The mob takes the ring's
+  // LEVEL, and its stats scale by level (+tier): farther-out rings are tougher and pay more.
+  // The bestiary is distributed across every spawn (species roll, own substream). `tiered`
+  // respawns may roll a Champion/Elite tier; the starting pack passes false (baseline). The
+  // species/tier/POSITION rolls all use INDEPENDENT substreams, so the main loot/position
+  // stream is untouched whatever spawns.
+  private spawnEnemy(zoneIndex: number, spot: SpawnSpot, tiered: boolean): void {
     const id = this.nextId++;
-    const x = this.rng.range(-WORLD_HALF, WORLD_HALF);
-    const z = this.rng.range(-WORLD_HALF, WORLD_HALF);
-    // Variety arrives with REINFORCEMENTS: the starting pack is all grey wolves
-    // (a gentle early game, GDD B4b), and every respawn rolls a species + tier — so
-    // the world fills with the tougher humanoid species as you farm. This mirrors how
-    // champion/elite tiers also only show up on respawn. The roll always runs, so the
-    // speciesRng stream — and thus determinism — is independent of the tiered flag.
+    const zone = SPAWN_ZONES[zoneIndex];
+    // Position: at the spot with a small jitter from the dedicated spawnRng, clamped to
+    // the world. The jitter (< half a ring) keeps the mob inside its ring.
+    const x = clamp(spot.x + this.spawnRng.range(-SPAWN_JITTER, SPAWN_JITTER), -WORLD_HALF, WORLD_HALF);
+    const z = clamp(spot.z + this.spawnRng.range(-SPAWN_JITTER, SPAWN_JITTER), -WORLD_HALF, WORLD_HALF);
+    // The innermost ring (level 1) is the grey-wolf "starter ring" by the town; the deeper
+    // rings get the varied humanoid bestiary. The roll runs every spawn (own substream), so
+    // the species stream stays independent of this choice.
     const rolled = pickSpecies(this.speciesRng.next());
-    const sp = tiered ? rolled : ENEMY_TEMPLATE;
+    const sp = zone.level === 1 ? ENEMY_TEMPLATE : rolled;
     const tier = tiered ? pickEnemyTier(this.tierRng.next()) : ENEMY_TIERS[0];
-    const hp = Math.round(sp.hp * tier.hpMult);
+    const level = zone.level;
+    const lhp = levelHpMult(level);
+    const ldmg = levelDamageMult(level);
+    const hp = Math.round(sp.hp * tier.hpMult * lhp);
     const name = tier.nameSuffix ? `${sp.name} ${tier.nameSuffix}` : sp.name;
     this.ents.set(id, {
       id, kind: 'enemy', name,
       x, z, facing: 0,
       hp, maxHp: hp,
       targetId: null,
-      str: Math.round(sp.str * tier.damageMult),
-      weaponDamage: Math.round(sp.weaponDamage * tier.damageMult),
+      str: Math.round(sp.str * tier.damageMult * ldmg),
+      weaponDamage: Math.round(sp.weaponDamage * tier.damageMult * ldmg),
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: hp, baseMaxMp: 0,
       swingTicks: Math.round(sp.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
-      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      level, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: tier.id,
       species: sp.id,
-      boss: false, summoned: false,
+      boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
     });
@@ -344,7 +372,7 @@ export class Sim implements IWorld {
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       species: '',
-      boss: false, summoned: false,
+      boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
     });
@@ -370,7 +398,7 @@ export class Sim implements IWorld {
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       species: t.id, // the boss id, so kill/summon/render resolve its def
-      boss: true, summoned: false,
+      boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
       targetX: def.spawnX, targetZ: def.spawnZ, repickAt: 0,
     });
@@ -450,7 +478,7 @@ export class Sim implements IWorld {
       sp: 0, skillRanks: {},
       gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
       species: def.minionSpecies,
-      boss: false, summoned: true,
+      boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,
       targetX: x, targetZ: z, repickAt: 0,
     });
@@ -922,18 +950,20 @@ export class Sim implements IWorld {
           : `${bossDef.template.name} foi derrotado`,
       });
     } else if (!dead.summoned) {
-      // Common enemies respawn after a delay; summoned minions are ephemeral.
-      this.respawnQueue.push(this.tick + RESPAWN_TICKS);
+      // Common enemies respawn after a delay, refilling their OWN ring; summons are ephemeral.
+      this.respawnQueue.push({ at: this.tick + RESPAWN_TICKS, zone: dead.spawnZone });
     }
     if (killer.kind === 'player') {
       const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
       const st = SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE; // the dead mob's species (xp/sp baseline)
-      // A boss pays its big flat XP/SP lump; a common mob scales by tier (GDD B4). The
-      // reward is then distributed by the killer's party mode (solo = all to the killer).
-      const baseXp = bossDef ? bossDef.template.xp : Math.round(st.xp * tier.xpMult);
-      const baseSp = bossDef ? bossDef.template.sp : Math.round(st.sp * tier.xpMult);
+      // A boss pays its big flat XP/SP lump; a common mob scales by tier AND by its LEVEL
+      // (deeper rings pay more — GDD §G3). The reward is then distributed by the killer's
+      // party mode (solo = all to the killer).
+      const lvl = levelRewardMult(dead.level);
+      const baseXp = bossDef ? bossDef.template.xp : Math.round(st.xp * tier.xpMult * lvl);
+      const baseSp = bossDef ? bossDef.template.sp : Math.round(st.sp * tier.xpMult * lvl);
       this.awardReward(killer, baseXp, baseSp);
-      this.rollLoot(killer, dead, bossDef ? 1 : tier.goldMult);
+      this.rollLoot(killer, dead, bossDef ? 1 : tier.goldMult * lvl);
     }
   }
 
@@ -1069,10 +1099,15 @@ export class Sim implements IWorld {
 
   private processRespawns(): void {
     if (this.respawnQueue.length === 0) return;
-    const remaining: number[] = [];
-    for (const at of this.respawnQueue) {
-      if (this.tick >= at) this.spawnEnemy(true); // reinforcements can be Champion/Elite
-      else remaining.push(at);
+    const remaining: { at: number; zone: number }[] = [];
+    for (const r of this.respawnQueue) {
+      if (this.tick >= r.at) {
+        // Refill the SAME ring at one of its spots (own spawnRng), so each ring keeps its
+        // level population. Reinforcements can be Champion/Elite.
+        const zone = SPAWN_ZONES[r.zone];
+        const spot = zone.spots[this.spawnRng.int(0, zone.spots.length - 1)];
+        this.spawnEnemy(r.zone, spot, true);
+      } else remaining.push(r);
     }
     this.respawnQueue = remaining;
   }
@@ -1902,7 +1937,8 @@ export class Sim implements IWorld {
       // idle: pull aggro toward the NEAREST living player within range (multiplayer:
       // a mob locks onto whoever is closest; single-player this is just the local one).
       const player = this.nearestLivingPlayer(e);
-      if (player) {
+      // The central safe-zone is sanctuary: mobs never aggro a player standing in it.
+      if (player && !zoneAt(player.x, player.z).safe) {
         const dx = player.x - e.x;
         const dz = player.z - e.z;
         if (dx * dx + dz * dz <= tmpl.aggroRadius * tmpl.aggroRadius) {
@@ -1945,7 +1981,9 @@ export class Sim implements IWorld {
       const dx = target.x - e.x;
       const dz = target.z - e.z;
       const dist = Math.hypot(dx, dz);
-      if (dist <= reach && e.swingTicks > 0 && this.tick >= e.nextSwingAt) {
+      // No bite while the target stands in the safe-zone (it can chase to the edge, but
+      // the town is sanctuary — mobs don't attack there).
+      if (dist <= reach && e.swingTicks > 0 && this.tick >= e.nextSwingAt && !zoneAt(target.x, target.z).safe) {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         // An enemy bite: a basic physical hit. critChance 0 => no crit roll (enemies never
         // crit today), so it draws NO rng — identical to the old direct meleeDamage call.
@@ -1969,8 +2007,11 @@ export class Sim implements IWorld {
     // Idle: the boss holds its ground; common enemies wander.
     if (e.boss) return;
     if (this.tick >= e.repickAt) {
-      e.targetX = this.rng.range(-WORLD_HALF, WORLD_HALF);
-      e.targetZ = this.rng.range(-WORLD_HALF, WORLD_HALF);
+      // Wander LOCALLY (around the current spot), so a mob roams its ring instead of
+      // crossing the whole (now 300x300) world and leaving its zone. Same draw count as
+      // before (2 range + 1 int), so the main Rng stream's shape is unchanged.
+      e.targetX = clamp(e.x + this.rng.range(-WANDER_RADIUS, WANDER_RADIUS), -WORLD_HALF, WORLD_HALF);
+      e.targetZ = clamp(e.z + this.rng.range(-WANDER_RADIUS, WANDER_RADIUS), -WORLD_HALF, WORLD_HALF);
       e.repickAt = this.tick + this.rng.int(40, 120); // re-pick every 2..6s
     }
     if (this.isRooted(e)) return; // rooted -> may pick a wander target but can't move to it
@@ -2218,7 +2259,7 @@ export class Sim implements IWorld {
       }
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
-    for (const at of this.respawnQueue) mix(at);
+    for (const r of this.respawnQueue) { mix(r.at); mix(r.zone); }
     // Each boss's schedule (Infinity while alive -> sentinel) + summon progress.
     for (const s of this.bossState) {
       mix(s.entityId ?? -1);

@@ -86,6 +86,10 @@ export interface Entity {
   // a boss-summoned minion: ephemeral (when killed it does NOT enter the common
   // respawn queue, so summons don't permanently grow the wolf population).
   summoned: boolean;
+  // the spawn-zone index (into zones SPAWN_ZONES) this mob belongs to, so a kill respawns
+  // a replacement in the SAME ring (keeping each ring's level population stable). -1 for
+  // players, the vendor NPC, bosses and summons (they aren't ring mobs).
+  spawnZone: number;
   // enemy strength tier ('normal' for the player/NPCs/boss); scales HP/damage/
   // reward at spawn and drives the renderer's size/tint.
   tier: EnemyTierId;

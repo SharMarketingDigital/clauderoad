@@ -5,7 +5,7 @@
 // determinism (same seed + same per-player commands => same world).
 import { describe, it, expect } from 'vitest';
 import { Sim } from '../src/sim/sim';
-import { ENEMY_COUNT } from '../src/sim/content/enemies';
+import { STARTING_ENEMY_COUNT } from '../src/sim/sim';
 
 const enemies = (sim: Sim) => sim.entities().filter((e) => e.kind === 'enemy');
 const players = (sim: Sim) => sim.entities().filter((e) => e.kind === 'player');
@@ -26,7 +26,7 @@ describe('multiplayer shared world (server-mode Sim)', () => {
     const sim = new Sim(1337, false);
     expect(sim.players().length).toBe(0);
     expect(players(sim).length).toBe(0);
-    expect(enemies(sim).length).toBe(ENEMY_COUNT);
+    expect(enemies(sim).length).toBe(STARTING_ENEMY_COUNT);
     for (let i = 0; i < 100; i++) sim.step(); // mobs wander/respawn without a player, no crash
     expect(enemies(sim).length).toBeGreaterThan(0);
   });
@@ -89,7 +89,7 @@ describe('multiplayer shared world (server-mode Sim)', () => {
     let recovered = false;
     for (let i = 0; i < 3000 && !recovered; i++) {
       sim.step();
-      if (enemies(sim).length >= ENEMY_COUNT) recovered = true; // the pack repopulated
+      if (enemies(sim).length >= STARTING_ENEMY_COUNT) recovered = true; // the pack repopulated
     }
     expect(recovered).toBe(true);
   });
