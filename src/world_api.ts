@@ -87,6 +87,10 @@ export interface ItemStackView {
   readonly equipSlot?: EquipSlot;
   readonly consumable: boolean; // true => usable from the bag (a potion, etc.)
   readonly sellValue: number; // gold the vendor pays for ONE of this stack (rarity-scaled)
+  // --- K2 degrees (equipáveis): grau, requisito de nível, e se o DONO atual pode equipar ---
+  readonly degree?: number; // grau do item (>=1); ausente p/ itens sem grau / não-equipáveis
+  readonly reqLevel?: number; // nível mínimo p/ equipar; ausente p/ não-equipáveis
+  readonly canEquip?: boolean; // o dono cumpre o requisito? ausente => tratar como equipável (back-compat)
 }
 
 // One equipment slot's current contents (null fields when empty). `plus` is the

@@ -3224,3 +3224,34 @@ describe('degrees — mercador vende equipamento por grau', () => {
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBeNull();
   });
 });
+
+// --- K2: IWorld surfaces grau/requisito/canEquip per stack (Slice 4a) ---
+describe('degrees — inventário expõe grau/requisito/canEquip', () => {
+  it('reports degree, reqLevel and canEquip per stack, by the owner level', () => {
+    const sim = new Sim(7);
+    const id = sim.localPlayerId()!;
+    const stackOf = (itemId: string) => sim.inventory().stacks.find((s) => s.itemId === itemId)!;
+    sim.restorePlayer(id, {
+      level: 1, gold: 0,
+      bag: [
+        { itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }, // D3, reqLevel 8
+        { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 1 }, // non-equippable
+      ],
+      equipment: { weapon: null, armor: null },
+    });
+    expect(stackOf('steel_sword').degree).toBe(3);
+    expect(stackOf('steel_sword').reqLevel).toBe(8);
+    expect(stackOf('steel_sword').canEquip).toBe(false); // level 1 < 8
+    // a non-equippable item carries no degree/requirement
+    expect(stackOf('health_potion').degree).toBeUndefined();
+    expect(stackOf('health_potion').reqLevel).toBeUndefined();
+    expect(stackOf('health_potion').canEquip).toBeUndefined();
+    // at level 8 the same weapon becomes equippable
+    sim.restorePlayer(id, {
+      level: 8, gold: 0,
+      bag: [{ itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }],
+      equipment: { weapon: null, armor: null },
+    });
+    expect(stackOf('steel_sword').canEquip).toBe(true);
+  });
+});
