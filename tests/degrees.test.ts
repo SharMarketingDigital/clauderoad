@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DEGREES, degreeOf, degreeDef, equipLevelReq, meetsLevelReq } from '../src/sim/content/degrees';
-import type { ItemDef } from '../src/sim/content/items';
+import { ITEMS, type ItemDef } from '../src/sim/content/items';
 
 // Pure-helper tests: degrees.ts has no Sim/Rng/DOM dependency, so we exercise it with
 // minimal hand-built ItemDefs (no world needed). These guard the data model + the
@@ -49,5 +49,43 @@ describe('degrees (modelo de graus)', () => {
     expect(meetsLevelReq(d3derived, 7)).toBe(false); // below the floor (8)
     expect(meetsLevelReq(d3derived, 8)).toBe(true); // exactly at the floor
     expect(meetsLevelReq(d3derived, 9)).toBe(true); // above the floor
+  });
+});
+
+// --- Slice 1: degree'd weapon definitions (data-level, no Sim needed) ---
+const DEGREE_WEAPONS = [
+  { base: 'old_sword', d2: 'iron_sword', d3: 'steel_sword', mastery: 'sword' },
+  { base: 'iron_spear', d2: 'steel_spear', d3: 'halberd', mastery: 'spear' },
+  { base: 'short_bow', d2: 'hunters_bow', d3: 'composite_bow', mastery: 'bow' },
+  { base: 'apprentice_staff', d2: 'adept_staff', d3: 'sorcerer_staff', mastery: 'mage' },
+] as const;
+
+describe('degrees — armas com grau (bake honesto + consistência)', () => {
+  for (const w of DEGREE_WEAPONS) {
+    const base = ITEMS[w.base];
+    for (const [deg, id] of [[2, w.d2], [3, w.d3]] as const) {
+      it(`${id}: ${deg}º grau de ${w.base}, stats baked = base × statMult`, () => {
+        const item = ITEMS[id];
+        expect(item).toBeDefined();
+        expect(item.slot).toBe('weapon');
+        expect(item.mastery).toBe(w.mastery);
+        expect(item.degree).toBe(deg);
+        // reqLevel matches the band exactly (catches an authoring typo)
+        expect(item.reqLevel).toBe(degreeDef(deg)!.reqLevel);
+        // the baked weaponDamage is locked to round(base × statMult) — drift fails CI,
+        // since the sim reads this literal and NEVER re-applies statMult at runtime
+        const expected = Math.round(base.stats!.weaponDamage! * degreeDef(deg)!.statMult);
+        expect(item.stats!.weaponDamage).toBe(expected);
+        // strictly stronger than the base, so a higher degree always out-ranks it
+        expect(item.stats!.weaponDamage!).toBeGreaterThan(base.stats!.weaponDamage!);
+      });
+    }
+  }
+
+  it('as armas base continuam legadas (sem degree/reqLevel) — equipar segue sem gate', () => {
+    for (const w of DEGREE_WEAPONS) {
+      expect(ITEMS[w.base].degree).toBeUndefined();
+      expect(ITEMS[w.base].reqLevel).toBeUndefined();
+    }
   });
 });
