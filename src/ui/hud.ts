@@ -1,5 +1,5 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
-import type { IWorld, AbilityView, InventoryView, EntityView } from '../world_api';
+import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
 import { isTyping } from './typing';
 
 export class Hud {
@@ -49,7 +49,14 @@ export class Hud {
   private shopSell: HTMLDivElement;
   private shopRepair: HTMLDivElement; // vendor repair buttons for worn equipped gear (GDD B8)
   private shopOpen = false;
-  private lastShopSig = ''; // skip rebuilding the buy/sell buttons when nothing changed
+  // Buy/sell/repair buttons are built ONCE and updated in place (the same robust pattern
+  // as the bag), so a refresh never destroys a button mid-click and the player's clicks
+  // stay reliable. Handlers read the CURRENT data by index (lastShopStock / lastInv) at
+  // click time, so they never go stale.
+  private shopBuyCells: HTMLButtonElement[] = [];
+  private shopSellCells: HTMLButtonElement[] = [];
+  private shopRepairCells: HTMLButtonElement[] = [];
+  private lastShopStock: ShopView['stock'] | null = null;
   // SP wallet + skills panel (toggled with K): spend SP to rank up abilities (GDD B4)
   private spAmt: HTMLSpanElement;
   private skillsEl: HTMLDivElement;
@@ -196,7 +203,6 @@ export class Hud {
   private setShop(open: boolean): void {
     this.shopOpen = open;
     this.shopEl.hidden = !open;
-    if (open) this.lastShopSig = ''; // force a rebuild on (re)open
   }
 
   private setSkills(open: boolean): void {
@@ -291,67 +297,110 @@ export class Hud {
   }
 
   // Vendor shop: lists what the vendor sells (buy buttons, gated on gold) and the
-  // player's sellable bag stacks (sell buttons). Only usable while in range.
+  // player's sellable bag stacks (sell buttons). Only usable while in range. Buttons
+  // are built ONCE and updated IN PLACE (the same pattern as the bag) — never torn
+  // down — so a player's click is never lost to a refresh landing between mousedown
+  // and mouseup. Handlers read the CURRENT data by index, so they can't go stale.
   private updateShop(world: IWorld, p: EntityView): void {
     const s = world.shop();
     this.shopTitle.textContent = `${s.name} · Ouro: ${p.gold}`;
-    if (!s.inRange) {
-      this.shopHint.textContent = 'Aproxime-se do mercador para negociar.';
-      if (this.lastShopSig !== 'far') {
-        this.shopBuy.textContent = '';
-        this.shopSell.textContent = '';
-        this.shopRepair.textContent = '';
-        this.lastShopSig = 'far';
-      }
-      return;
-    }
-    this.shopHint.textContent = 'Comprar / Vender:';
+    const near = s.inRange;
+    this.shopHint.textContent = near
+      ? 'Comprar / Vender:'
+      : 'Aproxime-se do mercador para negociar.';
+    // Hide the groups when out of range (inline display so .shop-btn CSS can't override
+    // it). The buttons PERSIST — nothing is destroyed — so clicks survive every refresh.
+    this.shopBuy.style.display = near ? '' : 'none';
+    this.shopSell.style.display = near ? '' : 'none';
+    this.shopRepair.style.display = near ? '' : 'none';
+    if (!near) return;
+
     const inv = world.inventory();
-    // Rebuild the buttons only when gold / stock / sellable bag actually changed —
-    // not every frame — so the DOM (and hover/focus) isn't thrashed while open.
-    const sig =
-      `${p.gold}|` +
-      s.stock.map((e) => `${e.itemId}:${e.price}`).join(',') +
-      '|' +
-      inv.stacks.map((st) => `${st.itemId}:${st.rarity}:${st.plus}:${st.qty}:${st.sellValue}`).join(',') +
-      '|' +
-      inv.equipment.map((e) => `${e.itemId}:${e.durability}:${e.repairCost}`).join(',');
-    if (sig === this.lastShopSig) return;
-    this.lastShopSig = sig;
+    this.lastInv = inv; // sell/repair handlers read the CURRENT bag/gear by index
+    this.lastShopStock = s.stock; // buy handlers read the CURRENT stock by index
 
-    // Repair worn equipped gear (GDD B8 death penalty). Only damaged items appear.
-    this.shopRepair.textContent = '';
-    for (const eq of inv.equipment) {
-      if (eq.itemId == null || eq.durability >= eq.maxDurability) continue;
-      const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
-      const btn = document.createElement('button');
-      btn.className = 'shop-btn repair';
-      btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] — ${eq.repairCost}`;
-      btn.disabled = p.gold < eq.repairCost;
-      btn.addEventListener('click', () => world.sendCommand({ t: 'repair', slot: eq.slot }));
-      this.shopRepair.appendChild(btn);
-    }
-
-    this.shopBuy.textContent = '';
-    for (const e of s.stock) {
+    // Buy: one button per stock entry, created once and then reused.
+    while (this.shopBuyCells.length < s.stock.length) {
+      const i = this.shopBuyCells.length;
       const btn = document.createElement('button');
       btn.className = 'shop-btn';
-      btn.textContent = `Comprar ${e.name} — ${e.price}`;
-      btn.disabled = p.gold < e.price;
-      btn.addEventListener('click', () => world.sendCommand({ t: 'buy', itemId: e.itemId }));
+      btn.addEventListener('click', () => this.onShopBuyClick(i));
       this.shopBuy.appendChild(btn);
+      this.shopBuyCells.push(btn);
     }
-    this.shopSell.textContent = '';
-    for (const st of inv.stacks) {
-      if (st.sellValue <= 0) continue;
+    for (let i = 0; i < this.shopBuyCells.length; i++) {
+      const e = s.stock[i];
+      const btn = this.shopBuyCells[i];
+      if (e) {
+        btn.style.display = '';
+        btn.textContent = `Comprar ${e.name} — ${e.price}`;
+        btn.disabled = p.gold < e.price;
+      } else {
+        btn.style.display = 'none';
+      }
+    }
+
+    // Repair: one button per equip slot, created once. Only damaged gear shows.
+    while (this.shopRepairCells.length < inv.equipment.length) {
+      const j = this.shopRepairCells.length;
+      const btn = document.createElement('button');
+      btn.className = 'shop-btn repair';
+      btn.addEventListener('click', () => this.onShopRepairClick(j));
+      this.shopRepair.appendChild(btn);
+      this.shopRepairCells.push(btn);
+    }
+    for (let j = 0; j < this.shopRepairCells.length; j++) {
+      const eq = inv.equipment[j];
+      const btn = this.shopRepairCells[j];
+      if (eq && eq.itemId != null && eq.durability < eq.maxDurability) {
+        btn.style.display = '';
+        const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+        btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] — ${eq.repairCost}`;
+        btn.disabled = p.gold < eq.repairCost;
+      } else {
+        btn.style.display = 'none';
+      }
+    }
+
+    // Sell: one button per bag slot, created once. Only stacks worth gold show.
+    while (this.shopSellCells.length < inv.capacity) {
+      const i = this.shopSellCells.length;
       const btn = document.createElement('button');
       btn.className = 'shop-btn sell';
-      const tag = st.plus > 0 ? ` +${st.plus}` : '';
-      btn.textContent = `Vender ${st.name}${tag} — ${st.sellValue}`;
-      btn.addEventListener('click', () =>
-        world.sendCommand({ t: 'sell', itemId: st.itemId, rarity: st.rarity, plus: st.plus }),
-      );
+      btn.addEventListener('click', () => this.onShopSellClick(i));
       this.shopSell.appendChild(btn);
+      this.shopSellCells.push(btn);
+    }
+    for (let i = 0; i < this.shopSellCells.length; i++) {
+      const st = inv.stacks[i];
+      const btn = this.shopSellCells[i];
+      if (st && st.sellValue > 0) {
+        btn.style.display = '';
+        const tag = st.plus > 0 ? ` +${st.plus}` : '';
+        btn.textContent = `Vender ${st.name}${tag} — ${st.sellValue}`;
+      } else {
+        btn.style.display = 'none';
+      }
+    }
+  }
+
+  // Click a vendor button -> send the trade. Each reads the CURRENT data by index
+  // (never a value captured at build time), so an in-place-updated button always acts
+  // on the right item. No-op if the slot is empty / not sellable / not repairable.
+  private onShopBuyClick(i: number): void {
+    const e = this.lastShopStock?.[i];
+    if (e && this.world) this.world.sendCommand({ t: 'buy', itemId: e.itemId });
+  }
+  private onShopSellClick(i: number): void {
+    const st = this.lastInv?.stacks[i];
+    if (st && st.sellValue > 0 && this.world) {
+      this.world.sendCommand({ t: 'sell', itemId: st.itemId, rarity: st.rarity, plus: st.plus });
+    }
+  }
+  private onShopRepairClick(j: number): void {
+    const eq = this.lastInv?.equipment[j];
+    if (eq?.itemId != null && eq.durability < eq.maxDurability && this.world) {
+      this.world.sendCommand({ t: 'repair', slot: eq.slot });
     }
   }
 
