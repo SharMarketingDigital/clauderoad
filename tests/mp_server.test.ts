@@ -3,6 +3,7 @@
 // and the PERSONAL state (HUD/bag) it hands back to each player. Layer 1 = combat + HUD.
 import { describe, it, expect } from 'vitest';
 import { ServerWorld } from '../server/world';
+import { VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_STOCK } from '../src/sim/content/vendor';
 
 const enemyId = (w: ServerWorld) => w.snapshot().entities.find((e) => e.kind === 'enemy')!.id;
 const selfOf = (w: ServerWorld, id: number) => w.snapshot().entities.find((e) => e.id === id)!;
@@ -266,5 +267,63 @@ describe('ServerWorld — Layer 4: per-player auto-play (bot)', () => {
     expect(sb.level).toBe(1); // B did nothing — no bot, no input
     expect(sb.xp).toBe(0);
     expect(sb.botActive).toBe(false);
+  });
+});
+
+// Farm the nearest mob until the player has at least `target` gold (stops as soon as it's
+// reached, so loot doesn't overfill the bag). Mirrors how a real player earns to shop.
+function farmUntilGold(w: ServerWorld, a: number, target: number): void {
+  for (let i = 0; i < 5000 && w.selfState(a).gold < target; i++) {
+    const me = w.snapshot().entities.find((e) => e.id === a);
+    if (!me) break;
+    let mob: { id: number; x: number; z: number } | null = null;
+    let bd = Infinity;
+    for (const e of w.snapshot().entities) {
+      if (e.kind !== 'enemy') continue;
+      const d = (e.x - me.x) ** 2 + (e.z - me.z) ** 2;
+      if (d < bd) { bd = d; mob = e; }
+    }
+    if (mob) { w.setIntent(a, mob.x - me.x, mob.z - me.z); w.command(a, { t: 'set-target', id: mob.id }); }
+    w.step();
+  }
+}
+
+// Walk a player to the town vendor (server-side) until shop.inRange becomes true.
+function goToVendor(w: ServerWorld, a: number): void {
+  w.command(a, { t: 'set-target', id: null });
+  for (let i = 0; i < 1500 && !w.selfState(a).shop.inRange; i++) {
+    const me = w.snapshot().entities.find((e) => e.id === a)!;
+    w.setIntent(a, VENDOR_SPAWN_X - me.x, VENDOR_SPAWN_Z - me.z);
+    w.step();
+  }
+  w.setIntent(a, 0, 0);
+  w.step();
+}
+
+describe('ServerWorld — Layer 3: vendor buy (online path)', () => {
+  it('a player buys items (incl. the Mago staff) through the server: gold spent + item in the bag', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    const staffPrice = VENDOR_STOCK.find((s) => s.itemId === 'apprentice_staff')!.price;
+    const potPrice = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!.price;
+    farmUntilGold(w, a, staffPrice + potPrice + 30);
+    goToVendor(w, a);
+    expect(w.selfState(a).shop.inRange).toBe(true);
+    expect(w.selfState(a).shop.stock.some((s) => s.itemId === 'apprentice_staff')).toBe(true); // staff listed
+
+    // a basic stackable item buys: gold drops by the price, the item lands in the bag
+    const g0 = w.selfState(a).gold;
+    w.command(a, { t: 'buy', itemId: 'health_potion' });
+    w.step();
+    const s1 = w.selfState(a);
+    expect(s1.gold).toBe(g0 - potPrice);
+    expect(s1.inventory.stacks.some((x) => x.itemId === 'health_potion')).toBe(true);
+
+    // the new Mago staff buys end-to-end through the server too
+    w.command(a, { t: 'buy', itemId: 'apprentice_staff' });
+    w.step();
+    const s2 = w.selfState(a);
+    expect(s2.gold).toBe(s1.gold - staffPrice);
+    expect(s2.inventory.stacks.some((x) => x.itemId === 'apprentice_staff')).toBe(true);
   });
 });
