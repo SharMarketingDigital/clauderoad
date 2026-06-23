@@ -30,6 +30,9 @@ export interface ItemDef {
   luckyPowder?: boolean; // the alchemy luck booster
   consumable?: ConsumableEffect; // present => usable from the bag for this effect
   value?: number; // base gold value; the vendor pays this (rarity-scaled) on a sale
+  // --- K2 degrees (graus por faixa de nível) — campos INTRÍNSECOS à definição do item ---
+  degree?: number; // grau do equipamento (1..N); ausente => grau 1 (linha base legada)
+  reqLevel?: number; // nível mínimo p/ EQUIPAR; ausente => derivado do grau (degrees.ts), senão 0
 }
 
 export const ITEMS: Record<string, ItemDef> = {
