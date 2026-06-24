@@ -290,6 +290,7 @@ html, body {
 }
 .refine-row { display: flex; gap: 6px; }
 .lucky-toggle,
+.protect-toggle,
 .refine-btn {
   flex: 1;
   padding: 5px 6px;
@@ -304,6 +305,10 @@ html, body {
 .lucky-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
 .refine-btn:hover:not(:disabled) { background: #26344a; }
 .refine-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+.protect-toggle.on { background: #1c2f3a; border-color: #4a9fd1; color: #b0e6f5; }
+/* K4 alchemy risk tiers on a refine button (the label already states the danger; color reinforces). */
+.refine-btn[data-risk="danger"] { background: #3a1c1c; border-color: #d14a4a; color: #f5b0b0; }
+.refine-btn[data-risk="protected"] { border-color: #4a9fd1; color: #b0e6f5; }
 .mat-line { font-size: 10px; color: #9fd0ff; text-align: center; }
 
 /* Attribute spending row (inside the bag): points + the two "+" buttons. */

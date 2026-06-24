@@ -40,8 +40,10 @@ export class Hud {
   private refineRow: HTMLDivElement;
   private refineBtns: HTMLButtonElement[] = [];
   private luckyToggle: HTMLButtonElement;
+  private protectToggle: HTMLButtonElement;
   private matLine: HTMLDivElement;
   private luckyOn = false; // UI state: whether to spend a Lucky Powder
+  private protectOn = false; // UI state (K4): whether to spend a Pedra de Proteção
   private bagOpen = false;
   // vendor shop window (toggled with V)
   private shopEl: HTMLDivElement;
@@ -112,6 +114,7 @@ export class Hud {
         </div>
         <div class="alchemy">
           <button class="lucky-toggle">Pó da Sorte: OFF</button>
+          <button class="protect-toggle">Proteção: OFF</button>
           <div class="refine-row"></div>
           <div class="mat-line"></div>
         </div>
@@ -173,6 +176,12 @@ export class Hud {
       this.luckyOn = !this.luckyOn;
       this.luckyToggle.textContent = `Pó da Sorte: ${this.luckyOn ? 'ON' : 'OFF'}`;
       this.luckyToggle.classList.toggle('on', this.luckyOn);
+    });
+    this.protectToggle = this.root.querySelector('.protect-toggle') as HTMLButtonElement;
+    this.protectToggle.addEventListener('click', () => {
+      this.protectOn = !this.protectOn;
+      this.protectToggle.textContent = `Proteção: ${this.protectOn ? 'ON' : 'OFF'}`;
+      this.protectToggle.classList.toggle('on', this.protectOn);
     });
     this.botToggleBtn = this.root.querySelector('.bot-toggle') as HTMLButtonElement;
     this.botIndicator = this.root.querySelector('.bot-indicator') as HTMLDivElement;
@@ -543,6 +552,7 @@ export class Hud {
       const btn = this.refineBtns[j];
       const slotName = SLOT_LABELS[eq.slot];
       const elixirId = eq.slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
+      btn.dataset.risk = 'safe'; // K4: risk tier for styling; overridden in the risk band below
       if (eq.itemId == null) {
         btn.textContent = `${slotName}: vazio`;
         btn.disabled = true;
@@ -553,10 +563,18 @@ export class Hud {
         btn.textContent = `${slotName} +${eq.plus} (sem Elixir)`;
         btn.disabled = true;
       } else {
-        // Show the chance that matches the toggle AND whether a powder is held.
+        // Success chance (matching the toggle + held powder). In the risk band (+ >= RISK_FLOOR)
+        // also state the break danger as TEXT — never color alone: protected => capped -1, else
+        // the break % and the multi-drop. CSS reinforces the tier via [data-risk].
         const ch = this.luckyOn && powder > 0 ? eq.enhanceChanceLucky : eq.enhanceChance;
-        btn.textContent = `Refinar ${slotName} +${eq.plus} (${Math.round(ch * 100)}%)`;
+        const warn = eq.breakChance > 0
+          ? (this.protectOn
+            ? ' · protegido (−1)'
+            : ` · PODE QUEBRAR −${eq.dropOnFail} (quebra ${Math.round(eq.breakChance * 100)}%)`)
+          : '';
+        btn.textContent = `Refinar ${slotName} +${eq.plus} (${Math.round(ch * 100)}%)${warn}`;
         btn.disabled = false;
+        btn.dataset.risk = eq.breakChance <= 0 ? 'safe' : this.protectOn ? 'protected' : 'danger';
       }
     }
     this.matLine.textContent =
@@ -566,9 +584,18 @@ export class Hud {
   // Click "Refinar" -> attempt the "+N" upgrade on that slot (sim rolls it).
   private onRefineClick(j: number): void {
     const eq = this.lastInv?.equipment[j];
-    if (eq?.itemId && eq.enhanceChance > 0 && this.world) {
-      this.world.sendCommand({ t: 'enhance', slot: eq.slot, useLuckyPowder: this.luckyOn });
+    if (!eq?.itemId || eq.enhanceChance <= 0 || !this.world) return;
+    // K4: a risky attempt (can break) with protection OFF is irreversible — confirm first.
+    // Protected attempts (and sub-RISK_FLOOR ones) skip the prompt. (Simple native guard; a
+    // styled in-panel modal is a future polish.)
+    if (eq.breakChance > 0 && !this.protectOn) {
+      const ok = window.confirm(
+        `Refinar ${SLOT_LABELS[eq.slot]} +${eq.plus} pode QUEBRAR o item (chance ${Math.round(eq.breakChance * 100)}%) `
+        + `ou cair −${eq.dropOnFail} níveis, e você não está usando Pedra de Proteção. Continuar?`,
+      );
+      if (!ok) return;
     }
+    this.world.sendCommand({ t: 'enhance', slot: eq.slot, useLuckyPowder: this.luckyOn, useProtection: this.protectOn });
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {
