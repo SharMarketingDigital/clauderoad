@@ -293,40 +293,40 @@ export class Renderer {
       this.lastCd.set(a.slot, a.cooldownRemaining);
     }
 
-    // Did we deal damage to our target this frame? (auto-attack OR an attack ability.) Capture
-    // the hit's x/z too: the target can DIE on the cast tick (the sim removes it immediately),
-    // so the damage event's position snapshot is the only reliable anchor for an impact effect.
-    const targetId = world.localTargetId();
-    let dealt = false;
+    // Did we land a hit on an ENEMY this frame? (auto-attack OR an attack ability.) This must NOT
+    // key on the selected target: a killing blow makes the sim drop the target the SAME tick
+    // (validateTarget clears it once the enemy is gone), so localTargetId() is already null when we
+    // read it — which is why keying on it lost every one-shot cast. Instead, take any enemy-damage
+    // event (targetId !== the local player) and use its x/z snapshot, which the SimEvent captures
+    // BEFORE the enemy is removed, so it survives a one-shot. (Single-player: enemy-damage events
+    // come only from the local player's own hits.)
+    let hitEnemy = false;
     let hitX = 0;
     let hitZ = 0;
     let maxSeq = this.lastSeenSeq;
     for (const ev of world.recentEvents()) {
       if (ev.seq > maxSeq) maxSeq = ev.seq;
       if (ev.seq <= this.lastSeenSeq) continue;
-      if (ev.kind === 'damage' && targetId != null && ev.targetId === targetId) {
-        dealt = true;
+      if (ev.kind === 'damage' && ev.targetId !== id) {
+        hitEnemy = true;
         hitX = ev.x;
         hitZ = ev.z;
       }
     }
     this.lastSeenSeq = maxSeq;
 
-    // A cast that also dealt damage = an attack ability (Golpe Forte, Atordoamento) ->
-    // always swing, heavier for Golpe Forte (slot 1). A cast with NO damage is a buff
-    // (Postura) -> no swing for now. Otherwise a plain auto-attack swings (gated so a
-    // bleed tick can't spam it mid-swing).
-    if (castSlot !== 0 && dealt) {
+    // Attack animation: swing on a landed hit. A slot-1 cast is "heavy" (Golpe Forte); a plain
+    // auto-attack swings too (gated so a bleed tick can't restart the clip mid-swing).
+    if (castSlot !== 0 && hitEnemy) {
       av.triggerAttack(castSlot === 1);
-    } else if (dealt && !av.isSwinging()) {
+    } else if (hitEnemy && !av.isSwinging()) {
       av.triggerAttack(false);
     }
 
-    // Ability VFX (GDD G2): on a damaging cast, spawn the ability's particle effect from the
-    // caster to the impact point. The target may die on the cast tick (the sim removes it at
-    // once), so the impact anchors on the damage event's x/z snapshot — NOT a live target lookup
-    // that would come up empty. Render-only — the sim already resolved the hit; this just shows it.
-    if (castSlot !== 0 && dealt) {
+    // Ability VFX (GDD G2): on a damaging cast, spawn the ability's particle effect from the caster
+    // to the impact point (the damage event's x/z snapshot — valid even when the blow kills the
+    // target). Render-only — the sim already resolved the hit; this just shows it.
+    if (castSlot !== 0 && hitEnemy) {
       const effect = abilityEffect(p.mastery, castSlot);
       if (effect) {
         const from = new THREE.Vector3(p.x, terrainHeight(p.x, p.z) + 1.3, p.z);
