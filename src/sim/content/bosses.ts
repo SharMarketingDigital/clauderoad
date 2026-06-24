@@ -59,10 +59,10 @@ export const BOSS_RARITIES: RarityDef[] = [
   { id: 'sun', name: 'SUN', dropWeight: 0.07, statMultiplier: 3.0 },
 ];
 
-// --- Boss #1: the Pack Alpha — a rooted wolf boss that summons wolf minions. ---
+// --- Boss #1: the Ancient Necromancer — a rooted caster boss that summons skeleton minions. ---
 export const BOSS_TEMPLATE: BossTemplate = {
   id: 'pack_alpha',
-  name: 'Alfa da Matilha',
+  name: 'Necromante Ancião',
   hp: 800, // ~20x a common wolf (40)
   xp: 500,
   sp: 60, // a big skill-point payout — beating the boss noticeably advances a kit
@@ -81,7 +81,7 @@ export const BOSS_TEMPLATE: BossTemplate = {
   rarities: BOSS_RARITIES,
   summonThresholds: [0.75, 0.5, 0.25],
   minionCount: 3,
-  minionName: 'Lobo da Matilha',
+  minionName: 'Esqueleto Servo', // distinct from the common 'Esqueleto Lacaio' (so minion counts are clean)
   minionHp: 60, // a bit beefier than a common wolf (40)
   swingTime: 2.5, // bites slower but for meleeDamage(60,30) = 60 — ~10x a common wolf
   aggroRadius: 12,
@@ -116,7 +116,7 @@ export const WARLORD_TEMPLATE: BossTemplate = {
   rarities: BOSS_RARITIES,
   summonThresholds: [0.7, 0.4], // two mercenary waves
   minionCount: 4,
-  minionName: 'Mercenário',
+  minionName: 'Esqueleto Mercenário',
   minionHp: 70,
   swingTime: 2.2, // hits a touch faster than the Alfa
   aggroRadius: 14, // spots you from farther (it hunts)

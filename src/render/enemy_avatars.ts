@@ -4,8 +4,8 @@
 // the same Rig_Medium clips the player uses (Idle when still, Walk when moving).
 // The model is chosen by the sim's enemy species — one KayKit skeleton per ring
 // (skeleton_minion/rogue/warrior/mage). Champion/Elite are bigger + tinted; bosses
-// reuse a model + tint (the Alfa a purple mage skeleton, the Warlord a dark-red
-// barbarian). On a hit, the enemy plays a one-shot KayKit attack clip for its kind
+// reuse a model + tint (the Necromancer a purple mage skeleton, the Warlord a dark-red
+// skeleton warrior). On a hit, the enemy plays a one-shot KayKit attack clip for its kind
 // (melee skeletons slice/chop; the mage skeleton casts), then returns to idle/walk.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -24,9 +24,6 @@ const FILES: Record<string, string> = {
   rogue: '/models/skeletons/Skeleton_Rogue.glb',
   warrior: '/models/skeletons/Skeleton_Warrior.glb',
   mage: '/models/skeletons/Skeleton_Mage.glb',
-  // A KayKit Adventurer kept only for a boss skin (the Warlord). Shares Rig_Medium,
-  // so it animates from the same Idle/Walk clips at no extra cost.
-  brute: '/models/Barbarian.glb',
 };
 
 // Map an enemy species id (sim's EntityView.species) to its skeleton model variant.
@@ -40,13 +37,12 @@ const SPECIES_VARIANT: Record<string, string> = {
 
 // The one-shot KayKit attack clip each model variant plays on a hit (Rig_Medium, same rig).
 // Melee skeletons slice/chop; the mage skeleton (and the caster boss) cast. Bosses resolve
-// through BOSS_VARIANT, so their variant ('mage'/'brute') picks the clip here too.
+// through BOSS_VARIANT, so their variant ('mage'/'warrior') picks the clip here too.
 const VARIANT_ATTACK_CLIP: Record<string, string> = {
   minion: 'Melee_1H_Attack_Slice_Diagonal',
   rogue: 'Melee_1H_Attack_Slice_Diagonal',
-  warrior: 'Melee_2H_Attack_Chop', // heavier swing for the bruiser
+  warrior: 'Melee_2H_Attack_Chop', // heavier swing (also the Warlord boss)
   mage: 'Ranged_Magic_Shoot',
-  brute: 'Melee_2H_Attack_Chop', // the Warlord boss
 };
 
 const TIER_SCALE: Record<string, number> = { normal: 1, champion: 1.35, elite: 1.7 };
@@ -60,8 +56,8 @@ const BOSS_TINT = 0x9b3bd0; // purple — "reads as boss"
 
 // Per-boss model + tint, keyed by the boss id carried in EntityView.species.
 const BOSS_VARIANT: Record<string, { variant: string; tint: number }> = {
-  pack_alpha: { variant: 'mage', tint: BOSS_TINT }, // Alfa da Matilha — purple skeleton mage
-  warlord: { variant: 'brute', tint: 0xb83232 }, // Senhor da Guerra — dark-red barbarian
+  pack_alpha: { variant: 'mage', tint: BOSS_TINT }, // Necromante Ancião — purple skeleton mage
+  warlord: { variant: 'warrior', tint: 0xb83232 }, // Senhor da Guerra — dark-red skeleton warrior
 };
 
 interface Style {
@@ -210,12 +206,11 @@ export class EnemyAvatars {
 
   private async load(): Promise<void> {
     const loader = new GLTFLoader();
-    const [minion, rogue, warrior, mage, brute, general, movement, melee, ranged] = await Promise.all([
+    const [minion, rogue, warrior, mage, general, movement, melee, ranged] = await Promise.all([
       loader.loadAsync(FILES.minion),
       loader.loadAsync(FILES.rogue),
       loader.loadAsync(FILES.warrior),
       loader.loadAsync(FILES.mage),
-      loader.loadAsync(FILES.brute), // Warlord boss skin
       loader.loadAsync('/models/Rig_Medium_General.glb'), // already in public/models from the Knight slice
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'),
       loader.loadAsync('/models/Rig_Medium_CombatMelee.glb'), // Melee_*_Attack_* clips
@@ -225,7 +220,6 @@ export class EnemyAvatars {
     this.templates.set('rogue', rogue.scene);
     this.templates.set('warrior', warrior.scene);
     this.templates.set('mage', mage.scene);
-    this.templates.set('brute', brute.scene); // used by the Warlord boss variant
     const clips = [
       ...general.animations, ...movement.animations,
       ...melee.animations, ...ranged.animations,
