@@ -278,6 +278,12 @@ export class Renderer {
     const p = world.entities().find((e) => e.id === id);
     if (!p) return;
 
+    // The player's position on the PREVIOUS frame — the dash origin for a charge (Investida
+    // teleports in one tick, so prev->now is the whole dash path). Captured before the movement
+    // check below overwrites playerPrevX/Z with the current position.
+    const prevX = this.playerPrevX;
+    const prevZ = this.playerPrevZ;
+
     // The sim only moves the player on a 20Hz tick, so position is static between
     // ticks; smooth over ~180ms so walking doesn't flicker back to idle.
     if (Math.hypot(p.x - this.playerPrevX, p.z - this.playerPrevZ) > 1e-3) {
@@ -339,7 +345,11 @@ export class Renderer {
       if (self) {
         this.abilityVfx.castSelf(self.effect, self.duration);
       } else if (dmg && hitEnemy) {
-        const from = new THREE.Vector3(p.x, terrainHeight(p.x, p.z) + 1.3, p.z);
+        // Origin: normally the caster; for a charge (Investida) the dash origin (prev frame) so the
+        // trail spans the whole dash path (the player has already teleported next to the target).
+        const ox = dmg === 'charge' ? prevX : p.x;
+        const oz = dmg === 'charge' ? prevZ : p.z;
+        const from = new THREE.Vector3(ox, terrainHeight(ox, oz) + 1.3, oz);
         const to = new THREE.Vector3(hitX, terrainHeight(hitX, hitZ) + 1.0, hitZ);
         this.abilityVfx.cast(dmg, from, to);
       }

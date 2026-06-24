@@ -22,6 +22,7 @@ const TEXTURES = {
   trace: '/textures/particles/trace_01.png', // streak — arrows
   circle: '/textures/particles/circle_05.png', // ring — shield aura
   twirl: '/textures/particles/twirl_01.png', // swirl — fury aura
+  slash: '/textures/particles/slash_01.png', // arc — heavy melee impact
 } as const;
 type TexKey = keyof typeof TEXTURES;
 
@@ -31,7 +32,8 @@ type TexKey = keyof typeof TEXTURES;
 const ABILITY_EFFECT: Partial<Record<MasteryId, Record<number, string>>> = {
   mage: { 1: 'fireball', 2: 'flamewave', 3: 'frostbolt' },
   bow: { 1: 'arrow', 2: 'multishot', 3: 'frostarrow' },
-  spear: { 2: 'sweep' },
+  spear: { 1: 'thrust', 2: 'sweep', 3: 'charge' },
+  sword: { 1: 'strongstrike', 3: 'stun' },
 };
 
 // Look up the damaging-effect id for a (mastery, slot), or undefined when nothing is wired.
@@ -44,7 +46,9 @@ export function abilityEffect(mastery: MasteryId, slot: number): string | undefi
 const ABILITY_CLIP: Partial<Record<MasteryId, Record<number, string>>> = {
   mage: { 2: 'Ranged_Magic_Spellcasting' }, // Onda de Chamas — a sweeping cast
   spear: { 2: 'Melee_2H_Attack_Spin', 4: 'Ranged_Magic_Raise' }, // Varredura — spin; Fúria — power-up raise
-  sword: { 2: 'Melee_Block' }, // Postura Defensiva — raise the shield
+  sword: { 2: 'Melee_Block', 3: 'Melee_Block_Attack' }, // Postura — raise shield; Atordoamento — shield bash
+  // Golpe Forte (sword/1) uses the default heavy chop; Estocada/Investida (spear/1,3) use the
+  // default 2H stab (the dash is instant, so Investida's "Running->Stab" is just the arrival thrust).
 };
 
 // Look up the ability's specific animation clip, or undefined to use the class's default attack.
@@ -186,6 +190,20 @@ export class AbilityVfx {
       case 'flamewave':
       case 'sweep':
         this.spawnCone(from, to, CONES[effect]);
+        break;
+      case 'strongstrike':
+        this.spawnMeleeImpact(to, 'heavy');
+        break;
+      case 'thrust':
+        this.spawnMeleeImpact(to, 'pierce');
+        break;
+      case 'stun':
+        this.spawnMeleeImpact(to, 'light');
+        this.spawnStunStars(to);
+        break;
+      case 'charge':
+        this.spawnDashTrail(from, to);
+        this.spawnMeleeImpact(to, 'heavy');
         break;
     }
   }
@@ -363,6 +381,56 @@ export class AbilityVfx {
       const spark = this.makeSprite('spark', color, THREE.AdditiveBlending);
       spark.position.copy(pos);
       this.particles.push({ sprite: spark, vx: Math.cos(a) * speed, vy: rnd(0.5, 2.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: 0.4, s1: 0.05, o0: 1, o1: 0 });
+    }
+  }
+
+  // Melee impact at the hit point: a slash arc + sparks (+ dust) for a heavy blow, a forward streak
+  // for a pierce, or a light contact spark (the stun stars carry the stun read).
+  private spawnMeleeImpact(pos: THREE.Vector3, kind: 'heavy' | 'pierce' | 'light'): void {
+    if (kind === 'heavy') {
+      const arc = this.makeSprite('slash', 0xfff0c0, THREE.AdditiveBlending);
+      arc.position.copy(pos);
+      arc.material.rotation = rnd(0, Math.PI * 2);
+      this.particles.push({ sprite: arc, vx: 0, vy: 0, vz: 0, life: 0.22, maxLife: 0.22, s0: 0.8, s1: 1.9, o0: 1, o1: 0 });
+      this.radialSparks(pos, 12, 0xfff0c0, 2, 4.5);
+      const dust = this.makeSprite('smoke', 0x6b5a44, THREE.NormalBlending);
+      dust.position.copy(pos);
+      this.particles.push({ sprite: dust, vx: 0, vy: 0.3, vz: 0, life: 0.4, maxLife: 0.4, s0: 0.5, s1: 1.3, o0: 0.4, o1: 0 });
+      return;
+    }
+    if (kind === 'pierce') {
+      const streak = this.makeSprite('trace', 0xfff0c0, THREE.AdditiveBlending);
+      streak.position.copy(pos);
+      streak.material.rotation = rnd(0, Math.PI * 2);
+      this.particles.push({ sprite: streak, vx: 0, vy: 0, vz: 0, life: 0.2, maxLife: 0.2, s0: 0.6, s1: 1.5, o0: 1, o1: 0 });
+      this.radialSparks(pos, 8, 0xfff0c0, 2, 3.5);
+      return;
+    }
+    this.radialSparks(pos, 6, 0xfff0b0, 1, 2.5); // 'light' — a small contact spark
+  }
+
+  // Dizzy stars circling above a stunned target (Atordoamento) — anchored above the head.
+  private spawnStunStars(pos: THREE.Vector3): void {
+    const cx = pos.x, cy = pos.y + 1.3, cz = pos.z;
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2 + rnd(-0.2, 0.2);
+      const r = rnd(0.3, 0.5);
+      const star = this.makeSprite('star', 0xffe066, THREE.AdditiveBlending);
+      star.position.set(cx + Math.cos(a) * r, cy + rnd(-0.1, 0.1), cz + Math.sin(a) * r);
+      star.material.rotation = rnd(0, Math.PI * 2);
+      this.particles.push({ sprite: star, vx: -Math.sin(a) * 0.8, vy: rnd(0, 0.2), vz: Math.cos(a) * 0.8, life: 0.9, maxLife: 0.9, s0: 0.35, s1: 0.22, o0: 1, o1: 0 });
+    }
+  }
+
+  // A streak of fading marks along the charge path (Investida): from the dash origin to the target.
+  private spawnDashTrail(from: THREE.Vector3, to: THREE.Vector3): void {
+    const n = 8;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const streak = this.makeSprite('trace', 0xdfe6ff, THREE.AdditiveBlending);
+      streak.position.set(lerp(from.x, to.x, t), lerp(from.y, to.y, t), lerp(from.z, to.z, t));
+      streak.material.rotation = rnd(0, Math.PI * 2);
+      this.particles.push({ sprite: streak, vx: 0, vy: rnd(0, 0.3), vz: 0, life: 0.3, maxLife: 0.3, s0: 0.5, s1: 0.1, o0: 0.8, o1: 0 });
     }
   }
 
