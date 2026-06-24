@@ -106,6 +106,8 @@ export interface SelfSnap {
   int: number;
   weaponDamage: number;
   weaponPlus: number;
+  phyDef: number; // K6: defesa física efetiva (base+gear) do jogador local
+  magDef: number; // K6: defesa mágica efetiva (base+gear) do jogador local
   botActive: boolean; // whether this player's auto-play is on
   abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
   inventory: InventoryView; // the player's bag + equipped gear (loot lands here)

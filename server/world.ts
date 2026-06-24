@@ -317,6 +317,7 @@ export class ServerWorld {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
+        phyDef: 0, magDef: 0,
         botActive: false, abilities, inventory, shop, party, invite,
         matching, partyRequests, myRequestPartyId,
       };
@@ -327,6 +328,7 @@ export class ServerWorld {
       level: e.level, xp: e.xp, xpToNext: e.xpToNext, attrPoints: e.attrPoints,
       gold: e.gold, sp: e.sp, str: e.str, int: e.int,
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
+      phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
       abilities, inventory, shop, party, invite,
       matching, partyRequests, myRequestPartyId,

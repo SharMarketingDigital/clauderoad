@@ -75,6 +75,11 @@ export interface EntityView {
   readonly int: number; // Intelligence (spent points); raises max MP
   readonly weaponDamage: number;
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
+  // Defensive stats (K3, surfaced by the character sheet / K6). EFFECTIVE phyDef/magDef = base +
+  // equipped gear, recomputed like str/maxHp. Enemies carry 0 (full damage). Combat reads these
+  // later (Gabriel's mitigate()); today they are display-only.
+  readonly phyDef: number;
+  readonly magDef: number;
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly tier: EnemyTierId; // enemy strength tier ('normal' for the player/NPCs); render scales/tints by it
   readonly species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it

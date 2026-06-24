@@ -804,6 +804,7 @@ export class Sim implements IWorld {
         str: e.str, weaponDamage: e.weaponDamage,
         int: e.baseInt,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
+        phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva (base+gear) p/ a ficha
         boss: e.boss,
         tier: e.tier,
         species: e.species,
