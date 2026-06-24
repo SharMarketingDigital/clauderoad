@@ -78,7 +78,7 @@ const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
 type TrailKind = 'ember' | 'frost' | 'none';
-type ImpactKind = 'fire' | 'frost' | 'spark';
+type ImpactKind = 'fire' | 'frost' | 'spark' | 'auto';
 
 // A projectile's look + behavior. coreColor tints the grayscale core texture.
 interface ProjectileStyle {
@@ -94,6 +94,13 @@ const STYLES: Record<string, ProjectileStyle> = {
   frostbolt: { coreTex: 'light', coreColor: 0x8fdcff, coreScale: 0.85, speed: 24, trail: 'frost', impact: 'frost', flash: 0x6cc8ff },
   arrow: { coreTex: 'trace', coreColor: 0xffe6a0, coreScale: 0.7, speed: 40, trail: 'none', impact: 'spark', flash: 0 },
   frostarrow: { coreTex: 'trace', coreColor: 0x9fe6ff, coreScale: 0.7, speed: 40, trail: 'frost', impact: 'frost', flash: 0 },
+};
+
+// Auto-attack projectiles — deliberately small/fast and trail-less, with a tiny 'auto' impact, so
+// the basic attack stays subtle next to the abilities. Melee classes use a small contact spark.
+const AUTO_STYLES: Record<string, ProjectileStyle> = {
+  arrow: { coreTex: 'trace', coreColor: 0xffe6a0, coreScale: 0.4, speed: 50, trail: 'none', impact: 'auto', flash: 0 },
+  bolt: { coreTex: 'light', coreColor: 0xbf9bff, coreScale: 0.38, speed: 34, trail: 'none', impact: 'auto', flash: 0 },
 };
 
 // A cone/fan burst that expands forward (direction = to - from): a spread of particles flung into
@@ -215,6 +222,16 @@ export class AbilityVfx {
     const style = AURAS[effect];
     if (!style) return;
     this.auras.push({ style, remaining: durationSecs, emit: 0 });
+  }
+
+  // Auto-attack VFX — the "feijão com arroz" hit, deliberately subtler than the abilities: a small
+  // contact spark for melee, or a tiny fast projectile for ranged (bow/mage). Anchored on the hit
+  // point (the damage event's x/z), like every effect — no localTargetId dependency.
+  autoAttack(mastery: MasteryId, from: THREE.Vector3, to: THREE.Vector3): void {
+    if (!this.ready) return;
+    if (mastery === 'bow') this.spawnProjectile(from, to, AUTO_STYLES.arrow);
+    else if (mastery === 'mage') this.spawnProjectile(from, to, AUTO_STYLES.bolt);
+    else this.radialSparks(to, 4, 0xfff0c0, 1, 2.4, 0.28); // sword/spear: a small contact spark
   }
 
   // Advance every live projectile/aura/particle and cull the finished ones; auras emit around the
@@ -370,17 +387,21 @@ export class AbilityVfx {
       }
       return;
     }
+    if (kind === 'auto') {
+      this.radialSparks(pos, 3, 0xfff0d0, 1, 2, 0.25); // a tiny, subtle auto-attack pop
+      return;
+    }
     // 'spark' — a small physical hit puff (arrows)
     this.radialSparks(pos, 7, 0xfff0b0, 1.5, 3);
   }
 
-  private radialSparks(pos: THREE.Vector3, count: number, color: number, minSpeed: number, maxSpeed: number): void {
+  private radialSparks(pos: THREE.Vector3, count: number, color: number, minSpeed: number, maxSpeed: number, scale = 0.4): void {
     for (let k = 0; k < count; k++) {
       const a = (k / count) * Math.PI * 2 + rnd(-0.3, 0.3);
       const speed = rnd(minSpeed, maxSpeed);
       const spark = this.makeSprite('spark', color, THREE.AdditiveBlending);
       spark.position.copy(pos);
-      this.particles.push({ sprite: spark, vx: Math.cos(a) * speed, vy: rnd(0.5, 2.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: 0.4, s1: 0.05, o0: 1, o1: 0 });
+      this.particles.push({ sprite: spark, vx: Math.cos(a) * speed, vy: rnd(0.5, 2.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: scale, s1: 0.05, o0: 1, o1: 0 });
     }
   }
 

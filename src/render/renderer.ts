@@ -333,6 +333,12 @@ export class Renderer {
       else av.triggerAttack(castSlot === 1);
     } else if (hitEnemy && !av.isSwinging()) {
       av.triggerAttack(false);
+      // Auto-attack VFX (subtle): a mini-projectile for ranged, a small spark for melee. Same hit
+      // anchor as the abilities (the damage event's x/z). Tied to the swing trigger + gated by
+      // !isSwinging, so it can't spam (and a DoT tick at most rides one swing's worth).
+      const from = new THREE.Vector3(p.x, terrainHeight(p.x, p.z) + 1.3, p.z);
+      const to = new THREE.Vector3(hitX, terrainHeight(hitX, hitZ) + 1.0, hitZ);
+      this.abilityVfx.autoAttack(p.mastery, from, to);
     }
 
     // Ability VFX (GDD G2). A self-cast BUFF fires on the cast alone, anchored on the caster (its
