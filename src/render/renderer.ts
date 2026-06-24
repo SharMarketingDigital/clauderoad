@@ -9,7 +9,7 @@ import { NpcAvatar } from './npc_avatar';
 import { populateForest } from './forest';
 import { populateVillage } from './village';
 import { setupEnvironment, terrainHeight, type Environment, type WeatherState } from './environment';
-import { AbilityVfx, abilityEffect } from './vfx/ability_vfx';
+import { AbilityVfx, abilityEffect, abilityClip } from './vfx/ability_vfx';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -315,10 +315,14 @@ export class Renderer {
     }
     this.lastSeenSeq = maxSeq;
 
-    // Attack animation: swing on a landed hit. A slot-1 cast is "heavy" (Golpe Forte); a plain
-    // auto-attack swings too (gated so a bleed tick can't restart the clip mid-swing).
-    if (castSlot !== 0 && hitEnemy) {
-      av.triggerAttack(castSlot === 1);
+    // Attack / ability animation. On a successful cast (castSlot != 0) play the ability's specific
+    // clip when it has one (Onda de Chamas, Varredura, ...), else the class's default attack clip
+    // ("heavy" for a slot-1 cast). A plain auto-attack swings on a landed hit (gated so a bleed
+    // tick can't restart the clip mid-swing).
+    if (castSlot !== 0) {
+      const clip = abilityClip(p.mastery, castSlot);
+      if (clip) av.playClip(clip);
+      else av.triggerAttack(castSlot === 1);
     } else if (hitEnemy && !av.isSwinging()) {
       av.triggerAttack(false);
     }

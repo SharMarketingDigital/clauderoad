@@ -71,12 +71,17 @@ export class PlayerAvatar {
   private walk?: THREE.AnimationAction;
   private current?: THREE.AnimationAction; // the active locomotion base (idle/walk)
 
-  // One-shot attack clips for this class (LoopOnce, clamp on the last frame). `attack` is the
-  // normal/auto-attack hit; `heavyAttack` is the weightier clip for Golpe Forte (sword only).
-  // Either may be undefined if the clip wasn't found; triggerAttack falls back or no-ops.
-  private attack?: THREE.AnimationAction;
-  private heavyAttack?: THREE.AnimationAction;
-  private attacking = false; // an attack clip is currently playing (the base is faded out)
+  // Every loaded Rig_Medium clip by name + a lazy cache of one-shot (LoopOnce) actions built from
+  // them — so triggerAttack and playClip can fire ANY clip (the class auto-attack, or an ability's
+  // own animation) without prebuilding actions. `attackClipName`/`heavyClipName` are this class's
+  // default auto-attack clips; `activeAttack` is the one-shot currently playing (the locomotion
+  // base is faded out while it runs).
+  private clipsByName = new Map<string, THREE.AnimationClip>();
+  private oneShotCache = new Map<string, THREE.AnimationAction>();
+  private attackClipName?: string;
+  private heavyClipName?: string;
+  private activeAttack?: THREE.AnimationAction;
+  private attacking = false; // an attack/ability clip is currently playing (the base is faded out)
 
   // `mastery` is the player's class; it picks the body skin (MASTERY_MODEL), the weapon(s)
   // attached to the hand-slot bones (MASTERY_WEAPON), and the attack clip (MASTERY_ATTACK_CLIP).
@@ -126,9 +131,9 @@ export class PlayerAvatar {
       ...general.animations, ...movement.animations,
       ...melee.animations, ...ranged.animations,
     ];
-    const byName = (name: string): THREE.AnimationClip | undefined => clips.find((c) => c.name === name);
-    const idleClip = byName('Idle_A');
-    const walkClip = byName('Walking_A'); // swap to 'Running_A' if the stride looks too slow for the move speed
+    for (const c of clips) this.clipsByName.set(c.name, c);
+    const idleClip = this.clipsByName.get('Idle_A');
+    const walkClip = this.clipsByName.get('Walking_A'); // swap to 'Running_A' if the stride looks too slow
     if (idleClip) {
       this.idle = this.mixer.clipAction(idleClip);
       this.idle.play();
@@ -136,26 +141,17 @@ export class PlayerAvatar {
     }
     if (walkClip) this.walk = this.mixer.clipAction(walkClip);
 
-    // The class's attack clip(s) as one-shots: play once, then hold the last frame until faded
-    // back out (so a fast clip can't snap to rest before we crossfade to idle/walk).
+    // This class's default auto-attack clips (resolved lazily into one-shot actions on first use).
     const atk = MASTERY_ATTACK_CLIP[this.mastery];
-    const mkOneShot = (name?: string): THREE.AnimationAction | undefined => {
-      const clip = name ? byName(name) : undefined;
-      if (!clip || !this.mixer) return undefined;
-      const a = this.mixer.clipAction(clip);
-      a.setLoop(THREE.LoopOnce, 1);
-      a.clampWhenFinished = true;
-      return a;
-    };
-    this.attack = mkOneShot(atk.attack);
-    this.heavyAttack = mkOneShot(atk.heavy);
+    this.attackClipName = atk.attack;
+    this.heavyClipName = atk.heavy;
 
-    // When a one-shot attack finishes, resume the locomotion base (idle/walk was faded out on
-    // the strike). Only attack clips are LoopOnce, so 'finished' always means an attack ended.
+    // When a one-shot (attack OR ability) clip finishes, resume the locomotion base (idle/walk was
+    // faded out on the strike). Only one-shots are LoopOnce, so 'finished' always means one ended.
     this.mixer.addEventListener('finished', () => {
       this.attacking = false;
-      this.attack?.fadeOut(ATTACK_FADE);
-      this.heavyAttack?.fadeOut(ATTACK_FADE);
+      this.activeAttack?.fadeOut(ATTACK_FADE);
+      this.activeAttack = undefined;
       this.current?.reset().fadeIn(ATTACK_FADE).play(); // update() then crossfades to walk if moving
     });
 
@@ -191,16 +187,41 @@ export class PlayerAvatar {
     return this.attacking;
   }
 
-  // Fire a one-shot attack clip. heavy = Golpe Forte -> the weightier clip (a chop) when the
-  // class has one, else the normal attack. Re-triggering restarts the clip from the top.
+  // Fire this class's default auto-attack clip. heavy = Golpe Forte -> the weightier clip (a chop)
+  // when the class has one, else the normal attack.
   triggerAttack(heavy: boolean): void {
-    const action = (heavy && this.heavyAttack) ? this.heavyAttack : this.attack;
+    const name = (heavy && this.heavyClipName) ? this.heavyClipName : this.attackClipName;
+    this.playAction(this.oneShot(name));
+  }
+
+  // Fire a SPECIFIC clip by name as a one-shot — an ability's own animation (e.g. Magic_Spellcasting
+  // for Onda de Chamas, Melee_2H_Attack_Spin for Varredura). No-op if the clip isn't loaded.
+  playClip(name: string): void {
+    this.playAction(this.oneShot(name));
+  }
+
+  // Resolve (and cache) a LoopOnce action for a clip name, or undefined if not loaded.
+  private oneShot(name?: string): THREE.AnimationAction | undefined {
+    if (!name || !this.mixer) return undefined;
+    const cached = this.oneShotCache.get(name);
+    if (cached) return cached;
+    const clip = this.clipsByName.get(name);
+    if (!clip) return undefined;
+    const a = this.mixer.clipAction(clip);
+    a.setLoop(THREE.LoopOnce, 1);
+    a.clampWhenFinished = true;
+    this.oneShotCache.set(name, a);
+    return a;
+  }
+
+  // Play a one-shot over the locomotion base: stop any other one-shot (so they can't blend), fade
+  // this one in, fade the base out, and mark us "attacking" until 'finished' resumes the base.
+  private playAction(action: THREE.AnimationAction | undefined): void {
     if (!action) return;
-    // Stop the OTHER attack action so normal<->heavy can't blend if we switch mid-swing.
-    const other = action === this.attack ? this.heavyAttack : this.attack;
-    other?.stop();
+    if (this.activeAttack && this.activeAttack !== action) this.activeAttack.stop();
     action.reset().fadeIn(ATTACK_FADE).play();
     this.current?.fadeOut(ATTACK_FADE);
+    this.activeAttack = action;
     this.attacking = true;
   }
 

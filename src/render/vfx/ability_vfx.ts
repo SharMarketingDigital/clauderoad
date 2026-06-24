@@ -27,13 +27,26 @@ type TexKey = keyof typeof TEXTURES;
 // sim's action-bar slots WITHOUT importing sim content (keeps the IWorld seam intact). Buffs live
 // in a separate ABILITY_SELF_EFFECT table (added with the aura group).
 const ABILITY_EFFECT: Partial<Record<MasteryId, Record<number, string>>> = {
-  mage: { 1: 'fireball', 3: 'frostbolt' },
+  mage: { 1: 'fireball', 2: 'flamewave', 3: 'frostbolt' },
   bow: { 1: 'arrow', 2: 'multishot', 3: 'frostarrow' },
+  spear: { 2: 'sweep' },
 };
 
 // Look up the damaging-effect id for a (mastery, slot), or undefined when nothing is wired.
 export function abilityEffect(mastery: MasteryId, slot: number): string | undefined {
   return ABILITY_EFFECT[mastery]?.[slot];
+}
+
+// Abilities whose ANIMATION clip differs from the class auto-attack — the renderer plays this clip
+// via PlayerAvatar.playClip on cast. Slots not listed fall back to the default attack clip.
+const ABILITY_CLIP: Partial<Record<MasteryId, Record<number, string>>> = {
+  mage: { 2: 'Ranged_Magic_Spellcasting' }, // Onda de Chamas — a sweeping cast
+  spear: { 2: 'Melee_2H_Attack_Spin' }, // Varredura — an arcing spin
+};
+
+// Look up the ability's specific animation clip, or undefined to use the class's default attack.
+export function abilityClip(mastery: MasteryId, slot: number): string | undefined {
+  return ABILITY_CLIP[mastery]?.[slot];
 }
 
 const TRAIL_EVERY = 0.02; // seconds between trail emissions during flight
@@ -61,6 +74,19 @@ const STYLES: Record<string, ProjectileStyle> = {
   frostbolt: { coreTex: 'light', coreColor: 0x8fdcff, coreScale: 0.85, speed: 24, trail: 'frost', impact: 'frost', flash: 0x6cc8ff },
   arrow: { coreTex: 'trace', coreColor: 0xffe6a0, coreScale: 0.7, speed: 40, trail: 'none', impact: 'spark', flash: 0 },
   frostarrow: { coreTex: 'trace', coreColor: 0x9fe6ff, coreScale: 0.7, speed: 40, trail: 'frost', impact: 'frost', flash: 0 },
+};
+
+// A cone/fan burst that expands forward (direction = to - from): a spread of particles flung into
+// the frontal arc, each drifting out and fading. Reuses the particle pool (no continuous emitter).
+interface ConeStyle {
+  tex: TexKey; color: number; blending: THREE.Blending;
+  count: number; arc: number; reach: number; life: number;
+  s0: number; s1: number; o0: number; o1: number;
+  embers: boolean; // a few forward sparks/embers for extra punch
+}
+const CONES: Record<string, ConeStyle> = {
+  flamewave: { tex: 'flame', color: 0xffb347, blending: THREE.AdditiveBlending, count: 16, arc: 1.1, reach: 6, life: 0.45, s0: 0.5, s1: 1.7, o0: 1, o1: 0, embers: true },
+  sweep: { tex: 'smoke', color: 0x9b8a6a, blending: THREE.NormalBlending, count: 14, arc: 1.5, reach: 3.6, life: 0.4, s0: 0.4, s1: 1.1, o0: 0.6, o1: 0, embers: false },
 };
 
 // A free-floating particle: a sprite that drifts, scales, and fades over its life.
@@ -117,6 +143,10 @@ export class AbilityVfx {
         break;
       case 'multishot':
         this.spawnVolley(from, to);
+        break;
+      case 'flamewave':
+      case 'sweep':
+        this.spawnCone(from, to, CONES[effect]);
         break;
     }
   }
@@ -179,6 +209,29 @@ export class AbilityVfx {
       const a = base + ((i / (MULTI_COUNT - 1)) - 0.5) * MULTI_SPREAD;
       const t = new THREE.Vector3(from.x + Math.cos(a) * dist, from.y + dy, from.z + Math.sin(a) * dist);
       this.spawnProjectile(from, t, STYLES.arrow);
+    }
+  }
+
+  // A fan of particles flung into the frontal arc (direction = to - from). Reuses the particle pool.
+  private spawnCone(from: THREE.Vector3, to: THREE.Vector3, style: ConeStyle): void {
+    const base = Math.atan2(to.z - from.z, to.x - from.x);
+    for (let i = 0; i < style.count; i++) {
+      const a = base + (Math.random() - 0.5) * style.arc;
+      const speed = rnd(style.reach * 0.6, style.reach);
+      const start = rnd(0.4, 1.4); // begin a bit in front of the caster
+      const spr = this.makeSprite(style.tex, style.color, style.blending);
+      spr.position.set(from.x + Math.cos(a) * start, from.y + rnd(-0.2, 0.4), from.z + Math.sin(a) * start);
+      spr.material.rotation = rnd(0, Math.PI * 2);
+      this.particles.push({ sprite: spr, vx: Math.cos(a) * speed, vy: rnd(0, 0.5), vz: Math.sin(a) * speed, life: style.life, maxLife: style.life, s0: style.s0, s1: style.s1, o0: style.o0, o1: style.o1 });
+    }
+    if (style.embers) {
+      for (let k = 0; k < 6; k++) {
+        const a = base + (Math.random() - 0.5) * style.arc;
+        const speed = rnd(style.reach * 0.7, style.reach * 1.1);
+        const ember = this.makeSprite('spark', 0xffd28a, THREE.AdditiveBlending);
+        ember.position.set(from.x + Math.cos(a) * 0.6, from.y + rnd(0, 0.4), from.z + Math.sin(a) * 0.6);
+        this.particles.push({ sprite: ember, vx: Math.cos(a) * speed, vy: rnd(0.3, 1.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: 0.3, s1: 0.05, o0: 0.9, o1: 0 });
+      }
     }
   }
 
