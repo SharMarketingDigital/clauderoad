@@ -225,6 +225,9 @@ html, body {
 .bag-slot.equippable:hover { border-color: #fff; }
 .bag-slot.usable { cursor: pointer; }
 .bag-slot.usable:hover { border-color: #6bff8a; } /* green: "drink me" */
+/* K2 degrees: gear the player can't equip yet (below its required level) — dimmed, no-go cursor. */
+.bag-slot.locked { cursor: not-allowed; opacity: 0.5; }
+.bag-slot.locked:hover { border-color: #ff6b6b; } /* red: requires a higher level */
 
 /* Rarity colors (placed AFTER .filled so they win the equal-specificity tie).
    Normal gray · SOS blue · SOM purple · SUN gold (with a glow). */

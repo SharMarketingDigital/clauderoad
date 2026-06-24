@@ -465,19 +465,26 @@ export class Hud {
       const stack = inv.stacks[i];
       if (stack) {
         slot.classList.add('filled');
-        slot.classList.toggle('equippable', stack.equipSlot != null);
+        // K2 degrees: a below-level equippable is LOCKED — no equip affordance, and the click
+        // is dead (the sim silently refuses it anyway). canEquip is undefined for non-equippables
+        // and true/false for gear (back-compat: undefined => treat as wearable).
+        const locked = stack.equipSlot != null && stack.canEquip === false;
+        slot.classList.toggle('equippable', stack.equipSlot != null && !locked);
+        slot.classList.toggle('locked', locked);
         slot.classList.toggle('usable', stack.consumable);
         slot.dataset.rarity = stack.rarity; // UI colors the border/text by this
         const plusTag = stack.plus > 0 ? ` +${stack.plus}` : '';
         const label = `${stack.name}${plusTag} (${stack.rarityName})`;
-        slot.title = stack.equipSlot
-          ? `${label} — clique p/ equipar`
-          : stack.consumable
-            ? `${label} — clique p/ usar`
-            : label;
+        slot.title = locked
+          ? `${label} — requer nível ${stack.reqLevel}`
+          : stack.equipSlot
+            ? `${label} — clique p/ equipar`
+            : stack.consumable
+              ? `${label} — clique p/ usar`
+              : label;
         slot.textContent = stack.qty > 1 ? `${label} ×${stack.qty}` : label;
       } else {
-        slot.classList.remove('filled', 'equippable', 'usable');
+        slot.classList.remove('filled', 'equippable', 'usable', 'locked');
         delete slot.dataset.rarity;
         slot.title = '';
         slot.textContent = '';
@@ -491,6 +498,7 @@ export class Hud {
     const stack = this.lastInv?.stacks[i];
     if (!stack || !this.world) return;
     if (stack.equipSlot) {
+      if (stack.canEquip === false) return; // K2: below required level — dead click (the sim would refuse it)
       this.world.sendCommand({
         t: 'equip',
         itemId: stack.itemId,
