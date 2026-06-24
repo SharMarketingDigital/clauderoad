@@ -64,7 +64,7 @@ const FOG_FAR = 200; // see farther across the larger world (camera far plane is
 // -- terrain relief (visual) --
 const TERRAIN_AMP = 1.6;
 const TERRAIN_SCALE = 0.013;
-const FLAT_RADIUS = 26;
+const FLAT_RADIUS = 38; // flat ground out past the city wall corners (~37 from centre) so the rampart sits clean
 const FLAT_RAMP = 16;
 const VILLAGE_FLAT = 13;
 const GROUND_SIZE = WORLD_HALF * 2 + 40; // covers the whole world (±WORLD_HALF) + a margin
