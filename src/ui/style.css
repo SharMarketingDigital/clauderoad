@@ -240,6 +240,34 @@ html, body {
   box-shadow: 0 0 7px rgba(242, 196, 74, 0.7);
 }
 
+/* K5 — Painel do Armazém (banco). Container largo p/ duas grades lado a lado; as células
+   reusam .bag-slot (tamanho, borda, cores de raridade). */
+.storage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 680px;
+  max-width: 94vw;
+  padding: 12px;
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+.storage[hidden] { display: none; }
+.storage-titlebar { font-weight: 700; font-size: 14px; color: var(--gold); text-align: center; }
+.storage-hint { font-size: 11px; color: var(--ink); text-align: center; margin: 4px 0 10px; opacity: 0.85; }
+.storage-dual { display: flex; gap: 16px; }
+.storage-col { flex: 1; min-width: 0; }
+.storage-col-title { font-size: 11px; font-weight: 600; color: var(--gold); margin-bottom: 6px; text-align: center; }
+.storage-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-height: 46vh; overflow-y: auto; }
+/* clicável quando perto do armazém; esmaecido + inerte quando longe (storage().inRange === false) */
+.storage .bag-slot.filled:not(.disabled) { cursor: pointer; }
+.storage .bag-slot.filled:not(.disabled):hover { border-color: #fff; }
+.storage .bag-slot.disabled { opacity: 0.5; cursor: default; }
+
 /* Equipped-slots row inside the bag window. */
 .equip-row {
   display: flex;

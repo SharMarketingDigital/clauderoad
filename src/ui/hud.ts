@@ -3,6 +3,7 @@ import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '.
 import { isTyping } from './typing';
 import { SLOT_LABELS } from './inventory';
 import { CharacterSheet } from './character_sheet';
+import { StoragePanel } from './storage';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -77,6 +78,8 @@ export class Hud {
   private lastInv: InventoryView | null = null;
   // K6 — ficha de personagem (tecla C); auto-contida, registra a própria hotkey e lê o EntityView.
   private sheet = new CharacterSheet();
+  // K5 — painel do armazém (tecla H); auto-contido, registra a própria hotkey e fala com a IWorld.
+  private storagePanel = new StoragePanel();
 
   constructor() {
     this.root = document.createElement('div');
@@ -278,6 +281,7 @@ export class Hud {
     if (this.shopOpen) this.updateShop(world, p);
     if (this.skillsOpen) this.updateSkills(world, p);
     if (this.sheet.isOpen()) this.sheet.update(p); // K6: ficha (só leitura)
+    if (this.storagePanel.isOpen()) this.storagePanel.update(world); // K5: armazém (depósito/saque)
   }
 
   // Skills panel (GDD B4): each ability's rank + the SP cost to raise it, with a
