@@ -36,18 +36,30 @@ export interface EnemyTemplate {
   swingTime: number; // seconds between bites
   aggroRadius: number; // world units; aggros when the player is this close
   leashRadius: number; // world units from the chase anchor before it gives up
-  // Per-species behavior (optional; omitted == the baseline melee wolf). The sim
+  // Per-species behavior (optional; omitted == the baseline melee minion). The sim
   // defaults these to ENEMY_SPEED / MELEE_RANGE, so leaving them off reproduces the
-  // original wolf exactly.
+  // baseline skeleton exactly.
   speed?: number; // chase/wander units/sec (default ENEMY_SPEED)
   attackRange?: number; // reach to strike (default MELEE_RANGE); a ranged species stands off at ~this distance
-  spawnWeight?: number; // relative spawn frequency among the species roster (default 1)
   onHit?: OnHitStatus; // optional status this species inflicts on the player when it bites
 }
 
+// --- The skeleton bestiary (KayKit Skeletons, Rig_Medium — the SAME rig as the player,
+// so the one set of Idle/Walk clips and the procedural attack swing animate them at no
+// extra cost). ONE species per ring (GDD v0.3 §G3 / Silkroad: every area has its own
+// creature): ring1 → Lacaio, ring2 → Ladino, ring4 → Guerreiro, ring10 → Mago. The
+// per-level scaling (levelHpMult/…) and the normal/champion/elite tier system layer on
+// top, so the ring-10 Mago is far deadlier than the ring-1 Lacaio even where the base
+// stats are close. Numbers are provisional — grounded loosely against the base (40 HP /
+// 6 dmg); tune by playing.
+
+// Ring 1 (level 1) — the starter skeleton by the town. This is the BASE template and the
+// determinism-critical species: its stats define the level-1 baseline the tests pin to,
+// and it carries NO on-hit debuff (kept clean on purpose). Stats are the original
+// starter mob's, unchanged — so the level-1 progression numbers stay exact.
 export const ENEMY_TEMPLATE: EnemyTemplate = {
-  id: 'grey_wolf',
-  name: 'Lobo Cinzento',
+  id: 'skeleton_minion',
+  name: 'Esqueleto Lacaio',
   hp: 40,
   xp: 25,
   sp: 4, // ~3 kills to rank up an ability the first time (cost 10); ramps with the cost curve
@@ -59,7 +71,6 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
   swingTime: 2.0,
   aggroRadius: 8,
   leashRadius: 16,
-  spawnWeight: 5, // the most common species — the world stays wolf-led but varied
   drops: [
     { itemId: 'wolf_leather', chance: 0.4 },
     { itemId: 'health_potion', chance: 0.25 },
@@ -71,124 +82,91 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
   ],
 };
 
-// --- Humanoid species (reuse the KayKit Adventurer models already on disk; they
-// share Rig_Medium, so they animate with the same Idle/Walk clips as the wolves).
-// Each is its own template with distinct stats AND behavior; the tier system
-// (normal/champion/elite) still layers on top. Numbers are provisional — grounded
-// loosely against the base wolf (40 HP / 6 dmg), tune by playing.
+// Ring 2 (level 2) — a fast, frail skeleton that pecks quickly and leaves a bleeding wound
+// (a small DoT on a successful strike — parsimonious, ~6 over 3s, occasional). Inherits the
+// old assassin's debuff role; thematic for a Ladino (rogue).
+export const ROGUE_TEMPLATE: EnemyTemplate = {
+  id: 'skeleton_rogue',
+  name: 'Esqueleto Ladino',
+  hp: 30,
+  xp: 20,
+  sp: 4,
+  goldMin: 3,
+  goldMax: 12,
+  str: 7, // meleeDamage(7,2) = 5 per nick
+  weaponDamage: 2,
+  swingTime: 1.6, // fast, pecking attacks
+  aggroRadius: 9,
+  leashRadius: 18,
+  speed: 3.0, // darts in
+  onHit: { kind: 'dot', chance: 0.3, durationSecs: 3, magnitude: 2, periodSecs: 1 },
+  drops: [
+    { itemId: 'health_potion', chance: 0.3 },
+    { itemId: 'old_sword', chance: 0.06 },
+    { itemId: 'lucky_powder', chance: 0.2 },
+    { itemId: 'elixir_weapon', chance: 0.14 },
+  ],
+};
 
-// A tanky, slow-moving brute that hits hard and is a real wall of HP.
-export const BRUTE_TEMPLATE: EnemyTemplate = {
-  id: 'brute',
-  name: 'Bruto Saqueador',
-  hp: 110,
-  xp: 60,
-  sp: 8,
+// Ring 4 (level 4) — a tanky, slow-moving warrior: a wall of HP that hits hard. Lumbering
+// (easy to kite, dangerous up close). Inherits the old brute's profile.
+export const WARRIOR_TEMPLATE: EnemyTemplate = {
+  id: 'skeleton_warrior',
+  name: 'Esqueleto Guerreiro',
+  hp: 70,
+  xp: 45,
+  sp: 6,
   goldMin: 6,
   goldMax: 18,
-  str: 14, // meleeDamage(14,4) = 11 per blow — a heavy hit
+  str: 12, // meleeDamage(12,4) = 10 per blow — a heavy hit
   weaponDamage: 4,
-  swingTime: 2.6, // slow, telegraphed swings
+  swingTime: 2.4, // slow, telegraphed swings
   aggroRadius: 8,
   leashRadius: 16,
-  speed: 1.7, // lumbering — easy to kite, dangerous up close
-  spawnWeight: 2,
+  speed: 2.0, // lumbering
   drops: [
     { itemId: 'wolf_leather', chance: 0.45 },
     { itemId: 'health_potion', chance: 0.3 },
-    { itemId: 'iron_spear', chance: 0.06 }, // the brute carries a spear (a way to farm into the Lança mastery)
+    { itemId: 'iron_spear', chance: 0.06 }, // carries a spear (a way to farm into the Lança mastery)
     { itemId: 'lucky_powder', chance: 0.2 },
     { itemId: 'elixir_armor', chance: 0.16 },
   ],
 };
 
-// A fast, frail bandit: quick frequent bites, low HP, carries coin.
-export const BANDIT_TEMPLATE: EnemyTemplate = {
-  id: 'bandit',
-  name: 'Bandido',
-  hp: 26,
-  xp: 18,
-  sp: 3,
-  goldMin: 3,
-  goldMax: 12, // bandits drop a bit more coin
-  str: 6, // meleeDamage(6,2) = 5 per nick
-  weaponDamage: 2,
-  swingTime: 1.4, // fast, pecking attacks
-  aggroRadius: 9,
-  leashRadius: 18,
-  speed: 3.3, // quick — closes the gap and chases hard
-  spawnWeight: 3,
-  drops: [
-    { itemId: 'health_potion', chance: 0.3 },
-    { itemId: 'old_sword', chance: 0.05 },
-    { itemId: 'lucky_powder', chance: 0.2 },
-    { itemId: 'elixir_weapon', chance: 0.14 },
-  ],
-};
-
-// A ranged renegade archer: notices from afar, stands off and shoots instead of
-// closing to melee (attackRange >> MELEE_RANGE makes the AI hold its distance).
-export const ARCHER_TEMPLATE: EnemyTemplate = {
-  id: 'archer',
-  name: 'Arqueiro Renegado',
-  hp: 34,
-  xp: 32,
-  sp: 5,
+// Ring 10 (level 10) — a ranged caster skeleton: notices from afar and stands off to fling
+// instead of closing (attackRange >> MELEE_RANGE makes the AI hold its distance). Deep-ring
+// common; level scaling makes it the deadliest common mob in the world.
+export const MAGE_TEMPLATE: EnemyTemplate = {
+  id: 'skeleton_mage',
+  name: 'Esqueleto Mago',
+  hp: 40,
+  xp: 55,
+  sp: 8,
   goldMin: 4,
-  goldMax: 12,
-  str: 7, // meleeDamage(7,3) = 6 per shot
-  weaponDamage: 3,
-  swingTime: 2.2, // a measured draw between shots
+  goldMax: 14,
+  str: 9, // meleeDamage(9,4) = 8 per cast
+  weaponDamage: 4,
+  swingTime: 2.2,
   aggroRadius: 12, // spots you from range
   leashRadius: 22,
   speed: 2.2,
-  attackRange: 11, // shoots from afar — holds distance rather than charging in
-  spawnWeight: 2,
+  attackRange: 11, // casts from afar — holds distance rather than charging in
   drops: [
     { itemId: 'health_potion', chance: 0.25 },
-    { itemId: 'short_bow', chance: 0.06 }, // drops a bow (a way to farm into the Arco mastery)
-    { itemId: 'lucky_powder', chance: 0.2 },
-    { itemId: 'elixir_weapon', chance: 0.14 },
-  ],
-};
-
-// A fast, bursty assassin: closes quickly and hits hard for its low HP.
-export const ASSASSIN_TEMPLATE: EnemyTemplate = {
-  id: 'assassin',
-  name: 'Assassino Encapuzado',
-  hp: 30,
-  xp: 34,
-  sp: 6,
-  goldMin: 4,
-  goldMax: 14,
-  str: 11, // meleeDamage(11,3) = 8 per strike — punchy for a glass cannon
-  weaponDamage: 3,
-  swingTime: 1.8,
-  aggroRadius: 9,
-  leashRadius: 16,
-  speed: 3.0, // darts in
-  spawnWeight: 2,
-  // A bleeding wound: a small damage-over-time on a successful strike (parsimonious —
-  // ~6 total over 3s, occasional). Thematic for an assassin; never one-shots.
-  onHit: { kind: 'dot', chance: 0.3, durationSecs: 3, magnitude: 2, periodSecs: 1 },
-  drops: [
-    { itemId: 'health_potion', chance: 0.25 },
-    { itemId: 'old_sword', chance: 0.06 },
     { itemId: 'lucky_powder', chance: 0.22 },
     { itemId: 'elixir_weapon', chance: 0.14 },
     { itemId: 'elixir_armor', chance: 0.14 },
   ],
 };
 
-// The species roster used for spawning. A spawn rolls one by spawnWeight via the
-// sim's dedicated speciesRng (an independent substream, like the tier roll), so
-// adding variety never perturbs the main loot/position Rng.
+// The species roster (one per ring). Drives the lookup by id and the "every spawned mob is
+// a known species" test. Spawning no longer ROLLS a species — each ring spawns its own (see
+// SPECIES_BY_LEVEL / speciesForLevel), so there is no spawn-weight and no species Rng.
 export const ENEMY_SPECIES: EnemyTemplate[] = [
   ENEMY_TEMPLATE,
-  BRUTE_TEMPLATE,
-  BANDIT_TEMPLATE,
-  ARCHER_TEMPLATE,
-  ASSASSIN_TEMPLATE,
+  ROGUE_TEMPLATE,
+  WARRIOR_TEMPLATE,
+  MAGE_TEMPLATE,
 ];
 
 // Fast lookup by species id (for loot/stat resolution on kill and for the AI).
@@ -196,18 +174,20 @@ export const SPECIES_BY_ID: Record<string, EnemyTemplate> = Object.fromEntries(
   ENEMY_SPECIES.map((s) => [s.id, s]),
 );
 
-const SPECIES_WEIGHT_TOTAL = ENEMY_SPECIES.reduce((s, t) => s + (t.spawnWeight ?? 1), 0);
+// The deterministic anel→espécie map (GDD v0.3 §G3 / Silkroad: every area has its own
+// creature), keyed by the zone's LEVEL (see zones.ts ZoneDef.level: 1, 2, 4, 10).
+export const SPECIES_BY_LEVEL: Record<number, EnemyTemplate> = {
+  1: ENEMY_TEMPLATE, // ring1 Campina — Esqueleto Lacaio
+  2: ROGUE_TEMPLATE, // ring2 Bosque — Esqueleto Ladino
+  4: WARRIOR_TEMPLATE, // ring4 Terras Selvagens — Esqueleto Guerreiro
+  10: MAGE_TEMPLATE, // ring10 Ermo Profundo — Esqueleto Mago
+};
 
-// Pick a species from a roll in [0,1) by spawnWeight. Pure (the sim supplies the
-// roll), mirroring pickEnemyTier — keeps content Rng-free and deterministic.
-export function pickSpecies(roll: number): EnemyTemplate {
-  const target = roll * SPECIES_WEIGHT_TOTAL;
-  let acc = 0;
-  for (const t of ENEMY_SPECIES) {
-    acc += t.spawnWeight ?? 1;
-    if (target < acc) return t;
-  }
-  return ENEMY_SPECIES[0];
+// The species a ring spawns, by its level. Pure (no Rng): the ring fixes the species, so
+// spawning stays deterministic without any species roll. Unmapped levels fall back to the
+// base Lacaio (defensive — every current ring level is mapped).
+export function speciesForLevel(level: number): EnemyTemplate {
+  return SPECIES_BY_LEVEL[level] ?? ENEMY_TEMPLATE;
 }
 
 export const ENEMY_COUNT = 12;

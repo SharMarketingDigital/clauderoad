@@ -228,7 +228,7 @@ function killOneWolf(sim: Sim, killerId: number, followers: number[] = []): void
   const k0 = find(killerId)!;
   const wolves = sim
     .entities()
-    .filter((x) => x.kind === 'enemy' && !x.boss && x.species === 'grey_wolf' && x.hp > 0)
+    .filter((x) => x.kind === 'enemy' && !x.boss && x.species === 'skeleton_minion' && x.hp > 0)
     .sort((a, b) => (a.x - k0.x) ** 2 + (a.z - k0.z) ** 2 - ((b.x - k0.x) ** 2 + (b.z - k0.z) ** 2));
   if (wolves.length === 0) return;
   const tid = wolves[0].id;

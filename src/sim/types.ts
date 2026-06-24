@@ -93,9 +93,9 @@ export interface Entity {
   // enemy strength tier ('normal' for the player/NPCs/boss); scales HP/damage/
   // reward at spawn and drives the renderer's size/tint.
   tier: EnemyTierId;
-  // enemy species id (a key in content/enemies.ts SPECIES_BY_ID), e.g. 'grey_wolf'
-  // | 'brute' | 'bandit' | 'archer' | 'assassin'. Chosen at spawn; drives stats/
-  // loot/behavior and the renderer's model choice. '' for players/NPCs.
+  // enemy species id (a key in content/enemies.ts SPECIES_BY_ID), e.g. 'skeleton_minion'
+  // | 'skeleton_rogue' | 'skeleton_warrior' | 'skeleton_mage'. Fixed by the spawn ring;
+  // drives stats/loot/behavior and the renderer's model choice. '' for players/NPCs.
   species: string;
   // enemy AI: the leash anchor — where the CURRENT chase began. The enemy gives
   // up if led `leashRadius` from here. Players carry zeros (unused).

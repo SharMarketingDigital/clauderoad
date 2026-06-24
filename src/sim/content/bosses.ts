@@ -145,7 +145,7 @@ export const BOSS_DEFS: BossDef[] = [
     rooted: true,
     speed: 0,
     minionSpawnRadius: MINION_SPAWN_RADIUS,
-    minionSpecies: 'grey_wolf',
+    minionSpecies: 'skeleton_minion', // summoned skeleton minions (model + stat baseline)
   },
   {
     template: WARLORD_TEMPLATE,
@@ -156,7 +156,7 @@ export const BOSS_DEFS: BossDef[] = [
     rooted: false, // it CHASES
     speed: 3.2, // faster than a common mob (2.4), still kiteable by the player (6)
     minionSpawnRadius: 4,
-    minionSpecies: 'bandit', // mercenary bandits (Rogue model)
+    minionSpecies: 'skeleton_rogue', // summoned skeleton rogues (model + stat baseline)
   },
 ];
 

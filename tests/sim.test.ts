@@ -30,7 +30,7 @@ import {
   STARTING_ENEMY_COUNT,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
-import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
+import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ROGUE_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
@@ -489,7 +489,7 @@ function killNearestEnemy(sim: Sim, species?: string): boolean {
   for (let guard = 0; guard < 6000; guard++) {
     if (playerOf().gold > gold0) return true;
     const me = playerOf();
-    // Optionally restrict to one species (progression tests pass 'grey_wolf' to assert
+    // Optionally restrict to one species (progression tests pass 'skeleton_minion' to assert
     // exact wolf XP/SP); unfiltered it kills the nearest of ANY species, so farming
     // loops don't deplete one species (respawns roll a fresh species each time).
     const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && (!species || e.species === species));
@@ -512,10 +512,10 @@ function killNearestEnemy(sim: Sim, species?: string): boolean {
 // that wolf's id, or null if none aggroed within the cap.
 function approachUntilAggro(sim: Sim): number | null {
   for (let i = 0; i < 2000; i++) {
-    const hostile = sim.entities().find((e) => e.kind === 'enemy' && !e.boss && e.hostile && e.species === 'grey_wolf');
+    const hostile = sim.entities().find((e) => e.kind === 'enemy' && !e.boss && e.hostile && e.species === 'skeleton_minion');
     if (hostile) return hostile.id;
     const p = sim.entities().find((e) => e.kind === 'player')!;
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.species === 'grey_wolf');
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.species === 'skeleton_minion');
     if (wolves.length === 0) return null;
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     const w = wolves[0];
@@ -707,7 +707,7 @@ function driveIntoWolvesUntilDead(sim: Sim): void {
 function castWolf(sim: Sim, slot: number): number | null {
   for (let i = 0; i < 2000; i++) {
     const p = sim.entities().find((e) => e.kind === 'player')!;
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'skeleton_minion');
     if (wolves.length === 0) return null;
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     const w = wolves[0];
@@ -929,7 +929,7 @@ describe('spear mastery (Lança)', () => {
   const findBoss = (sim: Sim) => sim.entities().find((e) => e.boss);
   const nearestWolf = (sim: Sim) => {
     const p = player(sim);
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'skeleton_minion');
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     return wolves[0];
   };
@@ -989,29 +989,41 @@ describe('spear mastery (Lança)', () => {
     const sim = new Sim(7);
     equipSpear(sim);
     const range = MASTERIES.spear.attackRange!;
-    // The rings spawn mobs in PACKS, so clusters exist. Walk into the nearest cluster (a
-    // mob that has a neighbor within cone range) and sweep — a single Varredura cast should
-    // damage 2+ distinct enemies. (Anchoring on any enemy is fine; the cone hits every
-    // enemy in front within reach, regardless of species.)
+    // The rings spawn mobs in PACKS (MOBS_PER_SPOT), so clusters exist. Walk into the
+    // nearest pack of ANY species and let it converge — aggroed melee mobs stack on the
+    // player at reach — then sweep when 2+ sit in the cone (range + front half-plane, the
+    // same gate enemiesInCone uses). One Varredura cast then damages 2+ distinct enemies.
     let hits = 0;
-    for (let i = 0; i < 4000 && hits < 2; i++) {
+    for (let i = 0; i < 6000 && hits < 2; i++) {
       const p = player(sim);
-      const live = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0);
-      // the nearest mob that is part of a cluster (has a neighbor within cone range)
-      const anchor = live
-        .filter((e) => live.some((o) => o.id !== e.id && Math.hypot(o.x - e.x, o.z - e.z) <= range))
-        .sort((a, b) => ((a.x - p.x) ** 2 + (a.z - p.z) ** 2) - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2))[0];
-      if (!anchor) { sim.step(); continue; }
-      if (Math.hypot(anchor.x - p.x, anchor.z - p.z) > 1.0) {
+      const live = sim.entities()
+        .filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0)
+        .sort((a, b) => ((a.x - p.x) ** 2 + (a.z - p.z) ** 2) - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+      const target = live[0]; // the nearest living mob orients (and is hit by) the cone
+      if (!target) { sim.step(); continue; }
+      if (Math.hypot(target.x - p.x, target.z - p.z) > range) {
         sim.sendCommand({ t: 'set-target', id: null }); // no auto-attack en route
-        sim.sendCommand({ t: 'move', dx: anchor.x - p.x, dz: anchor.z - p.z });
+        sim.sendCommand({ t: 'move', dx: target.x - p.x, dz: target.z - p.z });
         sim.step();
         continue;
       }
-      // In contact with the cluster: anchor + sweep, then count distinct enemies hit.
+      // In reach: count how many enemies are already inside the frontal cone (facing the
+      // target). Fewer than 2 → hold position a tick and let the rest of the pack close in.
+      const facing = Math.atan2(target.x - p.x, target.z - p.z);
+      const inCone = live.filter((e) => {
+        const dx = e.x - p.x, dz = e.z - p.z, d = Math.hypot(dx, dz);
+        return d <= range && (d <= 1.0 || inFrontOf(dx, dz, facing));
+      });
+      if (inCone.length < 2) {
+        sim.sendCommand({ t: 'set-target', id: target.id });
+        sim.sendCommand({ t: 'stop' });
+        sim.step();
+        continue;
+      }
+      // 2+ in the cone: anchor + sweep, then count distinct enemies hit this tick.
       const before = sim.recentEvents();
       const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
-      sim.sendCommand({ t: 'set-target', id: anchor.id }); // cone anchors on (and faces) this target
+      sim.sendCommand({ t: 'set-target', id: target.id }); // cone anchors on (and faces) this target
       sim.sendCommand({ t: 'use-ability', slot: 2 }); // Varredura (cone)
       sim.sendCommand({ t: 'stop' });
       sim.step();
@@ -1141,7 +1153,7 @@ describe('bow mastery (Arco)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
   const nearestWolf = (sim: Sim) => {
     const p = player(sim);
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'skeleton_minion');
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     return wolves[0];
   };
@@ -1204,10 +1216,15 @@ describe('bow mastery (Arco)', () => {
     const sim = new Sim(7);
     equipBow(sim);
     const range = MASTERIES.bow.attackRange!;
+    // Anchor the volley on the nearest mob of ANY species (each ring is now one species, so
+    // fresh same-species packs sit a ring out from the farmed starter ring). With the long
+    // bow range a pack easily puts 2+ in the firing arc; the volley then hits them all.
     let hits = 0;
-    for (let i = 0; i < 1500 && hits === 0; i++) {
+    for (let i = 0; i < 4000 && hits < 2; i++) {
       const p = player(sim);
-      const w = nearestWolf(sim);
+      const w = sim.entities()
+        .filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0)
+        .sort((a, b) => ((a.x - p.x) ** 2 + (a.z - p.z) ** 2) - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2))[0];
       if (!w) { sim.step(); continue; }
       const facing = Math.atan2(w.x - p.x, w.z - p.z);
       const inArc = sim.entities().filter((e) => {
@@ -1288,7 +1305,7 @@ describe('bow mastery (Arco)', () => {
 describe('enemy tiers (champion & elite)', () => {
   // These tier tests assert HP/damage scaled off the grey wolf, so they look at the
   // wolf species specifically (the world now also spawns humanoid species).
-  const wolves = (sim: Sim) => sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.species === 'grey_wolf');
+  const wolves = (sim: Sim) => sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.species === 'skeleton_minion');
 
   it('the starting pack is all baseline; respawns introduce tougher tiers', () => {
     const sim = new Sim(7);
@@ -1505,7 +1522,7 @@ describe('progression (XP & levels)', () => {
 
     // exactly enough WOLF kills to cross the level-1 threshold (50 XP / 25 = 2 wolves)
     const kills = Math.ceil(xpForLevel(1) / ENEMY_TEMPLATE.xp);
-    for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim, 'grey_wolf')).toBe(true);
+    for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
 
     const pp = player();
     expect(pp.level).toBe(2);
@@ -1520,7 +1537,7 @@ describe('progression (XP & levels)', () => {
     expect(sim.recentEvents().some((e) => e.kind === 'levelup' && e.amount === 2)).toBe(true);
 
     // one more WOLF kill: XP accumulates again toward level 3 (the HUD bar refills)
-    expect(killNearestEnemy(sim, 'grey_wolf')).toBe(true);
+    expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
     const after = player();
     expect(after.level).toBe(2);
     expect(after.xp).toBe(ENEMY_TEMPLATE.xp); // 25 progress into level 2
@@ -2485,11 +2502,11 @@ describe('enemies apply status effects', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
   const findWarlord = (sim: Sim) => sim.entities().find((e) => e.boss && e.species === 'warlord');
 
-  it('the content carries on-hit status data (Warlord slow, Alfa stun, Assassin bleed)', () => {
+  it('the content carries on-hit status data (Warlord slow, Alfa stun, Ladino bleed)', () => {
     expect(WARLORD_TEMPLATE.onHit?.kind).toBe('slow');
     expect(BOSS_TEMPLATE.onHit?.kind).toBe('stun');
-    expect(ASSASSIN_TEMPLATE.onHit?.kind).toBe('dot');
-    // the common wolf must NOT debuff — it's the determinism-critical species
+    expect(ROGUE_TEMPLATE.onHit?.kind).toBe('dot');
+    // the base skeleton must NOT debuff — it's the determinism-critical species
     expect(ENEMY_TEMPLATE.onHit).toBeUndefined();
   });
 
@@ -2781,7 +2798,7 @@ describe('SP and skill ranks', () => {
   it('killing a mob grants SP', () => {
     const sim = new Sim(7);
     expect(player(sim).sp).toBe(0);
-    expect(killNearestEnemy(sim, 'grey_wolf')).toBe(true);
+    expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
     expect(player(sim).sp).toBeGreaterThanOrEqual(ENEMY_TEMPLATE.sp); // at least a normal wolf's SP
   });
 
@@ -3028,7 +3045,7 @@ describe('mage mastery (Mago) — magical damage (Int)', () => {
   const FIREBALL = MASTERIES.mage.abilities.find((a) => a.slot === 1)!;
   const nearestWolf = (sim: Sim) => {
     const p = player(sim);
-    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'grey_wolf');
+    const wolves = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'skeleton_minion');
     wolves.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
     return wolves[0];
   };

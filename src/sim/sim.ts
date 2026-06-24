@@ -19,7 +19,7 @@ import type {
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
 import {
-  ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, pickSpecies, SPECIES_BY_ID,
+  ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, speciesForLevel, SPECIES_BY_ID,
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
@@ -133,7 +133,6 @@ export class Sim implements IWorld {
 
   private rng: Rng;
   private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
-  private speciesRng: Rng; // independent substream for enemy-species rolls (see constructor)
   private procRng: Rng; // independent substream for enemy on-hit status procs (see constructor)
   private spawnRng: Rng; // independent substream for zone spawn POSITIONS (see constructor)
   private partyRng: Rng; // independent substream for party loot auto-share recipient picks (see constructor)
@@ -183,10 +182,7 @@ export class Sim implements IWorld {
     // Enemy tiers roll from an INDEPENDENT deterministic substream so adding the
     // feature doesn't reshuffle the main loot/position Rng — worlds stay comparable.
     this.tierRng = new Rng((seed ^ 0x9e3779b9) >>> 0);
-    // Likewise, enemy SPECIES roll from their own substream, so a varied bestiary
-    // doesn't reshuffle the main loot/position Rng either.
-    this.speciesRng = new Rng((seed ^ 0x85ebca6b) >>> 0);
-    // And enemy on-hit status PROCS roll from their own substream, so a mob/boss
+    // Enemy on-hit status PROCS roll from their own substream, so a mob/boss
     // debuffing the player never perturbs the main loot/position stream.
     this.procRng = new Rng((seed ^ 0xc2b2ae35) >>> 0);
     // And party LOOT auto-share picks its random recipient from its own substream, so
@@ -324,11 +320,9 @@ export class Sim implements IWorld {
     // the world. The jitter (< half a ring) keeps the mob inside its ring.
     const x = clamp(spot.x + this.spawnRng.range(-SPAWN_JITTER, SPAWN_JITTER), -WORLD_HALF, WORLD_HALF);
     const z = clamp(spot.z + this.spawnRng.range(-SPAWN_JITTER, SPAWN_JITTER), -WORLD_HALF, WORLD_HALF);
-    // The innermost ring (level 1) is the grey-wolf "starter ring" by the town; the deeper
-    // rings get the varied humanoid bestiary. The roll runs every spawn (own substream), so
-    // the species stream stays independent of this choice.
-    const rolled = pickSpecies(this.speciesRng.next());
-    const sp = zone.level === 1 ? ENEMY_TEMPLATE : rolled;
+    // Each ring spawns its OWN species (GDD v0.3 §G3 / Silkroad: every area has its own
+    // creature) — a deterministic anel→espécie map keyed by the ring's level, no species roll.
+    const sp = speciesForLevel(zone.level);
     const tier = tiered ? pickEnemyTier(this.tierRng.next()) : ENEMY_TIERS[0];
     const level = zone.level;
     const lhp = levelHpMult(level);
@@ -458,12 +452,12 @@ export class Sim implements IWorld {
 
   // A boss minion: a common-mob-like enemy (selectable/attackable) but ephemeral
   // (summoned:true) so killing it doesn't feed the common respawn queue. Uses the
-  // base wolf's combat with the def's minion HP/name/render-species.
+  // minion species' combat with the def's minion HP/name/render-species.
   private spawnMinion(x: number, z: number, def: BossDef): void {
     const id = this.nextId++;
-    // Combat matches the minion's render species (a wolf minion bites like a wolf, a
-    // bandit mercenary like a bandit) so movement and bite are consistent — the Alfa's
-    // grey_wolf minion resolves to ENEMY_TEMPLATE, byte-identical to before.
+    // Combat matches the minion's species (the Alfa summons skeleton_minion, the Warlord
+    // skeleton_rogue) so movement and bite stay consistent; an unknown id falls back to the
+    // base ENEMY_TEMPLATE.
     const ms = SPECIES_BY_ID[def.minionSpecies] ?? ENEMY_TEMPLATE;
     this.ents.set(id, {
       id, kind: 'enemy', name: def.template.minionName,
