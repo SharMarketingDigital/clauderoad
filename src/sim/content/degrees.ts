@@ -15,9 +15,11 @@
 // statMult é METADADO DE AUTORIA APENAS: já vem pré-calculado (baked) no campo `stats` de
 // cada item com grau. O SIM NUNCA lê statMult em runtime — recomputeStats e botGearScore
 // leem ITEMS[id].stats verbatim. Por isso nenhum Rng/clock entra aqui e o determinismo é
-// preservado. O teto COMBINADO (degree × rarity × +N) foi acordado com o Gabriel (dono de
-// combate): com statMult máx 1.8, o pior caso de uma arma D3/SUN/+10 fica ~106 de
-// weaponDamage (≈1.8× o teto atual ~58), dentro da curva de HP de mob (levelHpMult).
+// preservado. O teto COMBINADO (degree × rarity × +N) precisa do aval do Gabriel (dono de
+// combate): o PIOR caso real é a Alabarda D3 (wd baked 22) em SUN/+10 = round(round(22×3.0)×2.0)
+// = 132 de weaponDamage (≈1.83× o teto pré-degrees ~72, do iron_spear 12 em SUN/+10), ainda
+// dentro da curva de HP de mob (levelHpMult). NOTA: o comentário anterior dizia ~106/~58 —
+// corrigido; reconfirmar o teto real de 132 com o Gabriel antes de a mitigação entrar.
 //
 // NOTA (gate é action-only): meetsLevelReq é checado na AÇÃO de equipar (ver Sim.equip),
 // nunca no restore do save — um item já equipado num save não é revalidado/removido no

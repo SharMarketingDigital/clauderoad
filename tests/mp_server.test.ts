@@ -208,6 +208,30 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     expect(eq!.itemId).toBe(gear!.itemId); // it's now equipped (the server decided it)
   });
 
+  it('accepts unequip on a NON-weapon slot — the server whitelist covers all 10 equip slots (K1)', () => {
+    // Regression guard for K1: the server's VALID_SLOTS used to be {weapon,armor}, so online
+    // it silently dropped unequip/enhance/repair for the 8 real non-weapon slots. This drives
+    // that exact path through ServerWorld.command() with a looted armor piece (e.g. chest).
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
+    for (let r = 0; r < 15 && !gear; r++) {
+      farm(w, a, 1200);
+      gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null && s.equipSlot !== 'weapon') as typeof gear;
+    }
+    expect(gear).toBeDefined(); // looted a non-weapon piece (armor/accessory)
+    expect(gear!.equipSlot).not.toBe('weapon');
+    const slot = gear!.equipSlot!;
+    w.command(a, { t: 'equip', itemId: gear!.itemId, rarity: gear!.rarity, plus: gear!.plus });
+    w.step();
+    expect(w.selfState(a).inventory.equipment.find((e) => e.slot === slot)!.itemId).toBe(gear!.itemId);
+    // The regression assertion: unequip that non-weapon slot THROUGH THE SERVER. Under the old
+    // {weapon,armor} whitelist this command was silently discarded and the slot stayed filled.
+    w.command(a, { t: 'unequip', slot });
+    w.step();
+    expect(w.selfState(a).inventory.equipment.find((e) => e.slot === slot)!.itemId).toBeNull();
+  });
+
   it('the vendor loop works in MP — walk into range, sell loot for gold', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
