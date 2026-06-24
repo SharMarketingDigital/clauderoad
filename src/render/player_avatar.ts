@@ -1,61 +1,26 @@
 // Loads the local player's CLASS model (GLB) and drives it: Rig_Medium idle/walk clips via an
 // AnimationMixer, the class weapon(s) parented to the hand-slot bones (sword+shield, bow, staff
-// or spear), and a procedural attack swing layered on top of the clip pose. The body skin and
-// weapons both come from the player's class (see class_models.ts); all four skins share the
-// Rig_Medium rig, so this code is identical for every one.
+// or spear), and a one-shot ATTACK CLIP (chosen per weapon type) played on top when the player
+// strikes. The body skin and weapons both come from the player's class (see class_models.ts);
+// all four skins share the Rig_Medium rig, so this code is identical for every one.
 //
 // Presentation only. It reads nothing from the world — the renderer tells it when
 // the player moves/attacks (derived from IWorld) and feeds it the host delta time.
 //
 // NOTE on rigs: every class skin uses KayKit's "Rig_Medium" skeleton (bones upperarm.l,
-// handslot.r, ...). Its animations therefore come from the Adventurers pack's own
-// Rig_Medium_*.glb — NOT KayKit_AnimatedCharacter_v1.2.glb, which is a different,
-// incompatible 6-bone rig. There is no melee-attack clip in the free Rig_Medium
-// set, so the attack is a small procedural swing (see update()).
+// handslot.r, ...). Its animations therefore come from the pack's own Rig_Medium_*.glb —
+// NOT KayKit_AnimatedCharacter_v1.2.glb, which is a different, incompatible 6-bone rig.
+// Idle/Walk come from General/MovementBasic; the attack clips from CombatMelee/CombatRanged
+// (per class — see MASTERY_ATTACK_CLIP). They all bind to the same bones, so one mixer drives them.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { MasteryId } from '../world_api';
-import { MASTERY_MODEL, MASTERY_WEAPON } from './class_models';
+import { MASTERY_MODEL, MASTERY_WEAPON, MASTERY_ATTACK_CLIP } from './class_models';
 
 const TARGET_HEIGHT = 1.9; // world units — the Knight is auto-scaled to roughly the old capsule's height
 const MODEL_FORWARD_Y = 0; // the Knight mesh already faces +Z (sim facing=0); a 180° offset made it run backward
 const FADE = 0.18; // idle<->walk crossfade, seconds
-
-// --- attack swing (procedural; layered on top of the idle/walk clip pose) ----------
-// The blade winds UP, then cuts DOWN *through* the rest pose into a short follow-
-// through, then settles — so it reads as a real cut, not a raise-and-return twitch.
-// Successive swings alternate the diagonal for a combo feel. All the feel knobs:
-const SWING_SECS = 0.42; // auto-attack swing duration (s) — raise it for a slower, weightier cut
-const SWING_SECS_HEAVY = 0.55; // Golpe Forte: longer, to fit a bigger arc
-const SWING_AMP = 2.1; // auto-attack arc size (radians of shoulder rotation) — bigger = wider cut
-const SWING_AMP_HEAVY = 2.9; // Golpe Forte: wider / more aggressive
-const WINDUP_FRAC = 0.34; // fraction of the swing spent raising the sword before the cut
-const SETTLE_FRAC = 0.84; // when the follow-through starts easing back to neutral
-const FOLLOW_FRAC = 0.35; // how far PAST rest the cut follows through (× amplitude)
-// The two diagonal cuts, alternated each swing. Each is the bone-local rotation
-// AXIS the blade sweeps around; they are mirror images:
-//   CUT_A = '\' (top-right -> bottom-left), CUT_B = '/' (top-left -> bottom-right).
-// The Z term drives the forward/back depth of the cut (+Z cuts toward the front /
-// the enemy); the X term tilts it into the diagonal. Flip a CUT's Z sign to cut
-// front vs back; flip an X sign to swap a diagonal's slant. (Do NOT flip SWING_AMP —
-// that negates the whole profile and inverts the wind-up->cut order.)
-const CUT_A = new THREE.Vector3(0.6, 0, 1).normalize(); // first swing: '\'
-const CUT_B = new THREE.Vector3(-0.6, 0, 1).normalize(); // next swing: '/'
-
-// Easing + the swing's normalized angle profile (multiplied by the amplitude).
-const easeOutCubic = (t: number): number => 1 - (1 - t) ** 3;
-const easeInCubic = (t: number): number => t * t * t;
-const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-// progress p in [0,1] -> 0 -> +1 (raise) -> -FOLLOW (cut through rest) -> 0 (settle).
-function swingProfile(p: number): number {
-  if (p < WINDUP_FRAC) return easeOutCubic(p / WINDUP_FRAC); // raise: quick, decelerating into the wind-up
-  if (p < SETTLE_FRAC) {
-    const t = (p - WINDUP_FRAC) / (SETTLE_FRAC - WINDUP_FRAC);
-    return lerp(1, -FOLLOW_FRAC, easeInCubic(t)); // strike: hold, then accelerate down through rest
-  }
-  const t = (p - SETTLE_FRAC) / (1 - SETTLE_FRAC);
-  return lerp(-FOLLOW_FRAC, 0, easeOutCubic(t)); // settle back to neutral
-}
+const ATTACK_FADE = 0.1; // quick blend into/out of the one-shot attack clip
 
 // GLTFLoader sanitizes node names (strips '.', ':' ...), so 'handslot.r' becomes
 // 'handslotr' on the loaded object while the original is kept in userData.name.
@@ -104,20 +69,17 @@ export class PlayerAvatar {
   private mixer?: THREE.AnimationMixer;
   private idle?: THREE.AnimationAction;
   private walk?: THREE.AnimationAction;
-  private current?: THREE.AnimationAction;
+  private current?: THREE.AnimationAction; // the active locomotion base (idle/walk)
 
-  // The shoulder bone we pulse for the attack. It is animated every frame by the
-  // idle/walk clips, so the mixer resets it each tick -> the swing can't accumulate.
-  private swingBone?: THREE.Object3D;
-  private swingLeft = 0; // seconds remaining on the current swing (0 = not swinging)
-  private swingDur = SWING_SECS; // this swing's total duration
-  private swingAmp = SWING_AMP; // this swing's arc size (radians)
-  private swingAxis = CUT_A; // this swing's diagonal (alternates each attack)
-  private swingFlip = false; // toggles \ <-> / each swing
-  private readonly tmpQ = new THREE.Quaternion();
+  // One-shot attack clips for this class (LoopOnce, clamp on the last frame). `attack` is the
+  // normal/auto-attack hit; `heavyAttack` is the weightier clip for Golpe Forte (sword only).
+  // Either may be undefined if the clip wasn't found; triggerAttack falls back or no-ops.
+  private attack?: THREE.AnimationAction;
+  private heavyAttack?: THREE.AnimationAction;
+  private attacking = false; // an attack clip is currently playing (the base is faded out)
 
-  // `mastery` is the player's class; it picks the body skin (MASTERY_MODEL) and the weapon(s)
-  // attached to the hand-slot bones (MASTERY_WEAPON) — see class_models.ts.
+  // `mastery` is the player's class; it picks the body skin (MASTERY_MODEL), the weapon(s)
+  // attached to the hand-slot bones (MASTERY_WEAPON), and the attack clip (MASTERY_ATTACK_CLIP).
   constructor(private readonly mastery: MasteryId) {
     // Fire-and-forget async load; the game keeps running on the capsule fallback
     // until `ready` flips true. A failure just logs and leaves the capsule in place.
@@ -127,10 +89,12 @@ export class PlayerAvatar {
   private async load(): Promise<void> {
     const loader = new GLTFLoader();
     const weapon = MASTERY_WEAPON[this.mastery];
-    const [char, general, movement, right, left] = await Promise.all([
+    const [char, general, movement, melee, ranged, right, left] = await Promise.all([
       loader.loadAsync(MASTERY_MODEL[this.mastery]),
       loader.loadAsync('/models/Rig_Medium_General.glb'), // Idle_A, Hit_A, ... (same rig as every skin)
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'), // Walking_A/B/C, Running_A/B
+      loader.loadAsync('/models/Rig_Medium_CombatMelee.glb'), // Melee_*_Attack_* clips
+      loader.loadAsync('/models/Rig_Medium_CombatRanged.glb'), // Ranged_Bow_* / Ranged_Magic_* clips
       loader.loadAsync(weapon.rightHand),
       weapon.leftHand ? loader.loadAsync(weapon.leftHand) : Promise.resolve(null),
     ]);
@@ -154,11 +118,14 @@ export class PlayerAvatar {
     charObj.rotation.y = MODEL_FORWARD_Y;
     this.root.add(charObj);
 
-    // Animations bind by bone name; the Rig_Medium clips target the same bones every
-    // class skin uses, so the mixer drives the character even though the clips ship in
-    // separate GLBs.
+    // Animations bind by bone name; every Rig_Medium clip (idle/walk AND the combat clips)
+    // targets the same bones each class skin uses, so the mixer drives the character even
+    // though the clips ship in separate GLBs.
     this.mixer = new THREE.AnimationMixer(charObj);
-    const clips = [...general.animations, ...movement.animations];
+    const clips = [
+      ...general.animations, ...movement.animations,
+      ...melee.animations, ...ranged.animations,
+    ];
     const byName = (name: string): THREE.AnimationClip | undefined => clips.find((c) => c.name === name);
     const idleClip = byName('Idle_A');
     const walkClip = byName('Walking_A'); // swap to 'Running_A' if the stride looks too slow for the move speed
@@ -169,6 +136,29 @@ export class PlayerAvatar {
     }
     if (walkClip) this.walk = this.mixer.clipAction(walkClip);
 
+    // The class's attack clip(s) as one-shots: play once, then hold the last frame until faded
+    // back out (so a fast clip can't snap to rest before we crossfade to idle/walk).
+    const atk = MASTERY_ATTACK_CLIP[this.mastery];
+    const mkOneShot = (name?: string): THREE.AnimationAction | undefined => {
+      const clip = name ? byName(name) : undefined;
+      if (!clip || !this.mixer) return undefined;
+      const a = this.mixer.clipAction(clip);
+      a.setLoop(THREE.LoopOnce, 1);
+      a.clampWhenFinished = true;
+      return a;
+    };
+    this.attack = mkOneShot(atk.attack);
+    this.heavyAttack = mkOneShot(atk.heavy);
+
+    // When a one-shot attack finishes, resume the locomotion base (idle/walk was faded out on
+    // the strike). Only attack clips are LoopOnce, so 'finished' always means an attack ended.
+    this.mixer.addEventListener('finished', () => {
+      this.attacking = false;
+      this.attack?.fadeOut(ATTACK_FADE);
+      this.heavyAttack?.fadeOut(ATTACK_FADE);
+      this.current?.reset().fadeIn(ATTACK_FADE).play(); // update() then crossfades to walk if moving
+    });
+
     // Weapon(s) -> KayKit's dedicated hand-slot bones (modeled for identity attach). The right
     // hand always holds the class weapon; the left hand gets an off-hand only when the class has
     // one (Sword & Shield) — bow/staff/spear wield a single weapon and carry nothing off-hand.
@@ -176,7 +166,6 @@ export class PlayerAvatar {
     const handL = findNode(charObj, 'handslot.l');
     if (handR) handR.add(right.scene);
     if (handL && left) handL.add(left.scene);
-    this.swingBone = findNode(charObj, 'upperarm.r');
 
     // A skinned mesh's static bounding box doesn't track the animated pose, so it
     // can get wrongly frustum-culled; disable culling on the whole avatar.
@@ -196,38 +185,37 @@ export class PlayerAvatar {
     disposeAvatar(this.root);
   }
 
+  // True while an attack clip is playing — the renderer gates auto-attack swings on this so a
+  // bleed tick (or a fast re-fire) can't restart the clip mid-swing.
   isSwinging(): boolean {
-    return this.swingLeft > 0;
+    return this.attacking;
   }
 
-  // Fire a one-shot attack swing. heavy = Golpe Forte (wider, longer, more aggressive).
-  // Successive swings alternate the diagonal (\ then /) for a sword-combo feel.
+  // Fire a one-shot attack clip. heavy = Golpe Forte -> the weightier clip (a chop) when the
+  // class has one, else the normal attack. Re-triggering restarts the clip from the top.
   triggerAttack(heavy: boolean): void {
-    this.swingFlip = !this.swingFlip;
-    this.swingAxis = this.swingFlip ? CUT_A : CUT_B; // first swing -> '\'
-    this.swingDur = heavy ? SWING_SECS_HEAVY : SWING_SECS;
-    this.swingAmp = heavy ? SWING_AMP_HEAVY : SWING_AMP;
-    this.swingLeft = this.swingDur;
+    const action = (heavy && this.heavyAttack) ? this.heavyAttack : this.attack;
+    if (!action) return;
+    // Stop the OTHER attack action so normal<->heavy can't blend if we switch mid-swing.
+    const other = action === this.attack ? this.heavyAttack : this.attack;
+    other?.stop();
+    action.reset().fadeIn(ATTACK_FADE).play();
+    this.current?.fadeOut(ATTACK_FADE);
+    this.attacking = true;
   }
 
   // Called once per render frame with the host delta and whether the player moved.
   update(dt: number, moving: boolean): void {
     if (!this.mixer) return;
-    const want = (moving ? this.walk : this.idle) ?? this.idle;
-    if (want && want !== this.current) {
-      want.reset().fadeIn(FADE).play();
-      this.current?.fadeOut(FADE);
-      this.current = want;
+    // While an attack clip plays it owns the body; resume idle/walk only once it finishes.
+    if (!this.attacking) {
+      const want = (moving ? this.walk : this.idle) ?? this.idle;
+      if (want && want !== this.current) {
+        want.reset().fadeIn(FADE).play();
+        this.current?.fadeOut(FADE);
+        this.current = want;
+      }
     }
     this.mixer.update(dt);
-
-    // Procedural swing, applied AFTER the mixer so it rides on top of the clip pose:
-    // wind up -> cut through -> settle, eased, along this swing's diagonal axis.
-    if (this.swingLeft > 0 && this.swingBone) {
-      const p = Math.min(1, 1 - this.swingLeft / this.swingDur); // 0 -> 1 over the swing
-      const angle = swingProfile(p) * this.swingAmp;
-      this.swingBone.quaternion.multiply(this.tmpQ.setFromAxisAngle(this.swingAxis, angle));
-      this.swingLeft -= dt;
-    }
   }
 }

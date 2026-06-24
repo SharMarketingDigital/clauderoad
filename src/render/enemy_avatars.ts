@@ -5,8 +5,8 @@
 // The model is chosen by the sim's enemy species — one KayKit skeleton per ring
 // (skeleton_minion/rogue/warrior/mage). Champion/Elite are bigger + tinted; bosses
 // reuse a model + tint (the Alfa a purple mage skeleton, the Warlord a dark-red
-// barbarian). No melee-attack clip exists in the free Rig_Medium set, so a hit is
-// a short procedural lunge (a forward pitch).
+// barbarian). On a hit, the enemy plays a one-shot KayKit attack clip for its kind
+// (melee skeletons slice/chop; the mage skeleton casts), then returns to idle/walk.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -16,8 +16,7 @@ const AUTOFIT_HEIGHT = 1.8; // base skeleton height in world units (≈ the old 
 const MODEL_FORWARD_Y = 0; // KayKit Rig_Medium faces +Z (sim facing=0). Flip to Math.PI if skeletons run backward.
 const FADE = 0.18; // idle<->walk crossfade
 const MOVE_WINDOW_MS = 180; // treat the enemy as "moving" for this long after its last position change
-const LUNGE_SECS = 0.34; // attack-lunge duration
-const LUNGE_AMP = 0.55; // attack-lunge forward pitch (radians)
+const ATTACK_FADE = 0.1; // quick blend into/out of the one-shot attack clip
 
 const FILES: Record<string, string> = {
   // One skeleton model per ring species (KayKit Skeletons, Rig_Medium).
@@ -37,6 +36,17 @@ const SPECIES_VARIANT: Record<string, string> = {
   skeleton_rogue: 'rogue',
   skeleton_warrior: 'warrior',
   skeleton_mage: 'mage',
+};
+
+// The one-shot KayKit attack clip each model variant plays on a hit (Rig_Medium, same rig).
+// Melee skeletons slice/chop; the mage skeleton (and the caster boss) cast. Bosses resolve
+// through BOSS_VARIANT, so their variant ('mage'/'brute') picks the clip here too.
+const VARIANT_ATTACK_CLIP: Record<string, string> = {
+  minion: 'Melee_1H_Attack_Slice_Diagonal',
+  rogue: 'Melee_1H_Attack_Slice_Diagonal',
+  warrior: 'Melee_2H_Attack_Chop', // heavier swing for the bruiser
+  mage: 'Ranged_Magic_Shoot',
+  brute: 'Melee_2H_Attack_Chop', // the Warlord boss
 };
 
 const TIER_SCALE: Record<string, number> = { normal: 1, champion: 1.35, elite: 1.7 };
@@ -77,7 +87,6 @@ function styleFor(e: EntityView): Style {
 // One enemy's animated skeleton.
 class EnemyAvatar {
   readonly root = new THREE.Group();
-  private inner: THREE.Object3D;
   private mixer: THREE.AnimationMixer;
   private idle: THREE.AnimationAction;
   private walk: THREE.AnimationAction;
@@ -86,9 +95,10 @@ class EnemyAvatar {
   private prevX: number;
   private prevZ: number;
   private lastMoveMs = 0;
-  private lungeLeft = 0;
+  private attack?: THREE.AnimationAction; // one-shot attack clip (LoopOnce); undefined if not found
+  private attacking = false; // the attack clip is playing (the locomotion base is faded out)
 
-  constructor(template: THREE.Object3D, idleClip: THREE.AnimationClip, walkClip: THREE.AnimationClip, style: Style, x: number, z: number) {
+  constructor(template: THREE.Object3D, idleClip: THREE.AnimationClip, walkClip: THREE.AnimationClip, attackClip: THREE.AnimationClip | undefined, style: Style, x: number, z: number) {
     this.prevX = x;
     this.prevZ = z;
     const inner = cloneSkinned(template);
@@ -122,7 +132,6 @@ class EnemyAvatar {
     box = new THREE.Box3().setFromObject(inner);
     inner.position.y = -box.min.y;
     inner.rotation.y = MODEL_FORWARD_Y;
-    this.inner = inner;
     this.root.add(inner);
 
     this.mixer = new THREE.AnimationMixer(inner);
@@ -130,6 +139,18 @@ class EnemyAvatar {
     this.walk = this.mixer.clipAction(walkClip);
     this.idle.play();
     this.current = this.idle;
+    if (attackClip) {
+      this.attack = this.mixer.clipAction(attackClip);
+      this.attack.setLoop(THREE.LoopOnce, 1);
+      this.attack.clampWhenFinished = true;
+    }
+    // A one-shot attack is the only LoopOnce action here, so 'finished' means the attack
+    // ended: fade it out and resume the locomotion base (faded out on the strike).
+    this.mixer.addEventListener('finished', () => {
+      this.attacking = false;
+      this.attack?.fadeOut(ATTACK_FADE);
+      this.current.reset().fadeIn(ATTACK_FADE).play();
+    });
 
     // Status bead above the head, so the renderer's shared updateStatusMarker works.
     const bead = new THREE.Mesh(
@@ -149,25 +170,23 @@ class EnemyAvatar {
       this.prevZ = z;
     }
     const moving = nowMs - this.lastMoveMs < MOVE_WINDOW_MS;
-    const want = moving ? this.walk : this.idle;
-    if (want !== this.current) {
-      want.reset().fadeIn(FADE).play();
-      this.current.fadeOut(FADE);
-      this.current = want;
+    // While an attack clip plays it owns the body; resume idle/walk only once it finishes.
+    if (!this.attacking) {
+      const want = moving ? this.walk : this.idle;
+      if (want !== this.current) {
+        want.reset().fadeIn(FADE).play();
+        this.current.fadeOut(FADE);
+        this.current = want;
+      }
     }
     this.mixer.update(dt);
-
-    // Attack stand-in: a short forward pitch (lunge), layered on the clip pose.
-    if (this.lungeLeft > 0) {
-      const p = 1 - this.lungeLeft / LUNGE_SECS;
-      this.inner.rotation.x = Math.sin(Math.PI * Math.min(1, p)) * LUNGE_AMP;
-      this.lungeLeft -= dt;
-      if (this.lungeLeft <= 0) this.inner.rotation.x = 0;
-    }
   }
 
   triggerAttack(): void {
-    this.lungeLeft = LUNGE_SECS;
+    if (!this.attack) return;
+    this.attack.reset().fadeIn(ATTACK_FADE).play();
+    this.current.fadeOut(ATTACK_FADE);
+    this.attacking = true;
   }
 
   dispose(): void {
@@ -182,6 +201,7 @@ export class EnemyAvatars {
   private templates = new Map<string, THREE.Object3D>();
   private idleClip?: THREE.AnimationClip;
   private walkClip?: THREE.AnimationClip;
+  private clipsByName = new Map<string, THREE.AnimationClip>(); // every loaded clip, for attack lookup
   private avatars = new Map<number, EnemyAvatar>();
 
   constructor() {
@@ -190,7 +210,7 @@ export class EnemyAvatars {
 
   private async load(): Promise<void> {
     const loader = new GLTFLoader();
-    const [minion, rogue, warrior, mage, brute, general, movement] = await Promise.all([
+    const [minion, rogue, warrior, mage, brute, general, movement, melee, ranged] = await Promise.all([
       loader.loadAsync(FILES.minion),
       loader.loadAsync(FILES.rogue),
       loader.loadAsync(FILES.warrior),
@@ -198,13 +218,19 @@ export class EnemyAvatars {
       loader.loadAsync(FILES.brute), // Warlord boss skin
       loader.loadAsync('/models/Rig_Medium_General.glb'), // already in public/models from the Knight slice
       loader.loadAsync('/models/Rig_Medium_MovementBasic.glb'),
+      loader.loadAsync('/models/Rig_Medium_CombatMelee.glb'), // Melee_*_Attack_* clips
+      loader.loadAsync('/models/Rig_Medium_CombatRanged.glb'), // Ranged_Magic_* clips
     ]);
     this.templates.set('minion', minion.scene);
     this.templates.set('rogue', rogue.scene);
     this.templates.set('warrior', warrior.scene);
     this.templates.set('mage', mage.scene);
     this.templates.set('brute', brute.scene); // used by the Warlord boss variant
-    const clips = [...general.animations, ...movement.animations];
+    const clips = [
+      ...general.animations, ...movement.animations,
+      ...melee.animations, ...ranged.animations,
+    ];
+    this.clipsByName = new Map(clips.map((c) => [c.name, c]));
     this.idleClip = clips.find((c) => c.name === 'Idle_A');
     this.walkClip = clips.find((c) => c.name === 'Walking_A'); // swap to 'Running_A' for a charging look
     this.ready = !!(this.idleClip && this.walkClip);
@@ -218,7 +244,8 @@ export class EnemyAvatars {
       const style = styleFor(e);
       const tpl = this.templates.get(style.variant) ?? this.templates.get('warrior');
       if (!tpl) return null;
-      a = new EnemyAvatar(tpl, this.idleClip, this.walkClip, style, e.x, e.z);
+      const attackClip = this.clipsByName.get(VARIANT_ATTACK_CLIP[style.variant] ?? '');
+      a = new EnemyAvatar(tpl, this.idleClip, this.walkClip, attackClip, style, e.x, e.z);
       this.avatars.set(e.id, a);
     }
     return a.root;
