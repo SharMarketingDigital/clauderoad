@@ -548,3 +548,58 @@ html, body {
   35%  { transform: translate(-50%, -22px) scale(1); opacity: 1; }
   100% { transform: translate(-50%, -54px) scale(1); opacity: 0; }
 }
+
+/* K6 — Character sheet ("ficha"): a dedicated, READ-ONLY stats panel (toggle C). Anchored
+   left-center so it doesn't overlap the centered .bag/.skills modals. */
+.sheet {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 300px;
+  padding: 12px 14px;
+  pointer-events: auto; /* HUD root is pointer-events:none; opt back in (also blocks click-through) */
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink);
+}
+.sheet[hidden] { display: none; } /* the [hidden] attribute must beat display:flex */
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(200, 168, 90, 0.4);
+}
+.sheet-portrait { font-size: 18px; color: var(--gold); }
+.sheet-name { font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
+.sheet-level { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--gold); }
+.sheet-body { display: flex; flex-direction: column; gap: 4px; }
+.sheet-section {
+  margin-top: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.sheet-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; }
+.sheet-label { opacity: 0.85; }
+.sheet-val { font-weight: 600; }
+.sheet-barrow {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+/* The reused .hp/.mp/.xp tracks carry a small top margin from the unit-frame context — drop it
+   here so they sit centered in the row. */
+.sheet-barrow .hp,
+.sheet-barrow .mp,
+.sheet-barrow .xp { margin-top: 0; }

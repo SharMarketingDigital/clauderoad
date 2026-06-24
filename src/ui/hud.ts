@@ -2,6 +2,7 @@
 import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
 import { isTyping } from './typing';
 import { SLOT_LABELS } from './inventory';
+import { CharacterSheet } from './character_sheet';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -72,6 +73,8 @@ export class Hud {
   // unequip) can send commands against the current state.
   private world: IWorld | null = null;
   private lastInv: InventoryView | null = null;
+  // K6 — ficha de personagem (tecla C); auto-contida, registra a própria hotkey e lê o EntityView.
+  private sheet = new CharacterSheet();
 
   constructor() {
     this.root = document.createElement('div');
@@ -265,6 +268,7 @@ export class Hud {
     if (this.bagOpen) this.updateBag(world.inventory(), p);
     if (this.shopOpen) this.updateShop(world, p);
     if (this.skillsOpen) this.updateSkills(world, p);
+    if (this.sheet.isOpen()) this.sheet.update(p); // K6: ficha (só leitura)
   }
 
   // Skills panel (GDD B4): each ability's rank + the SP cost to raise it, with a
