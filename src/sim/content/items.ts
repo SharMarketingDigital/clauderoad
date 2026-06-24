@@ -36,6 +36,9 @@ export interface ItemDef {
   luckyPowder?: boolean; // the alchemy luck booster
   consumable?: ConsumableEffect; // present => usable from the bag for this effect
   value?: number; // base gold value; the vendor pays this (rarity-scaled) on a sale
+  // --- K2 degrees (graus por faixa de nível) — campos INTRÍNSECOS à definição do item ---
+  degree?: number; // grau do equipamento (1..N); ausente => grau 1 (linha base legada)
+  reqLevel?: number; // nível mínimo p/ EQUIPAR; ausente => derivado do grau (degrees.ts), senão 0
 }
 
 export const ITEMS: Record<string, ItemDef> = {
@@ -63,6 +66,23 @@ export const ITEMS: Record<string, ItemDef> = {
   short_bow: { id: 'short_bow', name: 'Arco Curto', slot: 'weapon', mastery: 'bow', stats: { weaponDamage: 8 }, value: 50 },
   // a magical weapon: switches to the Mago mastery (ranged MAGICAL damage scaling with Int)
   apprentice_staff: { id: 'apprentice_staff', name: 'Cajado de Aprendiz', slot: 'weapon', mastery: 'mage', stats: { weaponDamage: 9 }, value: 55 },
+  // --- K2 degrees: armas de 2º/3º grau por maestria (D1 = a arma base acima). Os stats já
+  // vêm "baked" = base.weaponDamage * DEGREES[grau].statMult (1.4 / 1.8), arredondado; o sim
+  // nunca lê statMult em runtime (degrees.ts). reqLevel vem da faixa do grau (D2=4, D3=8) e o
+  // equipar é gated por nível (ver Sim.equip). Só ARMAS nesta leva (slot 'weapon' não colide
+  // com a expansão de slots do K1; armadura defensiva é escopo do K3).
+  // Espada (base old_sword, wd 10)
+  iron_sword:     { id: 'iron_sword',     name: 'Espada de Ferro (2º Grau)',      slot: 'weapon', mastery: 'sword', degree: 2, reqLevel: 4, stats: { weaponDamage: 14 }, value: 60 },
+  steel_sword:    { id: 'steel_sword',    name: 'Espada de Aço (3º Grau)',        slot: 'weapon', mastery: 'sword', degree: 3, reqLevel: 8, stats: { weaponDamage: 18 }, value: 110 },
+  // Lança (base iron_spear, wd 12)
+  steel_spear:    { id: 'steel_spear',    name: 'Lança de Aço (2º Grau)',         slot: 'weapon', mastery: 'spear', degree: 2, reqLevel: 4, stats: { weaponDamage: 17 }, value: 90 },
+  halberd:        { id: 'halberd',        name: 'Alabarda (3º Grau)',             slot: 'weapon', mastery: 'spear', degree: 3, reqLevel: 8, stats: { weaponDamage: 22 }, value: 160 },
+  // Arco (base short_bow, wd 8)
+  hunters_bow:    { id: 'hunters_bow',    name: 'Arco de Caçador (2º Grau)',      slot: 'weapon', mastery: 'bow',   degree: 2, reqLevel: 4, stats: { weaponDamage: 11 }, value: 100 },
+  composite_bow:  { id: 'composite_bow',  name: 'Arco Composto (3º Grau)',        slot: 'weapon', mastery: 'bow',   degree: 3, reqLevel: 8, stats: { weaponDamage: 14 }, value: 175 },
+  // Cajado / Mago (base apprentice_staff, wd 9) — dano mágico escala com Int + weaponDamage
+  adept_staff:    { id: 'adept_staff',    name: 'Cajado de Adepto (2º Grau)',     slot: 'weapon', mastery: 'mage',  degree: 2, reqLevel: 4, stats: { weaponDamage: 13 }, value: 110 },
+  sorcerer_staff: { id: 'sorcerer_staff', name: 'Cajado de Feiticeiro (3º Grau)', slot: 'weapon', mastery: 'mage',  degree: 3, reqLevel: 8, stats: { weaponDamage: 16 }, value: 190 },
   // alchemy materials (no rarity; consumed to attempt a "+N" upgrade)
   elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', value: 15 },
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', value: 15 },

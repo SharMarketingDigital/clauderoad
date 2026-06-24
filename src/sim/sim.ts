@@ -25,6 +25,7 @@ import {
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
+import { meetsLevelReq, equipLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
 import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
 import {
@@ -555,17 +556,25 @@ export class Sim implements IWorld {
   inventoryFor(id: number): InventoryView {
     const p = this.ents.get(id);
     const stacks = p
-      ? p.bag.map((s) => ({
-          itemId: s.itemId,
-          name: ITEMS[s.itemId]?.name ?? s.itemId,
-          qty: s.qty,
-          rarity: s.rarity,
-          rarityName: rarityDef(s.rarity).name,
-          plus: s.plus,
-          equipSlot: ITEMS[s.itemId]?.slot,
-          consumable: ITEMS[s.itemId]?.consumable != null,
-          sellValue: rarityStat(ITEMS[s.itemId]?.value ?? 0, s.rarity),
-        }))
+      ? p.bag.map((s) => {
+          const def = ITEMS[s.itemId];
+          return {
+            itemId: s.itemId,
+            name: def?.name ?? s.itemId,
+            qty: s.qty,
+            rarity: s.rarity,
+            rarityName: rarityDef(s.rarity).name,
+            plus: s.plus,
+            equipSlot: def?.slot,
+            consumable: def?.consumable != null,
+            sellValue: rarityStat(def?.value ?? 0, s.rarity),
+            // K2 degrees: grau do item + requisito de nível + se o DONO (p) pode equipar agora.
+            // Só faz sentido para equipáveis (têm slot); não-equipáveis ficam undefined.
+            degree: def?.degree,
+            reqLevel: def && def.slot != null ? equipLevelReq(def) : undefined,
+            canEquip: def && def.slot != null ? meetsLevelReq(def, p.level) : undefined,
+          };
+        })
       : [];
     const equipment = EQUIP_SLOTS.map((slot) => {
       const eq = p ? p.equipment[slot] : null;
@@ -1193,6 +1202,7 @@ export class Sim implements IWorld {
   private equip(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
+    if (!meetsLevelReq(def, p.level)) return; // K2: gate de nível (degrees) — recusa silenciosa. (1 linha no topo de equip(); avisar K1/Gabriel.)
     if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
     const prev = p.equipment[def.slot];
     p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY }; // a freshly equipped item is in full repair
@@ -1373,6 +1383,7 @@ export class Sim implements IWorld {
         const def = ITEMS[s.itemId];
         if (!def || def.slot !== slot) continue;
         if (slot === 'weapon' && (def.mastery ?? DEFAULT_MASTERY) !== activeId) continue;
+        if (!meetsLevelReq(def, p.level)) continue; // K2: só considerar gear que o bot PODE equipar — senão o 'best' vira inalcançável e ele nunca troca pelo item vestível
         const score = botGearScore(s.itemId, s.rarity, s.plus);
         if (score > bestScore) { bestScore = score; best = s; }
       }
