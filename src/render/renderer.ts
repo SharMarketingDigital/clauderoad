@@ -9,7 +9,7 @@ import { NpcAvatar } from './npc_avatar';
 import { populateForest } from './forest';
 import { populateVillage } from './village';
 import { setupEnvironment, terrainHeight, type Environment, type WeatherState } from './environment';
-import { AbilityVfx, abilityEffect, abilityClip } from './vfx/ability_vfx';
+import { AbilityVfx, abilityEffect, abilityClip, abilitySelfEffect } from './vfx/ability_vfx';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -190,12 +190,14 @@ export class Renderer {
     this.updatePlayerAvatar(world, dt);
     this.updatePlayerAvatars(world, dt);
     this.updateEnemyAvatars(world, dt);
-    this.abilityVfx.update(dt);
     // Keep the sky centred on the player and the sun's shadow frustum on them.
     const pid = world.localPlayerId();
     const pp = pid != null ? world.entities().find((e) => e.id === pid) : undefined;
     const px = pp ? pp.x : 0;
     const pz = pp ? pp.z : 0;
+    // Ability VFX last: buff auras follow the local player, so feed its live position.
+    const casterPos = pp ? new THREE.Vector3(px, terrainHeight(px, pz) + 1.0, pz) : undefined;
+    this.abilityVfx.update(dt, casterPos);
     this.env.update(dt, px, pz, terrainHeight(px, pz), serverWeather);
     if (this.vendorAvatar.ready) this.vendorAvatar.update(dt); // keep the vendor's idle playing
     this.updateCamera(world);
@@ -327,15 +329,19 @@ export class Renderer {
       av.triggerAttack(false);
     }
 
-    // Ability VFX (GDD G2): on a damaging cast, spawn the ability's particle effect from the caster
-    // to the impact point (the damage event's x/z snapshot — valid even when the blow kills the
-    // target). Render-only — the sim already resolved the hit; this just shows it.
-    if (castSlot !== 0 && hitEnemy) {
-      const effect = abilityEffect(p.mastery, castSlot);
-      if (effect) {
+    // Ability VFX (GDD G2). A self-cast BUFF fires on the cast alone, anchored on the caster (its
+    // aura follows the player — see abilityVfx.update). A damaging ability fires on a landed hit,
+    // anchored on the damage event's x/z snapshot (valid even when the blow kills the target).
+    // Render-only — the sim already resolved the outcome; this just shows it.
+    if (castSlot !== 0) {
+      const self = abilitySelfEffect(p.mastery, castSlot);
+      const dmg = abilityEffect(p.mastery, castSlot);
+      if (self) {
+        this.abilityVfx.castSelf(self.effect, self.duration);
+      } else if (dmg && hitEnemy) {
         const from = new THREE.Vector3(p.x, terrainHeight(p.x, p.z) + 1.3, p.z);
         const to = new THREE.Vector3(hitX, terrainHeight(hitX, hitZ) + 1.0, hitZ);
-        this.abilityVfx.cast(effect, from, to);
+        this.abilityVfx.cast(dmg, from, to);
       }
     }
 

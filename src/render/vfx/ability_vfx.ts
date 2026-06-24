@@ -20,6 +20,8 @@ const TEXTURES = {
   light: '/textures/particles/light_03.png', // soft glow — frost cores / flashes
   star: '/textures/particles/star_04.png', // sparkle — frost shards
   trace: '/textures/particles/trace_01.png', // streak — arrows
+  circle: '/textures/particles/circle_05.png', // ring — shield aura
+  twirl: '/textures/particles/twirl_01.png', // swirl — fury aura
 } as const;
 type TexKey = keyof typeof TEXTURES;
 
@@ -41,12 +43,26 @@ export function abilityEffect(mastery: MasteryId, slot: number): string | undefi
 // via PlayerAvatar.playClip on cast. Slots not listed fall back to the default attack clip.
 const ABILITY_CLIP: Partial<Record<MasteryId, Record<number, string>>> = {
   mage: { 2: 'Ranged_Magic_Spellcasting' }, // Onda de Chamas — a sweeping cast
-  spear: { 2: 'Melee_2H_Attack_Spin' }, // Varredura — an arcing spin
+  spear: { 2: 'Melee_2H_Attack_Spin', 4: 'Ranged_Magic_Raise' }, // Varredura — spin; Fúria — power-up raise
+  sword: { 2: 'Melee_Block' }, // Postura Defensiva — raise the shield
 };
 
 // Look up the ability's specific animation clip, or undefined to use the class's default attack.
 export function abilityClip(mastery: MasteryId, slot: number): string | undefined {
   return ABILITY_CLIP[mastery]?.[slot];
+}
+
+// Self-cast BUFFS: (mastery, slot) -> aura effect + how long it loops (seconds). Buffs have no enemy
+// target, so the renderer triggers these on the cast alone (no hitEnemy). The duration is a render-
+// local copy of the sim's buff length (cosmetic; a small drift would only end the aura a touch early).
+const ABILITY_SELF_EFFECT: Partial<Record<MasteryId, Record<number, { effect: string; duration: number }>>> = {
+  sword: { 2: { effect: 'shield', duration: 6 } }, // Postura Defensiva (~6s mitigation)
+  spear: { 4: { effect: 'fury', duration: 5 } }, // Fúria (~5s crit window)
+};
+
+// Look up a self-cast buff effect for a (mastery, slot), or undefined for non-buff slots.
+export function abilitySelfEffect(mastery: MasteryId, slot: number): { effect: string; duration: number } | undefined {
+  return ABILITY_SELF_EFFECT[mastery]?.[slot];
 }
 
 const TRAIL_EVERY = 0.02; // seconds between trail emissions during flight
@@ -89,6 +105,21 @@ const CONES: Record<string, ConeStyle> = {
   sweep: { tex: 'smoke', color: 0x9b8a6a, blending: THREE.NormalBlending, count: 14, arc: 1.5, reach: 3.6, life: 0.4, s0: 0.4, s1: 1.1, o0: 0.6, o1: 0, embers: false },
 };
 
+// A buff aura that orbits the LIVE caster position for the buff's duration (see update(casterPos)).
+interface AuraStyle {
+  tex: TexKey; color: number; blending: THREE.Blending;
+  perBurst: number; // sprites emitted per burst
+  radius: number; // orbit radius around the caster
+  rise: number; // upward drift (units/sec)
+  life: number; // per-sprite life (seconds)
+  scale: number; // sprite scale
+  every: number; // seconds between bursts
+}
+const AURAS: Record<string, AuraStyle> = {
+  shield: { tex: 'circle', color: 0x6fb0ff, blending: THREE.AdditiveBlending, perBurst: 3, radius: 0.75, rise: 0.7, life: 0.6, scale: 0.5, every: 0.08 },
+  fury: { tex: 'twirl', color: 0xff7a33, blending: THREE.AdditiveBlending, perBurst: 2, radius: 0.55, rise: 1.4, life: 0.5, scale: 0.55, every: 0.06 },
+};
+
 // A free-floating particle: a sprite that drifts, scales, and fades over its life.
 interface Particle {
   sprite: THREE.Sprite;
@@ -107,12 +138,20 @@ interface Projectile {
   trail: TrailKind; impact: ImpactKind;
 }
 
+// A live buff aura: emits orbiting sprites around the caster until `remaining` runs out.
+interface Aura {
+  style: AuraStyle;
+  remaining: number; // seconds of buff left
+  emit: number; // countdown to the next burst
+}
+
 export class AbilityVfx {
   private group = new THREE.Group();
   private textures = new Map<TexKey, THREE.Texture>();
   private ready = false;
   private particles: Particle[] = [];
   private projectiles: Projectile[] = [];
+  private auras: Aura[] = [];
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group);
@@ -151,9 +190,18 @@ export class AbilityVfx {
     }
   }
 
-  // Advance every live projectile (flight + trail + impact) and particle (drift + fade), and
-  // cull the finished ones. Called once per render frame with the host delta.
-  update(dt: number): void {
+  // Spawn a self-cast BUFF aura that follows the caster for `durationSecs` (no enemy target — the
+  // renderer fires this on the cast alone). No-op until textures load / for an unknown id.
+  castSelf(effect: string, durationSecs: number): void {
+    if (!this.ready) return;
+    const style = AURAS[effect];
+    if (!style) return;
+    this.auras.push({ style, remaining: durationSecs, emit: 0 });
+  }
+
+  // Advance every live projectile/aura/particle and cull the finished ones; auras emit around the
+  // LIVE caster position. Called once per render frame with the host delta + the local player pos.
+  update(dt: number, casterPos?: THREE.Vector3): void {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const pr = this.projectiles[i];
       pr.t += dt;
@@ -169,6 +217,17 @@ export class AbilityVfx {
         this.spawnImpact(pr.to, pr.impact);
         this.kill(pr.core);
         this.projectiles.splice(i, 1);
+      }
+    }
+    // Buff auras: emit orbiting sprites around the LIVE caster until the buff runs out.
+    for (let i = this.auras.length - 1; i >= 0; i--) {
+      const au = this.auras[i];
+      au.remaining -= dt;
+      if (au.remaining <= 0) { this.auras.splice(i, 1); continue; }
+      au.emit -= dt;
+      if (au.emit <= 0 && casterPos) {
+        au.emit = au.style.every;
+        this.emitAura(casterPos, au.style);
       }
     }
     for (let i = this.particles.length - 1; i >= 0; i--) {
@@ -232,6 +291,18 @@ export class AbilityVfx {
         ember.position.set(from.x + Math.cos(a) * 0.6, from.y + rnd(0, 0.4), from.z + Math.sin(a) * 0.6);
         this.particles.push({ sprite: ember, vx: Math.cos(a) * speed, vy: rnd(0.3, 1.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: 0.3, s1: 0.05, o0: 0.9, o1: 0 });
       }
+    }
+  }
+
+  // Emit one burst of a buff aura's sprites around the caster (orbiting ring, drifting up + fading).
+  private emitAura(at: THREE.Vector3, style: AuraStyle): void {
+    for (let k = 0; k < style.perBurst; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = style.radius * rnd(0.85, 1.1);
+      const spr = this.makeSprite(style.tex, style.color, style.blending);
+      spr.position.set(at.x + Math.cos(a) * r, at.y + rnd(-0.3, 0.4), at.z + Math.sin(a) * r);
+      spr.material.rotation = rnd(0, Math.PI * 2);
+      this.particles.push({ sprite: spr, vx: 0, vy: rnd(style.rise * 0.5, style.rise), vz: 0, life: style.life, maxLife: style.life, s0: style.scale, s1: style.scale * 0.4, o0: 0.85, o1: 0 });
     }
   }
 
