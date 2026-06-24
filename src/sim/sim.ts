@@ -115,6 +115,11 @@ export const ATTR_POINTS_PER_LEVEL = 5;
 export const ATTR_STR_PER_POINT = 2;
 export const ATTR_INT_PER_POINT = 1;
 export const MP_PER_INT = 5;
+// Strength also raises max HP (Silkroad: Str = physical damage + HP + phys def). Each point of
+// Strength adds STR_TO_HP max HP. Applied to baseMaxHp when a point is SPENT (see spendAttr) — NOT
+// from p.baseStr in recompute — because the class's innate base Strength must NOT inflate baseline
+// HP (Intelligence has no such base, so Int -> MP can live in recompute; Str can't).
+export const STR_TO_HP = 10;
 // XP needed to go from `level` to level+1. Integer curve (no Math.pow, so it's
 // bit-exact across engines): 25·L·(L+1) => L1:50, L2:150, L3:300, L4:500...
 // With a 25-XP wolf that's ~2 kills for level 2, ramping gently after.
@@ -1597,8 +1602,12 @@ export class Sim implements IWorld {
   private spendAttr(p: Entity, attr: 'str' | 'int'): void {
     if (p.attrPoints <= 0) return;
     p.attrPoints -= 1;
-    if (attr === 'str') p.baseStr += ATTR_STR_PER_POINT;
-    else p.baseInt += ATTR_INT_PER_POINT;
+    if (attr === 'str') {
+      p.baseStr += ATTR_STR_PER_POINT;
+      p.baseMaxHp += ATTR_STR_PER_POINT * STR_TO_HP; // Strength also raises max HP (Silkroad); permanent
+    } else {
+      p.baseInt += ATTR_INT_PER_POINT;
+    }
     this.recomputeStats(p);
     if (attr === 'int') p.mp = Math.min(p.maxMp, p.mp + MP_PER_INT);
   }
@@ -1698,7 +1707,7 @@ export class Sim implements IWorld {
     bonusMaxMp += passive.maxMp ?? 0;
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
-    p.maxHp = p.baseMaxHp + bonusMaxHp;
+    p.maxHp = p.baseMaxHp + bonusMaxHp; // Strength's HP is folded into baseMaxHp on spend (see spendAttr)
     p.maxMp = p.baseMaxMp + p.baseInt * MP_PER_INT + bonusMaxMp; // Intelligence adds max MP
     if (p.hp > p.maxHp) p.hp = p.maxHp;
     if (p.mp > p.maxMp) p.mp = p.maxMp;

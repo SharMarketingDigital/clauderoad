@@ -24,6 +24,7 @@ import {
   ATTR_POINTS_PER_LEVEL,
   ATTR_STR_PER_POINT,
   MP_PER_INT,
+  STR_TO_HP,
   BOT_HEAL_FRAC,
   BOT_MATERIAL_RESERVE,
   inFrontOf,
@@ -1439,6 +1440,7 @@ describe('attribute points', () => {
     const strBefore = before.str;
     const intBefore = before.int;
     const maxMpBefore = before.maxMp;
+    const maxHpBefore = before.maxHp;
     const hpBefore = before.hp;
     sim.sendCommand({ t: 'spend-attr', attr: 'str' });
     sim.step();
@@ -1446,9 +1448,10 @@ describe('attribute points', () => {
     expect(after.attrPoints).toBe(ptsBefore - 1); // one point spent
     expect(after.str).toBe(strBefore + ATTR_STR_PER_POINT); // Strength rose
     expect(meleeDamage(after.str, after.weaponDamage)).toBe(dmgBefore + 1); // a clean, exact +1 damage
+    expect(after.maxHp).toBe(maxHpBefore + ATTR_STR_PER_POINT * STR_TO_HP); // Strength raised max HP
     expect(after.int).toBe(intBefore); // didn't leak into Intelligence...
     expect(after.maxMp).toBe(maxMpBefore); // ...or MP
-    expect(after.hp).toBe(hpBefore); // and did NOT wrongly heal/change HP
+    expect(after.hp).toBe(hpBefore); // and did NOT wrongly heal/change HP (only the cap rose)
   });
 
   it('spending an Inteligência point raises Intelligence, max MP, and tops up current MP', () => {
