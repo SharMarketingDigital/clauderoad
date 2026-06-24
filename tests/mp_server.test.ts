@@ -232,6 +232,41 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     expect(w.selfState(a).inventory.equipment.find((e) => e.slot === slot)!.itemId).toBeNull();
   });
 
+  it('forwards the enhance useProtection flag — protection is NOT dropped online (K4)', () => {
+    // Regression guard for K4 (the same shape as the K1 whitelist bug): the server REBUILDS the
+    // enhance command from validated fields. If it forwarded only {slot, useLuckyPowder} and
+    // dropped useProtection, a high-"+" failure could DESTROY the weapon online while the
+    // single-player sim (which gets the flag directly) protected it. Set up a weapon in the RISK
+    // band (+5 >= RISK_FLOOR) with elixirs + protection stones via restore, then drive many
+    // PROTECTED enhances THROUGH THE SERVER and assert it never breaks and stones are spent.
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    w.restorePlayer(a, {
+      level: 30, xp: 0, attrPoints: 0, baseStr: 30, baseInt: 5, baseMaxHp: 400, baseMaxMp: 100,
+      sp: 0, skillRanks: {}, gold: 0,
+      bag: [
+        { itemId: 'elixir_weapon', rarity: 'normal', plus: 0, qty: 60 },
+        { itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 60 },
+      ],
+      equipment: { weapon: { itemId: 'old_sword', rarity: 'normal', plus: 5, durability: 100 } },
+    });
+    const weaponSlot = () => w.selfState(a).inventory.equipment.find((e) => e.slot === 'weapon')!;
+    const stones = (): number =>
+      w.selfState(a).inventory.stacks.filter((s) => s.itemId === 'protect_stone').reduce((n, s) => n + s.qty, 0);
+    expect(weaponSlot().itemId).toBe('old_sword'); // equipped in the risk band (+5)
+    const stones0 = stones();
+
+    for (let i = 0; i < 40; i++) {
+      w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: false, useProtection: true });
+      w.step();
+      expect(weaponSlot().itemId).not.toBeNull(); // protected: the weapon is NEVER destroyed
+    }
+    // A protected failure in the risk band consumes a stone; over 40 attempts at least one
+    // failed. If the server had dropped useProtection, NO stone would be spent (and the weapon
+    // could have broken above) — exactly the regression this guards.
+    expect(stones()).toBeLessThan(stones0);
+  });
+
   it('the vendor loop works in MP — walk into range, sell loot for gold', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
