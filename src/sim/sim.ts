@@ -29,8 +29,9 @@ import { meetsLevelReq, equipLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
 import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
 import {
-  MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
+  MAX_PLUS, RISK_FLOOR, BREAK_CHANCE, DROP_ON_FAIL, PROTECT_STONE_ID,
 } from './content/enhance';
+import { enhanceChance, enhanceStat, resolveEnhance } from './enhance';
 import {
   SKILL_MAX_RANK, skillUpgradeCost, rankEffectMult,
 } from './content/skill_ranks';
@@ -588,6 +589,9 @@ export class Sim implements IWorld {
         // both chances, so the UI shows the one matching the Lucky Powder toggle.
         enhanceChance: eq ? enhanceChance(eq.plus, false) : 0,
         enhanceChanceLucky: eq ? enhanceChance(eq.plus, true) : 0,
+        // K4 alchemy risk readout (0 / gentle below RISK_FLOOR).
+        breakChance: eq && eq.plus >= RISK_FLOOR ? (BREAK_CHANCE[eq.plus] ?? 0) : 0,
+        dropOnFail: eq && eq.plus >= RISK_FLOOR ? (DROP_ON_FAIL[eq.plus] ?? 1) : 1,
         durability: eq?.durability ?? 0,
         maxDurability: eq ? MAX_DURABILITY : 0,
         repairCost: eq ? repairCost(eq.durability) : 0,
@@ -1171,7 +1175,7 @@ export class Sim implements IWorld {
         this.unequip(p, cmd.slot);
         break;
       case 'enhance':
-        this.enhance(p, cmd.slot, cmd.useLuckyPowder);
+        this.enhance(p, cmd.slot, cmd.useLuckyPowder, cmd.useProtection);
         break;
       case 'repair':
         this.repair(p, cmd.slot);
@@ -1223,25 +1227,53 @@ export class Sim implements IWorld {
   }
 
   // ---------- alchemy ("+N") ----------
-  // Attempt to raise the equipped item's "+". Consumes the matching Elixir (and,
-  // if asked and available, a Lucky Powder for a better chance). Success: +1
-  // (cap MAX_PLUS). Failure: -1 (floored at 0 — never breaks, never resets).
-  // All randomness via the sim Rng. Refuses (no material cost) at the cap.
-  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean): void {
+  // Attempt to raise the equipped item's "+". Consumes the matching Elixir (and, if asked +
+  // held, a Lucky Powder for a better chance). K4 — REAL RISK at high "+": at/above
+  // RISK_FLOOR a failure can QUEBRAR (destroy) the item or drop multiple levels; a Pedra de
+  // Proteção (asked + held) caps the drop to <=1 and prevents the break, and is consumed
+  // ONLY when it actually prevents a bad outcome. Below RISK_FLOOR a failure stays a gentle
+  // -1. Determinism: a FIXED Rng draw order — roll1 (success) always; roll2 (break vs
+  // degrade) ONLY on an unprotected failure at/above RISK_FLOOR. Refuses (no cost) at the cap.
+  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean, useProtection?: boolean): void {
     const eq = p.equipment[slot];
     if (!eq || eq.plus >= MAX_PLUS) return; // nothing equipped, or already maxed
     const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
     if (!removeFromBag(p.bag, elixirId, 'normal', 0, 1)) return; // need the right Elixir
     let lucky = false;
     if (useLuckyPowder && removeFromBag(p.bag, 'lucky_powder', 'normal', 0, 1)) lucky = true;
+    // Protection: a NON-MUTATING held-check (botCount only sums the bag); the stone is
+    // consumed below ONLY when it actually prevents a break/multi-drop.
+    const protectedAttempt = !!useProtection && this.botCount(p, PROTECT_STONE_ID) > 0;
 
-    const success = this.rng.next() < enhanceChance(eq.plus, lucky);
-    eq.plus = success ? Math.min(MAX_PLUS, eq.plus + 1) : Math.max(0, eq.plus - 1);
+    // Fixed draw order: roll1 (success) always; roll2 (break vs degrade) only on an
+    // unprotected failure at/above RISK_FLOOR (resolveEnhance ignores roll2 otherwise).
+    const roll1 = this.rng.next();
+    const failedAtRisk = roll1 >= enhanceChance(eq.plus, lucky) && eq.plus >= RISK_FLOOR && !protectedAttempt;
+    const roll2 = failedAtRisk ? this.rng.next() : 0;
+    const outcome = resolveEnhance(eq.plus, lucky, protectedAttempt, roll1, roll2);
+
+    if (outcome.kind === 'break') {
+      const brokenName = ITEMS[eq.itemId]?.name ?? eq.itemId;
+      p.equipment[slot] = null; // the item is destroyed
+      this.recomputeStats(p);
+      this.events.push({
+        seq: this.nextEventSeq++, tick: this.tick, kind: 'enhance-break',
+        targetId: p.id, amount: 0, x: p.x, z: p.z, text: brokenName,
+      });
+      return;
+    }
+    const wasAtRisk = eq.plus >= RISK_FLOOR; // captured before applying the new "+"
+    eq.plus = outcome.nextPlus;
+    // Consume the protection stone ONLY when it actually prevented a break/multi-drop: a
+    // protected FAILURE (degrade) at/above RISK_FLOOR. Success / low-"+" never burns it.
+    if (protectedAttempt && outcome.kind === 'degrade' && wasAtRisk) {
+      removeFromBag(p.bag, PROTECT_STONE_ID, 'normal', 0, 1);
+    }
     this.recomputeStats(p);
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
-      kind: success ? 'enhance-success' : 'enhance-fail',
+      kind: outcome.kind === 'success' ? 'enhance-success' : 'enhance-fail',
       targetId: p.id,
       amount: eq.plus,
       x: p.x,
@@ -1460,7 +1492,7 @@ export class Sim implements IWorld {
   private botEnhance(p: Entity): void {
     for (const slot of EQUIP_SLOTS) {
       const eq = p.equipment[slot];
-      if (!eq || eq.plus >= MAX_PLUS) continue;
+      if (!eq || eq.plus >= RISK_FLOOR) continue; // K4: bot never gambles into the break band
       const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
       if (this.botCount(p, elixirId) <= BOT_MATERIAL_RESERVE) continue; // keep a reserve
       const useLucky = enhanceChance(eq.plus, false) < BOT_LUCKY_BELOW_CHANCE
@@ -2340,19 +2372,7 @@ export function rarityStat(value: number, rarity: Rarity): number {
   return Math.round(value * rarityDef(rarity).statMultiplier);
 }
 
-// Success chance of an enhance attempt from `plus` -> plus+1, optionally boosted
-// by a Lucky Powder. 0 at the cap. Pure & deterministic.
-export function enhanceChance(plus: number, lucky: boolean): number {
-  if (plus < 0 || plus >= MAX_PLUS) return 0;
-  const base = ENHANCE_SUCCESS[plus] ?? 0;
-  return Math.min(ENHANCE_CHANCE_CAP, base + (lucky ? LUCKY_POWDER_BONUS : 0));
-}
-
-// A "+N" item's bonus: the rarity-scaled stat, then +ENHANCE_STAT_PER_PLUS per
-// level. Pure & deterministic. So a higher "+" means a bigger stat.
-export function enhanceStat(rarityScaled: number, plus: number): number {
-  return Math.round(rarityScaled * (1 + ENHANCE_STAT_PER_PLUS * plus));
-}
+// enhanceChance / enhanceStat now live in ./enhance (K4 — alchemy logic in its own module).
 
 // True when the offset (dx,dz) points into the forward half-plane for `facing`
 // (the actor's forward is +Z at facing 0). Used by both target cycling and the

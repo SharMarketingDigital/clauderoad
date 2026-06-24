@@ -126,6 +126,10 @@ export interface EquipView {
   readonly durability: number;
   readonly maxDurability: number;
   readonly repairCost: number;
+  // K4 alchemy risk readout: the chance THIS next attempt destroys the item (0 below
+  // RISK_FLOOR, when empty, or at the cap), and how many "+" a non-breaking failure drops.
+  readonly breakChance: number; // 0..1
+  readonly dropOnFail: number; // levels lost on a failed (non-breaking) attempt; >= 1
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -205,7 +209,7 @@ export type Command =
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
-  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
+  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
   | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
@@ -251,6 +255,7 @@ export type SimEvent = {
   readonly tick: number;
   // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
+  // 'enhance-break': a failed high-"+" attempt destroyed the item; `text` = its name.
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
   // 'death'/'respawn': the player went down / came back; `text` = the player name.
   // 'boss-spawn'/'boss-defeat'/'boss-summon': `text` = the boss name, for the announcement.
@@ -260,6 +265,7 @@ export type SimEvent = {
     | 'levelup'
     | 'enhance-success'
     | 'enhance-fail'
+    | 'enhance-break'
     | 'heal'
     | 'death'
     | 'respawn'
