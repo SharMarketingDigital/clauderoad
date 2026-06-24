@@ -9,6 +9,13 @@ export interface ItemStats {
   str?: number;
   maxHp?: number;
   maxMp?: number;
+  // Defensive stats (K3). Physical/magical defense granted while equipped; the sim scales
+  // them by rarity, "+N" and durability and folds them onto Entity.phyDef/magDef in
+  // recomputeStats, exactly like the offensive stats above. Combat does NOT read them yet —
+  // Gabriel's mitigate() will (physical hit reduced by phyDef; magical by the Int magic-resist
+  // PLUS magDef). Silkroad: every armor piece carries both. Provisional integers — tune later.
+  phyDef?: number;
+  magDef?: number;
 }
 
 // What a consumable restores when used from the bag. The use/heal path is fully
@@ -35,14 +42,16 @@ export const ITEMS: Record<string, ItemDef> = {
   // consumable: heals ~40% of the 120-HP starter, à la a WoW Classic minor healing potion
   health_potion: { id: 'health_potion', name: 'Poção de Vida', consumable: { healHp: 50 }, value: 10 },
   // crude leather "armor" — common drop, gives a little HP
-  wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'chest', stats: { maxHp: 20 }, value: 8 },
-  // K1: the rest of the Silkroad armor set + shield + accessories (str/maxHp/maxMp). Per-piece
-  // weight chest>legs>helmet>hands~feet; the shield is balanced. Provisional integers — tune later.
-  leather_cap: { id: 'leather_cap', name: 'Gorro de Couro', slot: 'helmet', stats: { maxHp: 12 }, value: 6 },
-  leather_gloves: { id: 'leather_gloves', name: 'Luvas de Couro', slot: 'hands', stats: { maxHp: 8 }, value: 5 },
-  leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14 }, value: 7 },
-  leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8 }, value: 5 },
-  wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', stats: { maxHp: 18 }, value: 10 },
+  wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'chest', stats: { maxHp: 20, phyDef: 2, magDef: 1 }, value: 8 },
+  // K1 added the rest of the Silkroad armor set + shield + accessories (str/maxHp/maxMp).
+  // K3 then added phyDef/magDef to the PROTECTIVE pieces (helmet/chest/hands/legs/feet/shield);
+  // accessories & weapons carry no defense, à la Silkroad. Per-piece weight chest>legs>helmet>
+  // hands~feet; the shield is balanced. Provisional integers on the wolf_leather scale — tune later.
+  leather_cap: { id: 'leather_cap', name: 'Gorro de Couro', slot: 'helmet', stats: { maxHp: 12, phyDef: 1, magDef: 1 }, value: 6 },
+  leather_gloves: { id: 'leather_gloves', name: 'Luvas de Couro', slot: 'hands', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, value: 5 },
+  leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14, phyDef: 2, magDef: 1 }, value: 7 },
+  leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, value: 5 },
+  wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', stats: { maxHp: 18, phyDef: 2, magDef: 2 }, value: 10 },
   copper_necklace: { id: 'copper_necklace', name: 'Colar de Cobre', slot: 'necklace', stats: { maxMp: 12 }, value: 12 },
   copper_earring: { id: 'copper_earring', name: 'Brinco de Cobre', slot: 'earring', stats: { str: 1 }, value: 12 },
   copper_ring: { id: 'copper_ring', name: 'Anel de Cobre', slot: 'ring', stats: { str: 1 }, value: 12 },

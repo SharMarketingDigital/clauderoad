@@ -53,6 +53,13 @@ export interface Entity {
   baseWeaponDamage: number;
   baseMaxHp: number;
   baseMaxMp: number;
+  // Defensive stats (K3). EFFECTIVE phyDef/magDef = base + equipped gear, recomputed in
+  // recomputeStats just like str/maxHp. Combat does NOT read these yet (Gabriel's mitigate()
+  // will). Enemies carry 0 -> take full damage (unchanged). base* are 0 today (no innate defense).
+  phyDef: number;
+  magDef: number;
+  basePhyDef: number;
+  baseMagDef: number;
   // Intelligence (spent attribute points). Drives max MP. No "effective" gear
   // bonus today, so the view's `int` equals this. Enemies carry 0.
   baseInt: number;

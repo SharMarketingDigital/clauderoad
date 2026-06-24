@@ -304,6 +304,7 @@ export class Sim implements IWorld {
       str: cls.baseStr, weaponDamage: cls.weaponDamage,
       baseStr: cls.baseStr, baseWeaponDamage: cls.weaponDamage,
       baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3: defense (player starts with none innate)
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
@@ -349,6 +350,7 @@ export class Sim implements IWorld {
       str: Math.round(sp.str * tier.damageMult * ldmg),
       weaponDamage: Math.round(sp.weaponDamage * tier.damageMult * ldmg),
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: hp, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3: enemies have no defense (take full damage)
       swingTicks: Math.round(sp.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level, xp: 0, attrPoints: 0, baseInt: 0,
@@ -372,6 +374,7 @@ export class Sim implements IWorld {
       targetId: null,
       str: 0, weaponDamage: 0,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
@@ -398,6 +401,7 @@ export class Sim implements IWorld {
       targetId: null,
       str: t.str, weaponDamage: t.weaponDamage,
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
@@ -478,6 +482,7 @@ export class Sim implements IWorld {
       targetId: null,
       str: ms.str, weaponDamage: ms.weaponDamage,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: def.template.minionHp, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: Math.round(ms.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
@@ -1665,6 +1670,8 @@ export class Sim implements IWorld {
     let bonusWeapon = 0;
     let bonusMaxHp = 0;
     let bonusMaxMp = 0;
+    let bonusPhyDef = 0; // K3: physical defense from gear
+    let bonusMagDef = 0; // K3: magical defense from gear
     for (const slot of EQUIP_SLOTS) {
       const eq = p.equipment[slot];
       const stats = eq ? ITEMS[eq.itemId]?.stats : undefined;
@@ -1678,6 +1685,8 @@ export class Sim implements IWorld {
       bonusWeapon += scale(stats.weaponDamage ?? 0);
       bonusMaxHp += scale(stats.maxHp ?? 0);
       bonusMaxMp += scale(stats.maxMp ?? 0);
+      bonusPhyDef += scale(stats.phyDef ?? 0); // K3: same rarity/+N/durability scale as the stats above
+      bonusMagDef += scale(stats.magDef ?? 0); // K3
     }
     // The active weapon mastery's passive is always on (e.g. Lança's +HP).
     const passive = this.activeMastery(p).passive;
@@ -1689,6 +1698,10 @@ export class Sim implements IWorld {
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
     p.maxHp = p.baseMaxHp + bonusMaxHp;
     p.maxMp = p.baseMaxMp + p.baseInt * MP_PER_INT + bonusMaxMp; // Intelligence adds max MP
+    // K3: defense is a plain additive write (NOT routed through the Int/maxMp line). Combat does
+    // not read these yet; Gabriel's mitigate() will (phyDef reduces physical; magDef adds to Int resist).
+    p.phyDef = p.basePhyDef + bonusPhyDef;
+    p.magDef = p.baseMagDef + bonusMagDef;
     if (p.hp > p.maxHp) p.hp = p.maxHp;
     if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
