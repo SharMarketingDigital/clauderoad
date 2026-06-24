@@ -10,8 +10,9 @@ tmp/
 # Stray non-project file that can appear in the working tree — never commit it.
 /CLAUDE-FABLE-5.md
 
-# Raw 3D asset downloads — NOT versioned (hundreds of source files: fbx/obj/blend/
-# textures). Only the curated, ready-to-use files in public/models/ are committed.
+# Raw asset downloads (3D model kits, texture/particle packs) — NOT versioned (hundreds
+# of source files: fbx/obj/blend/png). Only the curated, ready-to-use files under public/
+# are committed.
 /KayKit/
 /KayKit_Adventurers_2.0_FREE/
 /KayKit Character Animations 1.2/
@@ -19,3 +20,4 @@ tmp/
 /KayKit_Forest_Nature_Pack_1.0_FREE/
 /KayKit_Skeletons_1.1_FREE/
 /Medieval Village MegaKit*/
+/kenney_particle-pack/
