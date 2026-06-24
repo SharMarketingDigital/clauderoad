@@ -10,6 +10,7 @@
 import type { IWorld } from '../world_api';
 import { ZONES, WORLD_HALF, zoneAt } from '../sim/zones';
 import { isTyping } from './typing';
+import { registerOverlay } from './overlays';
 
 const MAP_PX = 360; // the square map is this many px on a side (represents the whole world)
 
@@ -58,6 +59,8 @@ export class WorldMap {
       if (e.key === 'Escape') { if (this.visible) this.setVisible(false); return; }
       if (e.key.toLowerCase() === 'm') this.setVisible(!this.visible);
     });
+    // ESC priority (overlays registry): the settings menu only opens when no window is up.
+    registerOverlay(() => this.visible);
   }
 
   private setVisible(open: boolean): void {

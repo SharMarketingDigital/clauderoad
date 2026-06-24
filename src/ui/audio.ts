@@ -1,13 +1,16 @@
-// Background music (GDD v0.4 §1.4) — PRESENTATION ONLY. Reads IWorld to pick a context
-// and NEVER touches the sim, so it carries zero determinism risk (it isn't even a function
-// of sim ticks — it's wall-clock crossfades over a cosmetic layer). Three looping tracks
-// crossfade by context: the city theme in the safe-zone, a combat theme when a hostile enemy
-// is near, exploration everywhere else. Volume + mute persist in localStorage.
+// Background music (GDD v0.4 §1.4) — PRESENTATION ONLY. Reads IWorld to pick a context and NEVER
+// touches the sim, so it carries zero determinism risk. Three looping tracks crossfade by context:
+// the city theme in the safe-zone, a combat theme when a hostile enemy is near, exploration else.
 //
-// Autoplay: browsers block audio until a user gesture, so nothing plays until unlock() — called
-// from the class-select click (see main.ts) and, as a fallback, the first pointer/key interaction.
-// The volume control itself also unlocks. All three tracks then loop at once and we only mix their
-// volumes, so a context switch is an instant, gap-free crossfade.
+// State (volume, mute, on/off) lives HERE as the single source of truth and persists in localStorage.
+// Two UIs drive it through the public API without duplicating logic: the small corner widget (built
+// here) and the ESC settings menu (settings_menu.ts). onChange() keeps them in sync — change volume in
+// one and the other's control follows. `muted` = silence but keep the loops running; `enabled` = false
+// (the menu's Música On/Off) actually pauses playback.
+//
+// Autoplay: browsers block audio until a user gesture, so nothing plays until unlock() — called from
+// the class-select click (main.ts) and, as a fallback, the first pointer/key interaction. Any control
+// interaction is itself a gesture, so the widget/menu also "wake" playback.
 import type { IWorld } from '../world_api';
 import { zoneAt } from '../sim/zones';
 
@@ -26,13 +29,16 @@ const COMBAT_RADIUS = 22; // a hostile enemy within this (world units) of the pl
 const COMBAT_HOLD = 3.0; // stay on combat music this long after the last hostile leaves (hysteresis)
 const VOL_KEY = 'claroad.music.volume';
 const MUTE_KEY = 'claroad.music.muted';
+const ENABLED_KEY = 'claroad.music.enabled';
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 function loadNum(key: string, def: number): number {
   try {
     const v = localStorage.getItem(key);
     if (v == null) return def;
     const n = Number(v);
-    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : def;
+    return Number.isFinite(n) ? clamp01(n) : def;
   } catch {
     return def;
   }
@@ -67,12 +73,16 @@ export class MusicPlayer {
   private active: Ctx = 'explore';
   private master: number;
   private muted: boolean;
+  private enabled: boolean;
+  private gestured = false; // a user gesture has happened, so play() is allowed
   private nowS = 0; // accumulated host seconds (drives the hysteresis window)
   private combatSeenAt = -Infinity;
+  private readonly listeners = new Set<() => void>();
 
   constructor() {
     this.master = loadNum(VOL_KEY, 0.6);
     this.muted = loadBool(MUTE_KEY, false);
+    this.enabled = loadBool(ENABLED_KEY, true);
     this.els = {
       explore: makeAudio(TRACKS.explore),
       city: makeAudio(TRACKS.city),
@@ -85,12 +95,52 @@ export class MusicPlayer {
     window.addEventListener('keydown', onceUnlock, { once: true });
   }
 
-  // Start playback. Browsers require this to run inside a user gesture; safe to call repeatedly
-  // (each call just resumes any track that isn't playing yet, so a later gesture retries cleanly).
+  // --- public API: the corner widget AND the ESC settings menu drive these (no duplicated logic) ---
+  getVolume(): number {
+    return this.master;
+  }
+  setVolume(v: number): void {
+    this.master = clamp01(v);
+    save(VOL_KEY, String(this.master));
+    this.gestured = true;
+    this.applyPlayback();
+    this.notify();
+  }
+  isMuted(): boolean {
+    return this.muted;
+  }
+  setMuted(b: boolean): void {
+    this.muted = b;
+    save(MUTE_KEY, b ? '1' : '0');
+    this.gestured = true;
+    this.applyPlayback();
+    this.notify();
+  }
+  toggleMute(): void {
+    this.setMuted(!this.muted);
+  }
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+  setEnabled(b: boolean): void {
+    this.enabled = b;
+    save(ENABLED_KEY, b ? '1' : '0');
+    this.gestured = true;
+    this.applyPlayback(); // stops playback when off, resumes when back on
+    this.notify();
+  }
+  // Subscribe to state changes (volume/mute/on-off). Returns an unsubscribe fn.
+  onChange(cb: () => void): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+
+  // Start playback (browsers require a user gesture). Safe to call repeatedly.
   unlock(): void {
-    for (const c of CTXS) {
-      if (this.els[c].paused) this.els[c].play().catch(() => { /* not a gesture yet: a later call retries */ });
-    }
+    this.gestured = true;
+    this.applyPlayback();
   }
 
   // Per-frame: pick the context from the world and crossfade the three tracks toward it.
@@ -99,11 +149,30 @@ export class MusicPlayer {
     const desired = this.contextOf(world);
     if (desired) this.active = desired;
     const step = FADE_SECS > 0 ? Math.min(1, dt / FADE_SECS) : 1;
+    const audible = this.enabled && !this.muted;
     for (const c of CTXS) {
       const target = c === this.active ? 1 : 0;
       this.fade[c] += (target - this.fade[c]) * step;
-      this.els[c].volume = this.muted ? 0 : Math.max(0, Math.min(1, this.fade[c] * this.master));
+      this.els[c].volume = audible ? clamp01(this.fade[c] * this.master) : 0;
     }
+  }
+
+  // Play (when enabled + a gesture has happened) or pause all tracks. Mute does NOT pause — it keeps
+  // the loops running at volume 0 (see update); only the On/Off switch (`enabled`) stops playback.
+  private applyPlayback(): void {
+    const shouldPlay = this.enabled && this.gestured;
+    for (const c of CTXS) {
+      const a = this.els[c];
+      if (shouldPlay) {
+        if (a.paused) a.play().catch(() => { /* not a gesture yet: a later call retries */ });
+      } else if (!a.paused) {
+        a.pause();
+      }
+    }
+  }
+
+  private notify(): void {
+    for (const cb of this.listeners) cb();
   }
 
   // City inside the safe-zone, combat when a hostile enemy is near (with hysteresis), else
@@ -130,8 +199,8 @@ export class MusicPlayer {
     return zoneAt(p.x, p.z).safe ? 'city' : 'explore';
   }
 
-  // A tiny, unobtrusive control in the bottom-right corner: a mute toggle + a volume slider.
-  // Interacting with it also unlocks audio (it's a user gesture).
+  // The quick corner shortcut (mute + volume). Full controls live in the ESC settings menu; both drive
+  // this same player, and this widget refreshes from onChange so the two never disagree.
   private buildControls(): void {
     const wrap = document.createElement('div');
     wrap.style.cssText =
@@ -140,28 +209,24 @@ export class MusicPlayer {
       'color:#fff;user-select:none;pointer-events:auto';
 
     const btn = document.createElement('button');
-    btn.textContent = this.muted ? '🔇' : '🔊';
-    btn.title = 'Música (liga/desliga)';
+    btn.title = 'Mudo (liga/desliga)';
     btn.style.cssText = 'background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:0';
-    btn.onclick = () => {
-      this.unlock();
-      this.muted = !this.muted;
-      save(MUTE_KEY, this.muted ? '1' : '0');
-      btn.textContent = this.muted ? '🔇' : '🔊';
-    };
+    btn.onclick = () => this.toggleMute();
 
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = '0';
     slider.max = '100';
-    slider.value = String(Math.round(this.master * 100));
     slider.title = 'Volume da música';
     slider.style.cssText = 'width:90px;cursor:pointer';
-    slider.oninput = () => {
-      this.unlock();
-      this.master = Number(slider.value) / 100;
-      save(VOL_KEY, String(this.master));
+    slider.oninput = () => this.setVolume(Number(slider.value) / 100);
+
+    const refresh = (): void => {
+      btn.textContent = this.muted ? '🔇' : '🔊';
+      slider.value = String(Math.round(this.master * 100));
     };
+    this.onChange(refresh);
+    refresh();
 
     wrap.append(btn, slider);
     document.body.appendChild(wrap);

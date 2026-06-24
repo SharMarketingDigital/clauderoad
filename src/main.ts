@@ -21,6 +21,7 @@ import { PartyHud } from './ui/party_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 import { MusicPlayer } from './ui/audio';
+import { SettingsMenu } from './ui/settings_menu';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 
@@ -40,6 +41,7 @@ function startOffline(): void {
   const hud = new Hud();
   const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; never touches the sim)
+  new SettingsMenu(music); // ESC settings menu (audio controls); self-driven, no per-frame update
   // Class selection on entry (G1): pick a starter class -> the sim equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {
@@ -97,6 +99,7 @@ function startOnline(url: string, name: string): void {
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const map = new WorldMap(); // world map (tecla M) — same module as SP, reads IWorld
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; same module as SP)
+  new SettingsMenu(music); // ESC settings menu (audio controls); self-driven, no per-frame update
   // Class selection on entry (G1): pick a starter class -> the server equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {

@@ -10,6 +10,7 @@
 // not part of the IWorld seam. A focused <input> makes isTyping() true so the character
 // never moves while you type a title (same mechanism as chat / the invite-name field).
 import type { PartyView } from '../world_api';
+import { registerOverlay } from './overlays';
 import type { MatchingEntryView, MatchingRequestView } from '../net/protocol';
 import { isTyping } from './typing';
 
@@ -84,6 +85,8 @@ export class PartyMatching {
       if (e.key === 'Escape') { if (this.visible) this.setVisible(false); return; }
       if (e.key.toLowerCase() === 'e') this.setVisible(!this.visible);
     });
+    // ESC priority (overlays registry): the settings menu only opens when no window is up.
+    registerOverlay(() => this.visible);
   }
 
   private setVisible(open: boolean): void {

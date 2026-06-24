@@ -1,6 +1,7 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
 import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
 import { isTyping } from './typing';
+import { registerOverlay } from './overlays';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -188,6 +189,8 @@ export class Hud {
         this.setSkills(false);
       }
     });
+    // ESC priority (overlays registry): the settings menu only opens when no window is up.
+    registerOverlay(() => this.bagOpen || this.shopOpen || this.skillsOpen);
   }
 
   // Flip auto-play on/off via the same command a click on the button sends.
