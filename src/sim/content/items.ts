@@ -87,6 +87,10 @@ export const ITEMS: Record<string, ItemDef> = {
   elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', value: 15 },
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', value: 15 },
   lucky_powder: { id: 'lucky_powder', name: 'Pó da Sorte', luckyPowder: true, value: 25 },
+  // K4: alchemy safety net — held + the enhance "useProtection" flag prevents a break and
+  // caps the drop to the floor. A plain material (the flag drives it, not an item field), à
+  // la the elixirs (no luckyPowder flag, no consumable effect).
+  protect_stone: { id: 'protect_stone', name: 'Pedra de Proteção', value: 30 },
 };
 
 // Shared cooldown between consumable uses (seconds) — classic "potion sickness",
