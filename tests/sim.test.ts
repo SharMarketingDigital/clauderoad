@@ -3142,7 +3142,7 @@ describe('degrees — gate de nível para equipar', () => {
       level,
       gold: 0,
       bag: itemIds.map((itemId) => ({ itemId, rarity: 'normal', plus: 0, qty: 1 })),
-      equipment: { weapon: null, armor: null },
+      equipment: {},
     });
   }
   const weapon = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'weapon')!;
@@ -3206,7 +3206,7 @@ describe('degrees — mercador vende equipamento por grau', () => {
     const sim = new Sim(7);
     const id = sim.localPlayerId()!;
     // seed gold so we skip grinding; level 1 keeps the equip gated
-    sim.restorePlayer(id, { level: 1, gold: 1000, bag: [], equipment: { weapon: null, armor: null } });
+    sim.restorePlayer(id, { level: 1, gold: 1000, bag: [], equipment: {} });
     for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
       const p = player(sim);
       sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
@@ -3237,7 +3237,7 @@ describe('degrees — inventário expõe grau/requisito/canEquip', () => {
         { itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }, // D3, reqLevel 8
         { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 1 }, // non-equippable
       ],
-      equipment: { weapon: null, armor: null },
+      equipment: {},
     });
     expect(stackOf('steel_sword').degree).toBe(3);
     expect(stackOf('steel_sword').reqLevel).toBe(8);
@@ -3250,7 +3250,7 @@ describe('degrees — inventário expõe grau/requisito/canEquip', () => {
     sim.restorePlayer(id, {
       level: 8, gold: 0,
       bag: [{ itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }],
-      equipment: { weapon: null, armor: null },
+      equipment: {},
     });
     expect(stackOf('steel_sword').canEquip).toBe(true);
   });

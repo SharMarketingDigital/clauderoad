@@ -89,7 +89,7 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
       level: 7, gold: 500, sp: 4,
       bag: 'garbage', // invalid -> empty bag
       skillRanks: { good: 4, tooHigh: 99, bad: 'x' }, // keep good; drop out-of-range / non-int
-      equipment: { weapon: { itemId: 'nope_unknown', rarity: 'normal', plus: 0, durability: 50 }, armor: null }, // unknown item -> dropped
+      equipment: { weapon: { itemId: 'nope_unknown', rarity: 'normal', plus: 0, durability: 50 } }, // unknown item -> dropped
     });
     const s = sim.serializePlayer(a)!;
     expect(s.level).toBe(7);
