@@ -20,6 +20,7 @@ import { MpHud } from './ui/mp_hud';
 import { PartyHud } from './ui/party_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
+import { MusicPlayer } from './ui/audio';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 
@@ -38,8 +39,13 @@ function startOffline(): void {
   const input = new Input(canvas, renderer);
   const hud = new Hud();
   const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
+  const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; never touches the sim)
   // Class selection on entry (G1): pick a starter class -> the sim equips its weapon/kit.
-  new ClassSelect((classId) => sim.sendCommand({ t: 'select-class', classId }));
+  // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
+  new ClassSelect((classId) => {
+    sim.sendCommand({ t: 'select-class', classId });
+    music.unlock();
+  });
   const combatText = new CombatText();
   new Recorder(canvas); // in-game ● REC button (captures the 3D canvas to .webm)
   // 🎬 Clipe: one-click auto-clip in three files (clean + with-HUD + vertical 9:16).
@@ -77,6 +83,7 @@ function startOffline(): void {
     drawCombatFeedback(sim); // after render: project with this frame's updated camera
     hud.update(sim);
     map.update(sim);
+    music.update(sim, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -89,8 +96,13 @@ function startOnline(url: string, name: string): void {
   const world = new ClientWorld(url, name); // a network-backed IWorld
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const map = new WorldMap(); // world map (tecla M) — same module as SP, reads IWorld
+  const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; same module as SP)
   // Class selection on entry (G1): pick a starter class -> the server equips its weapon/kit.
-  new ClassSelect((classId) => world.sendCommand({ t: 'select-class', classId }));
+  // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
+  new ClassSelect((classId) => {
+    world.sendCommand({ t: 'select-class', classId });
+    music.unlock();
+  });
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
@@ -118,6 +130,7 @@ function startOnline(url: string, name: string): void {
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
+    music.update(world, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
