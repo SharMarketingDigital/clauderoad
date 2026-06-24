@@ -9,6 +9,7 @@ import { NpcAvatar } from './npc_avatar';
 import { populateForest } from './forest';
 import { populateVillage } from './village';
 import { setupEnvironment, terrainHeight, type Environment, type WeatherState } from './environment';
+import { AbilityVfx, abilityEffect } from './vfx/ability_vfx';
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
@@ -64,6 +65,10 @@ export class Renderer {
   // sky / sun+shadows / undulating ground / grass / fog (all tunable in environment.ts)
   private env: Environment;
 
+  // Ability particle VFX (GDD G2) — projectiles/impacts spawned when the renderer detects a
+  // cast (derived from IWorld). Render-only; never touches the sim.
+  private abilityVfx: AbilityVfx;
+
   // third-person orbit camera state
   private camYaw = 0;
   private camPitch = 0.5;
@@ -84,6 +89,7 @@ export class Renderer {
     // colour-varied ground, dense grass, distance fog. The sky/sun follow the
     // player each frame (see render()). All knobs live in environment.ts.
     this.env = setupEnvironment(this.scene, this.gl);
+    this.abilityVfx = new AbilityVfx(this.scene);
 
     this.selectionRing = makeSelectionRing();
     this.scene.add(this.selectionRing);
@@ -184,6 +190,7 @@ export class Renderer {
     this.updatePlayerAvatar(world, dt);
     this.updatePlayerAvatars(world, dt);
     this.updateEnemyAvatars(world, dt);
+    this.abilityVfx.update(dt);
     // Keep the sky centred on the player and the sun's shadow frustum on them.
     const pid = world.localPlayerId();
     const pp = pid != null ? world.entities().find((e) => e.id === pid) : undefined;
@@ -305,6 +312,19 @@ export class Renderer {
       av.triggerAttack(castSlot === 1);
     } else if (dealt && !av.isSwinging()) {
       av.triggerAttack(false);
+    }
+
+    // Ability VFX (GDD G2): on a cast, spawn the ability's particle effect from the caster to
+    // its target. Render-only — the sim already resolved the hit; this only shows it. Mapped by
+    // (mastery, slot); so far the Mago's Bola de Fogo (slot 1) flies a fireball to the target.
+    if (castSlot !== 0) {
+      const effect = abilityEffect(p.mastery, castSlot);
+      const target = targetId != null ? world.entities().find((e) => e.id === targetId) : undefined;
+      if (effect && target) {
+        const from = new THREE.Vector3(p.x, terrainHeight(p.x, p.z) + 1.3, p.z);
+        const to = new THREE.Vector3(target.x, terrainHeight(target.x, target.z) + 1.0, target.z);
+        this.abilityVfx.cast(effect, from, to);
+      }
     }
 
     av.update(dt, moving);
