@@ -10,7 +10,7 @@
 // server runs ONE Sim for everyone and the client mirrors snapshots.
 
 import { Rng } from './rng';
-import { applyMove } from './movement';
+import { applyMove, slideThroughGates } from './movement';
 import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './party';
 import type { Entity, ItemStack } from './types';
 import type {
@@ -60,6 +60,11 @@ export const DT = 1 / TICK_RATE; // seconds per tick
 export { WORLD_HALF };
 
 export const PLAYER_SPEED = 6; // units/sec (also reused by the authoritative server)
+// City wall (Jangan): a square stone rampart at this Chebyshev half-extent — MUST match render's
+// WALL_H in village.ts. The player can't cross it except through a gate gap of ±GATE_HALF at each
+// cardinal mid-point (slightly wider than the visual ~2 opening, for comfortable passage).
+export const CITY_WALL_HALF = 26;
+export const GATE_HALF = 2.5;
 export const ENEMY_SPEED = 2.4; // units/sec
 export const MELEE_RANGE = 2.5; // units; provisional melee reach (player + enemy radius + a little)
 const CONTACT_DIST = 1.0; // within this the bodies overlap; don't require facing to swing
@@ -1943,8 +1948,11 @@ export class Sim implements IWorld {
     // Same integration the server runs (src/sim/movement.ts); slow debuffs cut speed.
     const m = applyMove(p.x, p.z, intent.dx, intent.dz, PLAYER_SPEED * this.slowFactor(p), DT, WORLD_HALF);
     if (!m) return;
-    p.x = m.x;
-    p.z = m.z;
+    // City wall: can't cross the rampart except through the 4 cardinal gates (slides to a gate
+    // when a step would cross elsewhere). Deterministic; player-only.
+    const w = slideThroughGates(p.x, p.z, m.x, m.z, CITY_WALL_HALF, GATE_HALF);
+    p.x = w.x;
+    p.z = w.z;
     p.facing = m.facing;
   }
 

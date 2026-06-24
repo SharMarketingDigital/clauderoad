@@ -9,6 +9,8 @@ import {
   enhanceStat,
   STR_TO_DAMAGE,
   WORLD_HALF,
+  CITY_WALL_HALF,
+  GATE_HALF,
   ENEMY_SPEED,
   MELEE_RANGE,
   CRIT_MULT,
@@ -3221,5 +3223,45 @@ describe('class selection (G1)', () => {
     };
     expect(run(7)).toBe(run(7));
     expect(run(7)).not.toBe(run(123));
+  });
+});
+
+// City wall (G4 / R4): the square stone rampart blocks the player except through the 4 cardinal
+// gates. Deterministic, player-only — the collision lives in src/sim/movement.ts (slideThroughGates).
+describe('city wall collision (gates)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('the player only crosses the rampart through a gate, and reaches the wilds via one', () => {
+    const sim = new Sim(7);
+    let prev = { x: player(sim).x, z: player(sim).z };
+    let crossings = 0;
+    // try to barge straight out toward a CORNER (no gate there) — the player should slide to a gate
+    for (let i = 0; i < 600; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: 60 - p.x, dz: 45 - p.z });
+      sim.step();
+      const cur = { x: player(sim).x, z: player(sim).z };
+      // a crossing of the east wall SEGMENT (|z| <= wallHalf) must fall within the gate gap
+      if (prev.x < CITY_WALL_HALF && cur.x >= CITY_WALL_HALF) {
+        const zc = prev.z + ((CITY_WALL_HALF - prev.x) / (cur.x - prev.x)) * (cur.z - prev.z);
+        if (Math.abs(zc) <= CITY_WALL_HALF) { expect(Math.abs(zc)).toBeLessThanOrEqual(GATE_HALF + 1e-6); crossings++; }
+      }
+      // a crossing of the north wall SEGMENT (|x| <= wallHalf) must fall within the gate gap
+      if (prev.z < CITY_WALL_HALF && cur.z >= CITY_WALL_HALF) {
+        const xc = prev.x + ((CITY_WALL_HALF - prev.z) / (cur.z - prev.z)) * (cur.x - prev.x);
+        if (Math.abs(xc) <= CITY_WALL_HALF) { expect(Math.abs(xc)).toBeLessThanOrEqual(GATE_HALF + 1e-6); crossings++; }
+      }
+      prev = cur;
+    }
+    expect(Math.max(Math.abs(player(sim).x), Math.abs(player(sim).z))).toBeGreaterThan(CITY_WALL_HALF); // got out
+    expect(crossings).toBeGreaterThan(0); // and it crossed the rampart (through a gate, per above)
+  });
+
+  it('walking due along a cardinal axis passes straight through that gate', () => {
+    const sim = new Sim(7);
+    for (let i = 0; i < 400; i++) { sim.sendCommand({ t: 'move', dx: 1, dz: 0 }); sim.step(); }
+    const p = player(sim);
+    expect(p.x).toBeGreaterThan(CITY_WALL_HALF); // exited east...
+    expect(Math.abs(p.z)).toBeLessThanOrEqual(GATE_HALF + 1e-6); // ...through the east gate (z ~ 0)
   });
 });
