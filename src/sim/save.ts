@@ -10,7 +10,7 @@
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type { EquipSlot, Rarity } from '../world_api';
 import { ITEMS } from './content/items';
-import { BAG_SLOTS } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS } from './inventory';
 import { MAX_PLUS } from './content/enhance';
 import { SKILL_MAX_RANK } from './content/skill_ranks';
 import { MAX_DURABILITY } from './content/durability';
@@ -29,12 +29,17 @@ export interface PlayerSave {
   skillRanks: Record<string, number>;
   gold: number;
   bag: ItemStack[];
-  equipment: { weapon: EquippedItem | null; armor: EquippedItem | null };
+  equipment: Record<EquipSlot, EquippedItem | null>;
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
 // (deep-copied so it never aliases the entity's own arrays/maps).
 export function toSave(e: Entity): PlayerSave {
+  const equipment = {} as Record<EquipSlot, EquippedItem | null>;
+  for (const slot of EQUIP_SLOTS) {
+    const it = e.equipment[slot];
+    equipment[slot] = it ? { ...it } : null;
+  }
   return {
     level: e.level,
     xp: e.xp,
@@ -47,10 +52,7 @@ export function toSave(e: Entity): PlayerSave {
     skillRanks: { ...e.skillRanks },
     gold: e.gold,
     bag: e.bag.map((s) => ({ itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty })),
-    equipment: {
-      weapon: e.equipment.weapon ? { ...e.equipment.weapon } : null,
-      armor: e.equipment.armor ? { ...e.equipment.armor } : null,
-    },
+    equipment,
   };
 }
 
@@ -71,8 +73,7 @@ export function applySave(e: Entity, raw: unknown): void {
   e.skillRanks = sanitizeRanks(raw.skillRanks);
   e.bag = sanitizeBag(raw.bag);
   const eq = sanitizeEquipment(raw.equipment);
-  e.equipment.weapon = eq.weapon;
-  e.equipment.armor = eq.armor;
+  for (const slot of EQUIP_SLOTS) e.equipment[slot] = eq[slot];
 }
 
 // ---- validation helpers (pure) ----
@@ -121,9 +122,11 @@ function sanitizeStack(raw: unknown): ItemStack | null {
   return { itemId: raw.itemId, rarity: raw.rarity, plus: raw.plus, qty: raw.qty };
 }
 
-function sanitizeEquipment(raw: unknown): { weapon: EquippedItem | null; armor: EquippedItem | null } {
-  if (!isObj(raw)) return { weapon: null, armor: null };
-  return { weapon: sanitizeEquipped(raw.weapon, 'weapon'), armor: sanitizeEquipped(raw.armor, 'armor') };
+function sanitizeEquipment(raw: unknown): Record<EquipSlot, EquippedItem | null> {
+  const out = {} as Record<EquipSlot, EquippedItem | null>;
+  const obj: Record<string, unknown> = isObj(raw) ? raw : {};
+  for (const slot of EQUIP_SLOTS) out[slot] = sanitizeEquipped(obj[slot], slot);
+  return out;
 }
 function sanitizeEquipped(raw: unknown, slot: EquipSlot): EquippedItem | null {
   if (!isObj(raw)) return null;

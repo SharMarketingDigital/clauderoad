@@ -26,7 +26,6 @@ export interface ItemDef {
   slot?: EquipSlot; // present => equippable (into this slot)
   mastery?: MasteryId; // weapons only: which mastery (kit + passive) this weapon activates
   stats?: ItemStats; // bonuses applied while equipped
-  elixirFor?: EquipSlot; // present => an alchemy Elixir that upgrades this slot
   luckyPowder?: boolean; // the alchemy luck booster
   consumable?: ConsumableEffect; // present => usable from the bag for this effect
   value?: number; // base gold value; the vendor pays this (rarity-scaled) on a sale
@@ -36,7 +35,17 @@ export const ITEMS: Record<string, ItemDef> = {
   // consumable: heals ~40% of the 120-HP starter, à la a WoW Classic minor healing potion
   health_potion: { id: 'health_potion', name: 'Poção de Vida', consumable: { healHp: 50 }, value: 10 },
   // crude leather "armor" — common drop, gives a little HP
-  wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'armor', stats: { maxHp: 20 }, value: 8 },
+  wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'chest', stats: { maxHp: 20 }, value: 8 },
+  // K1: the rest of the Silkroad armor set + shield + accessories (str/maxHp/maxMp). Per-piece
+  // weight chest>legs>helmet>hands~feet; the shield is balanced. Provisional integers — tune later.
+  leather_cap: { id: 'leather_cap', name: 'Gorro de Couro', slot: 'helmet', stats: { maxHp: 12 }, value: 6 },
+  leather_gloves: { id: 'leather_gloves', name: 'Luvas de Couro', slot: 'hands', stats: { maxHp: 8 }, value: 5 },
+  leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14 }, value: 7 },
+  leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8 }, value: 5 },
+  wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', stats: { maxHp: 18 }, value: 10 },
+  copper_necklace: { id: 'copper_necklace', name: 'Colar de Cobre', slot: 'necklace', stats: { maxMp: 12 }, value: 12 },
+  copper_earring: { id: 'copper_earring', name: 'Brinco de Cobre', slot: 'earring', stats: { str: 1 }, value: 12 },
+  copper_ring: { id: 'copper_ring', name: 'Anel de Cobre', slot: 'ring', stats: { str: 1 }, value: 12 },
   // the starter weapon upgrade: a big chunk of weapon damage over bare fists
   old_sword: { id: 'old_sword', name: 'Espada Velha', slot: 'weapon', mastery: 'sword', stats: { weaponDamage: 10 }, value: 30 },
   // a reach weapon: switches the character to the Lança mastery (area + crit kit)
@@ -46,8 +55,8 @@ export const ITEMS: Record<string, ItemDef> = {
   // a magical weapon: switches to the Mago mastery (ranged MAGICAL damage scaling with Int)
   apprentice_staff: { id: 'apprentice_staff', name: 'Cajado de Aprendiz', slot: 'weapon', mastery: 'mage', stats: { weaponDamage: 9 }, value: 55 },
   // alchemy materials (no rarity; consumed to attempt a "+N" upgrade)
-  elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', elixirFor: 'weapon', value: 15 },
-  elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', elixirFor: 'armor', value: 15 },
+  elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', value: 15 },
+  elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', value: 15 },
   lucky_powder: { id: 'lucky_powder', name: 'Pó da Sorte', luckyPowder: true, value: 25 },
 };
 

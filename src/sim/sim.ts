@@ -12,7 +12,7 @@
 import { Rng } from './rng';
 import { applyMove } from './movement';
 import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './party';
-import type { Entity, ItemStack } from './types';
+import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
@@ -44,13 +44,19 @@ export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
-import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, addToBag, removeFromBag } from './inventory';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
 } from './content/vendor';
 
-const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
+// Fresh, fully-populated equipment record (every slot null). One source so every
+// spawn literal stays exhaustive under TS strict when EQUIP_SLOTS changes.
+function emptyEquipment(): Record<EquipSlot, EquippedItem | null> {
+  const eq = {} as Record<EquipSlot, EquippedItem | null>;
+  for (const slot of EQUIP_SLOTS) eq[slot] = null;
+  return eq;
+}
 
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
@@ -302,7 +308,7 @@ export class Sim implements IWorld {
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
@@ -347,7 +353,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: tier.id,
+      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: tier.id,
       species: sp.id,
       boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
@@ -370,7 +376,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
@@ -396,7 +402,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: t.id, // the boss id, so kill/summon/render resolve its def
       boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
@@ -476,7 +482,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: def.minionSpecies,
       boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,

@@ -11,7 +11,17 @@ export type EntityKind = 'player' | 'enemy' | 'npc';
 
 // Equipment slots a character can fill. Defined here (the seam) so both the
 // sim's item content and the UI agree on the set.
-export type EquipSlot = 'weapon' | 'armor';
+export type EquipSlot =
+  | 'weapon'
+  | 'shield'
+  | 'helmet'
+  | 'chest'
+  | 'hands'
+  | 'legs'
+  | 'feet'
+  | 'necklace'
+  | 'earring'
+  | 'ring';
 
 // Item rarity, common -> rarest (Silkroad-style lucky drops). Defined at the
 // seam so content, sim, and UI agree; the UI maps these to colors.

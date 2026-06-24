@@ -3,9 +3,17 @@
 // feeds loot into it; render/ui only read it (via IWorld). Stacks key on item
 // id, rarity AND enhancement (+N) — a +4 SUN sword stacks separately from a +0.
 import type { ItemStack } from './types';
-import type { Rarity } from '../world_api';
+import type { Rarity, EquipSlot } from '../world_api';
 
 export const BAG_SLOTS = 20; // provisional grid size (GDD §D1: limited slots)
+
+// Equipment slots a character can fill (the full Silkroad set). The single typed
+// source the sim and the save layer iterate. It lives in this leaf (which imports
+// only world_api), so both sim.ts and save.ts can import it with NO import cycle.
+export const EQUIP_SLOTS: EquipSlot[] = [
+  'weapon', 'shield', 'helmet', 'chest', 'hands', 'legs', 'feet',
+  'necklace', 'earring', 'ring',
+];
 
 const sameStack = (s: ItemStack, itemId: string, rarity: Rarity, plus: number): boolean =>
   s.itemId === itemId && s.rarity === rarity && s.plus === plus;

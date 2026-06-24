@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { ServerWorld } from '../server/world';
 import { VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_STOCK } from '../src/sim/content/vendor';
+import type { EquipSlot } from '../src/world_api';
 
 const enemyId = (w: ServerWorld) => w.snapshot().entities.find((e) => e.kind === 'enemy')!.id;
 const selfOf = (w: ServerWorld, id: number) => w.snapshot().entities.find((e) => e.id === id)!;
@@ -195,7 +196,7 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
   it('accepts equip — a looted item goes onto the character (server applies it)', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
-    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: 'weapon' | 'armor' } | undefined;
+    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
     for (let r = 0; r < 10 && !gear; r++) {
       farm(w, a, 1200);
       gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null) as typeof gear;

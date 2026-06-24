@@ -23,4 +23,14 @@ export const VENDOR_STOCK: VendorStockEntry[] = [
   { itemId: 'elixir_weapon', price: 40 },
   { itemId: 'elixir_armor', price: 40 },
   { itemId: 'lucky_powder', price: 60 },
+  // K1: the full Silkroad equipment set, so a player can buy a complete set in town.
+  { itemId: 'leather_cap', price: 40 },
+  { itemId: 'wolf_leather', price: 50 },
+  { itemId: 'leather_gloves', price: 30 },
+  { itemId: 'leather_pants', price: 45 },
+  { itemId: 'leather_boots', price: 30 },
+  { itemId: 'wooden_shield', price: 55 },
+  { itemId: 'copper_necklace', price: 70 },
+  { itemId: 'copper_earring', price: 70 },
+  { itemId: 'copper_ring', price: 70 },
 ];

@@ -9,6 +9,7 @@
 // and offline because it's literally the same simulation.
 import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
+import { EQUIP_SLOTS } from '../src/sim/inventory';
 import type { Command, PartyView, EntityView } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
 import type { PlayerSave } from '../src/sim/save';
@@ -386,7 +387,10 @@ export class ServerWorld {
   }
 }
 
-const VALID_SLOTS: ReadonlySet<string> = new Set(['weapon', 'armor']);
+// Derived from the single EQUIP_SLOTS source (the full Silkroad set), so the server's
+// input whitelist accepts every equip slot the sim knows — never a hand-written subset
+// that silently drops 9 of 10 slots online (K1: was {'weapon','armor'}).
+const VALID_SLOTS: ReadonlySet<string> = new Set(EQUIP_SLOTS);
 const VALID_RARITIES: ReadonlySet<string> = new Set(['normal', 'sos', 'som', 'sun']);
 const PARTY_EXP: ReadonlySet<string> = new Set(['each-get', 'auto-share']);
 const PARTY_LOOT: ReadonlySet<string> = new Set(['distribution', 'auto-share']);

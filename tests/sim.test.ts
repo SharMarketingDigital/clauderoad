@@ -1651,11 +1651,11 @@ describe('equipment', () => {
 
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: leather.rarity, plus: leather.plus });
     sim.step();
-    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
+    expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBe('wolf_leather');
     expect(player(sim).maxHp).toBe(maxBefore + expectedBonus);
     expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp);
 
-    sim.sendCommand({ t: 'unequip', slot: 'armor' });
+    sim.sendCommand({ t: 'unequip', slot: 'chest' });
     sim.step();
     expect(player(sim).maxHp).toBe(maxBefore);
     expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp); // clamp invariant holds
@@ -1795,7 +1795,7 @@ describe('consumables', () => {
 
     // Re-open the gap (unequip + re-equip the leather — equipping never tops HP
     // up) so every later refusal can ONLY be the cooldown, not a full-HP no-op.
-    sim.sendCommand({ t: 'unequip', slot: 'armor' });
+    sim.sendCommand({ t: 'unequip', slot: 'chest' });
     safeStep(sim);
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
     safeStep(sim);
@@ -2682,13 +2682,13 @@ describe('bot (auto-play): self-sufficiency', () => {
     let g = 0;
     while (bagQty(sim, 'wolf_leather') < 1 && g++ < 400) killNearestEnemy(sim);
     expect(bagQty(sim, 'wolf_leather')).toBeGreaterThanOrEqual(1);
-    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBeNull();
+    expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBeNull();
     const maxHp0 = player(sim).maxHp;
 
     sim.sendCommand({ t: 'set-bot', on: true });
     for (let i = 0; i < 12; i++) sim.step();
 
-    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
+    expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBe('wolf_leather');
     expect(player(sim).maxHp).toBeGreaterThan(maxHp0); // the +HP armor is now folded in
   });
 
@@ -2877,7 +2877,7 @@ function dieOnceAndRespawn(sim: Sim): void {
 // bonus until repaired at the vendor for gold. Gentle — never breaks, fully restorable.
 describe('death penalty (durability / repair)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
-  const armor = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'armor')!;
+  const armor = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'chest')!;
 
   // Equip a freshly-looted Couro de Lobo (armor) at full durability.
   const equipFreshArmor = (sim: Sim): void => {
@@ -2931,7 +2931,7 @@ describe('death penalty (durability / repair)', () => {
     const cost = armor(sim).repairCost;
     expect(cost).toBeGreaterThan(0);
     expect(gold0).toBeGreaterThanOrEqual(cost);
-    sim.sendCommand({ t: 'repair', slot: 'armor' });
+    sim.sendCommand({ t: 'repair', slot: 'chest' });
     sim.step();
     expect(armor(sim).durability).toBe(MAX_DURABILITY); // fully repaired
     expect(player(sim).gold).toBe(gold0 - cost); // paid the repair cost
@@ -2949,7 +2949,7 @@ describe('death penalty (durability / repair)', () => {
     // away from the vendor: a repair command is a no-op (no gold spent)
     fleeToSafety(sim);
     const goldAway = player(sim).gold;
-    sim.sendCommand({ t: 'repair', slot: 'armor' });
+    sim.sendCommand({ t: 'repair', slot: 'chest' });
     sim.step();
     expect(armor(sim).durability).toBe(0); // not repaired (not at the vendor)
     expect(player(sim).gold).toBe(goldAway);
@@ -2959,7 +2959,7 @@ describe('death penalty (durability / repair)', () => {
     const cost = armor(sim).repairCost; // 100 at durability 0
     if (player(sim).gold < cost) {
       const gold0 = player(sim).gold;
-      sim.sendCommand({ t: 'repair', slot: 'armor' });
+      sim.sendCommand({ t: 'repair', slot: 'chest' });
       sim.step();
       expect(armor(sim).durability).toBe(0); // refused — can't afford it
       expect(player(sim).gold).toBe(gold0);

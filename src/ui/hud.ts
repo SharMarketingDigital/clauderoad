@@ -1,6 +1,7 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
 import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
 import { isTyping } from './typing';
+import { SLOT_LABELS } from './inventory';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -354,7 +355,7 @@ export class Hud {
       const btn = this.shopRepairCells[j];
       if (eq && eq.itemId != null && eq.durability < eq.maxDurability) {
         btn.style.display = '';
-        const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+        const slotName = SLOT_LABELS[eq.slot];
         btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] — ${eq.repairCost}`;
         btn.disabled = p.gold < eq.repairCost;
       } else {
@@ -419,7 +420,7 @@ export class Hud {
     for (let j = 0; j < this.equipCells.length; j++) {
       const eq = inv.equipment[j];
       const cell = this.equipCells[j];
-      const label = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      const label = SLOT_LABELS[eq.slot];
       cell.classList.toggle('filled', eq.itemId != null);
       if (eq.itemId) {
         cell.dataset.rarity = eq.rarity ?? '';
@@ -528,7 +529,7 @@ export class Hud {
     for (let j = 0; j < this.refineBtns.length; j++) {
       const eq = inv.equipment[j];
       const btn = this.refineBtns[j];
-      const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      const slotName = SLOT_LABELS[eq.slot];
       const elixirId = eq.slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
       if (eq.itemId == null) {
         btn.textContent = `${slotName}: vazio`;

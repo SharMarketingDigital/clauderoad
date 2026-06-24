@@ -39,7 +39,15 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
       ],
       equipment: {
         weapon: { itemId: 'old_sword', rarity: 'sos', plus: 2, durability: 70 },
-        armor: { itemId: 'wolf_leather', rarity: 'normal', plus: 0, durability: 100 },
+        shield: null,
+        helmet: null,
+        chest: { itemId: 'wolf_leather', rarity: 'normal', plus: 0, durability: 100 },
+        hands: null,
+        legs: null,
+        feet: null,
+        necklace: null,
+        earring: null,
+        ring: null,
       },
     };
     sim.restorePlayer(a, JSON.parse(JSON.stringify(save))); // through JSON, like the DB
