@@ -53,8 +53,10 @@ export class Renderer {
   private enemyAvatars = new EnemyAvatars();
   private lastEnemyHitSeq = 0; // cursor: spot NEW damage events on the player (to lunge the attacker)
 
-  // The vendor NPC as an animated 3D character (idle). Loads async; capsule fallback.
-  private vendorAvatar = new NpcAvatar('/models/Mage.glb');
+  // Town NPCs (vendor + warehouse keeper) as animated 3D characters (idle). One NpcAvatar
+  // per npc id, created lazily — so each NPC has its OWN model/root and renders at its OWN
+  // position (a single shared avatar can't be in two places). Loads async; capsule fallback.
+  private npcAvatars = new Map<number, NpcAvatar>();
 
   // sky / sun+shadows / undulating ground / grass / fog (all tunable in environment.ts)
   private env: Environment;
@@ -184,7 +186,7 @@ export class Renderer {
     const px = pp ? pp.x : 0;
     const pz = pp ? pp.z : 0;
     this.env.update(dt, px, pz, terrainHeight(px, pz), serverWeather);
-    if (this.vendorAvatar.ready) this.vendorAvatar.update(dt); // keep the vendor's idle playing
+    for (const av of this.npcAvatars.values()) if (av.ready) av.update(dt); // keep each NPC's idle playing
     this.updateCamera(world);
     this.gl.render(this.scene, this.camera);
   }
@@ -317,7 +319,12 @@ export class Renderer {
       return this.playerAvatars.rootFor(e.id, e.x, e.z);
     }
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
-    if (e.kind === 'npc') return this.vendorAvatar.ready ? this.vendorAvatar.root : null; // the vendor
+    if (e.kind === 'npc') {
+      // One avatar per NPC id (vendor + warehouse), created on first sight.
+      let av = this.npcAvatars.get(e.id);
+      if (!av) { av = new NpcAvatar('/models/Mage.glb'); this.npcAvatars.set(e.id, av); }
+      return av.ready ? av.root : null;
+    }
     return null;
   }
 
