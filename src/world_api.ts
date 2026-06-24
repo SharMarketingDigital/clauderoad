@@ -154,6 +154,16 @@ export interface ShopView {
   readonly inRange: boolean;
 }
 
+// The player's persistent warehouse (armazém/banco da cidade) — bag-like, stored at the town
+// warehouse and saved with the character (K5). `inRange` is whether the local player is close
+// enough to the warehouse NPC to deposit/withdraw (the sim enforces this too).
+export interface StorageView {
+  readonly name: string;
+  readonly capacity: number;
+  readonly stacks: ReadonlyArray<ItemStackView>;
+  readonly inRange: boolean;
+}
+
 // Party (co-op group), Silkroad-style. The leader picks BOTH modes at creation:
 //   exp:  'each-get'   — each member keeps the XP they earned (no range limit), +bonus
 //                        by party size; capacity 4.
@@ -296,6 +306,8 @@ export interface IWorld {
   inventory(): InventoryView;
   // The vendor's storefront (stock + whether the player is in range) for the shop.
   shop(): ShopView;
+  // The local player's warehouse (armazém) contents + whether in range to deposit/withdraw.
+  storage(): StorageView;
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;

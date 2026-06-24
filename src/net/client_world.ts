@@ -9,7 +9,7 @@
 //     later bag/shop), streamed by the server to this client only.
 // The server is authoritative for everything; this only mirrors and renders.
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView,
   PartyView, PartyInviteView,
 } from '../world_api';
 import type {
@@ -117,6 +117,10 @@ export class ClientWorld implements IWorld {
 
   shop(): ShopView {
     return this.self ? this.self.shop : EMPTY_SHOP;
+  }
+
+  storage(): StorageView {
+    return this.self ? this.self.storage : EMPTY_STORAGE;
   }
 
   botActive(): boolean {
@@ -250,6 +254,7 @@ function mergeSelf(v: EntityView, s: SelfSnap): EntityView {
 const EMPTY_ABILITIES: ReadonlyArray<AbilityView> = [];
 const EMPTY_INVENTORY: InventoryView = { capacity: 0, stacks: [], equipment: [] };
 const EMPTY_SHOP: ShopView = { name: '', stock: [], inRange: false };
+const EMPTY_STORAGE: StorageView = { name: '', capacity: 0, stacks: [], inRange: false }; // capacity 0 like EMPTY_INVENTORY; the panel reads capacity per-update
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;

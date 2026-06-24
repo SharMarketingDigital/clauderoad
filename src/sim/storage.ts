@@ -16,6 +16,10 @@ export const WAREHOUSE_NAME = 'Armazém';
 export const WAREHOUSE_SPAWN_X = 10;
 export const WAREHOUSE_SPAWN_Z = 18;
 export const WAREHOUSE_INTERACT_RANGE = 4; // unidades de mundo; precisa estar perto p/ usar
+// Id de entidade RESERVADO para o NPC do armazém — fora da sequência de this.nextId, p/ que
+// adicionar esse NPC NÃO desloque os ids que o addPlayer usa para posicionar jogadores em rede
+// (manteria o mundo do servidor byte-idêntico). 1e9 está muito acima de qualquer nextId real.
+export const WAREHOUSE_ENTITY_ID = 1_000_000_000;
 
 // `arr` aceitaria (itemId,rarity,plus)? true se já há um stack CASÁVEL (cresce a qty) OU se há
 // slot livre. ESPELHA exatamente addToBag (inventory.ts): um stack casável cresce mesmo com o

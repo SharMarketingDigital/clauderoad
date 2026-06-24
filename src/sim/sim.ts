@@ -14,7 +14,7 @@ import { applyMove } from './movement';
 import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './party';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES } from './content/classes';
@@ -46,7 +46,8 @@ export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
-import { BAG_SLOTS, EQUIP_SLOTS, addToBag, removeFromBag } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag } from './inventory';
+import { WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID } from './storage';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
@@ -176,6 +177,8 @@ export class Sim implements IWorld {
 
   // The town vendor NPC's entity id (a fixed, non-combat shopkeeper).
   private vendorId = 0;
+  // The town WAREHOUSE keeper NPC's entity id (K5 — the armazém/banco interaction anchor).
+  private warehouseId = 0;
   // Auto-play: the set of player ids whose bot is ON. The bot drives each of those
   // players (survive/evolve) through the SAME applyAction path a human's commands use,
   // and manual input from a bot-driven player is ignored. Per-player so the server can
@@ -218,6 +221,7 @@ export class Sim implements IWorld {
       }
     }
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
+    this.warehouseId = this.spawnWarehouse(); // AFTER the vendor (vendor stays the first 'npc')
   }
 
   // Wire up a player's per-player intent/command state and add it to the iteration
@@ -386,6 +390,33 @@ export class Sim implements IWorld {
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
+    });
+    return id;
+  }
+
+  // The town WAREHOUSE keeper NPC (armazém) — same fixed, non-combat NPC shape as the vendor,
+  // at a distinct spot (10,18). Spawned AFTER the vendor so the vendor stays the first 'npc'
+  // (tests/UI that find "the npc" still resolve to the vendor). The bank items live on each
+  // PLAYER (Entity.storage); this NPC is only the interaction anchor.
+  private spawnWarehouse(): number {
+    const id = WAREHOUSE_ENTITY_ID; // RESERVED id (not this.nextId) — keeps networked player ids/positions stable
+    this.ents.set(id, {
+      id, kind: 'npc', name: WAREHOUSE_NAME,
+      x: WAREHOUSE_SPAWN_X, z: WAREHOUSE_SPAWN_Z, facing: 0,
+      hp: 100, maxHp: 100,
+      targetId: null,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      species: '',
+      boss: false, summoned: false, spawnZone: -1,
+      homeX: WAREHOUSE_SPAWN_X, homeZ: WAREHOUSE_SPAWN_Z,
+      targetX: WAREHOUSE_SPAWN_X, targetZ: WAREHOUSE_SPAWN_Z, repickAt: 0,
     });
     return id;
   }
@@ -617,6 +648,34 @@ export class Sim implements IWorld {
       })),
       inRange: p ? this.nearVendor(p) : false,
     };
+  }
+
+  storage(): StorageView {
+    return this.storageFor(this.localId);
+  }
+
+  // The warehouse (armazém) contents for a SPECIFIC player. `inRange` depends on that player's
+  // position; the items themselves live on the player (Entity.storage). Mirrors inventoryFor's
+  // stack mapping (storage holds no equipment).
+  storageFor(id: number): StorageView {
+    const p = this.ents.get(id);
+    const stacks = p
+      ? p.storage.map((s) => {
+          const def = ITEMS[s.itemId];
+          return {
+            itemId: s.itemId,
+            name: def?.name ?? s.itemId,
+            qty: s.qty,
+            rarity: s.rarity,
+            rarityName: rarityDef(s.rarity).name,
+            plus: s.plus,
+            equipSlot: def?.slot,
+            consumable: def?.consumable != null,
+            sellValue: rarityStat(def?.value ?? 0, s.rarity),
+          };
+        })
+      : [];
+    return { name: WAREHOUSE_NAME, capacity: STORAGE_SLOTS, stacks, inRange: p ? this.nearWarehouse(p) : false };
   }
 
   botActive(): boolean {
@@ -1703,6 +1762,15 @@ export class Sim implements IWorld {
     const dx = p.x - v.x;
     const dz = p.z - v.z;
     return dx * dx + dz * dz <= VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
+  }
+
+  // Whether the player is close enough to the warehouse NPC to deposit/withdraw.
+  private nearWarehouse(p: Entity): boolean {
+    const w = this.ents.get(this.warehouseId);
+    if (!w) return false;
+    const dx = p.x - w.x;
+    const dz = p.z - w.z;
+    return dx * dx + dz * dz <= WAREHOUSE_INTERACT_RANGE * WAREHOUSE_INTERACT_RANGE;
   }
 
   // Recompute EFFECTIVE stats = base (class + level) + sum of equipped gear.

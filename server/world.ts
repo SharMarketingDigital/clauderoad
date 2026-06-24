@@ -309,6 +309,7 @@ export class ServerWorld {
     const abilities = [...this.sim.abilitiesFor(id)];
     const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
+    const storage = this.sim.storageFor(id); // K5: the player's warehouse view (inRange too)
     const e = this.sim.entities().find((v) => v.id === id);
     // Party state is the same for either branch (it survives a dead/missing entity view).
     const party = this.sim.partyViewFor(id);
@@ -323,7 +324,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, abilities, inventory, shop, party, invite,
+        botActive: false, abilities, inventory, shop, storage, party, invite,
         matching, partyRequests, myRequestPartyId,
       };
     }
@@ -335,7 +336,7 @@ export class ServerWorld {
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
-      abilities, inventory, shop, party, invite,
+      abilities, inventory, shop, storage, party, invite,
       matching, partyRequests, myRequestPartyId,
     };
   }

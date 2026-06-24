@@ -31,7 +31,7 @@ import { Rng } from '../src/sim/rng';
 import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
-import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
+import { addToBag, BAG_SLOTS, STORAGE_SLOTS } from '../src/sim/inventory';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS, RISK_FLOOR } from '../src/sim/content/enhance';
 import { enhanceChance, enhanceStat } from '../src/sim/enhance';
@@ -3259,5 +3259,17 @@ describe('degrees — inventário expõe grau/requisito/canEquip', () => {
       equipment: {},
     });
     expect(stackOf('steel_sword').canEquip).toBe(true);
+  });
+});
+
+// --- K5: armazém (storage) — superfície na IWorld ---
+describe('armazém (storage) — superfície na IWorld', () => {
+  it('storage() expõe o armazém vazio e fora de alcance no spawn', () => {
+    const sim = new Sim(7);
+    const st = sim.storage();
+    expect(st.name).toBe('Armazém');
+    expect(st.capacity).toBe(STORAGE_SLOTS);
+    expect(st.stacks.length).toBe(0); // nada guardado ainda
+    expect(st.inRange).toBe(false); // o jogador nasce em (0,0), longe do armazém (10,18)
   });
 });
