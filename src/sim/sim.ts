@@ -165,6 +165,10 @@ export class Sim implements IWorld {
   // the live entity id (null when dead), the tick its next spawn is due (Infinity
   // while alive), and how many summon waves it has fired this life. Tick-driven; no Rng.
   private bossState = BOSS_DEFS.map((d) => ({ entityId: null as number | null, spawnAt: d.firstSpawnTick, summonsFired: 0 }));
+  // Per-boss damage ledger: bossEntityId -> (playerId -> total damage dealt over the boss's life).
+  // The biggest contributor is credited with the kill/loot (Silkroad uniques), not the last hit.
+  // Pure bookkeeping (deterministic, not part of the world hash); single-player = the one player.
+  private bossDamage = new Map<number, Map<number, number>>();
   // Recent presentation events (damage numbers, hit flashes). Bounded by age
   // (EVENT_TTL_TICKS) so it never grows unbounded; `seq` is monotonic forever.
   private events: SimEvent[] = [];
@@ -900,6 +904,8 @@ export class Sim implements IWorld {
     // numbers to before. Giving enemies armor later happens here without touching this call.
     const dmg = combat.mitigate({ hit, target: t });
     t.hp -= dmg;
+    // Boss loot goes to the biggest damage contributor, so tally each player's damage to the boss.
+    if (t.boss && killer.kind === 'player' && dmg > 0) this.recordBossDamage(t.id, killer.id, dmg);
     // Captured at the target's current position so the number shows even on a kill.
     this.events.push({
       seq: this.nextEventSeq++,
@@ -933,9 +939,16 @@ export class Sim implements IWorld {
     this.ents.delete(dead.id);
     // Which boss died (if any), resolved from its species id (= boss id).
     const bossDef = dead.boss ? (BOSS_DEF_BY_ID[dead.species] ?? BOSS_DEFS[0]) : null;
+    // A boss credits the BIGGEST damage contributor over its life (Silkroad uniques), not the last
+    // hit; common mobs credit the last hitter. The credited player still exists (players aren't
+    // removed here). Single-player: the top damager IS the last hitter, so behavior is unchanged.
+    const credited = bossDef
+      ? (this.ents.get(this.topBossDamager(dead.id) ?? killer.id) ?? killer)
+      : killer;
     if (bossDef) {
-      // This boss reschedules on its OWN timer (not the common-mob queue) and
-      // announces its defeat WITH the name of whoever landed the kill.
+      this.bossDamage.delete(dead.id); // the boss is gone — clear its damage ledger
+      // This boss reschedules on its OWN timer (not the common-mob queue) and announces its
+      // defeat WITH the name of whoever earned the kill (the top damage contributor).
       const s = this.bossState[BOSS_DEFS.indexOf(bossDef)];
       s.entityId = null;
       s.spawnAt = this.tick + bossDef.respawnTicks;
@@ -947,26 +960,46 @@ export class Sim implements IWorld {
         amount: 0,
         x: dead.x,
         z: dead.z,
-        text: killer.kind === 'player'
-          ? `${killer.name} derrotou ${bossDef.template.name}`
+        text: credited.kind === 'player'
+          ? `${credited.name} derrotou ${bossDef.template.name}`
           : `${bossDef.template.name} foi derrotado`,
       });
     } else if (!dead.summoned) {
       // Common enemies respawn after a delay, refilling their OWN ring; summons are ephemeral.
       this.respawnQueue.push({ at: this.tick + RESPAWN_TICKS, zone: dead.spawnZone });
     }
-    if (killer.kind === 'player') {
+    if (credited.kind === 'player') {
       const tier = ENEMY_TIERS.find((t) => t.id === dead.tier) ?? ENEMY_TIERS[0];
       const st = SPECIES_BY_ID[dead.species] ?? ENEMY_TEMPLATE; // the dead mob's species (xp/sp baseline)
       // A boss pays its big flat XP/SP lump; a common mob scales by tier AND by its LEVEL
       // (deeper rings pay more — GDD §G3). The reward is then distributed by the killer's
-      // party mode (solo = all to the killer).
+      // party mode (solo = all to the credited player).
       const lvl = levelRewardMult(dead.level);
       const baseXp = bossDef ? bossDef.template.xp : Math.round(st.xp * tier.xpMult * lvl);
       const baseSp = bossDef ? bossDef.template.sp : Math.round(st.sp * tier.xpMult * lvl);
-      this.awardReward(killer, baseXp, baseSp);
-      this.rollLoot(killer, dead, bossDef ? 1 : tier.goldMult * lvl);
+      this.awardReward(credited, baseXp, baseSp);
+      this.rollLoot(credited, dead, bossDef ? 1 : tier.goldMult * lvl);
     }
+  }
+
+  // Tally per-player damage dealt to a boss (over its life), for "most damage wins the loot".
+  private recordBossDamage(bossId: number, playerId: number, dmg: number): void {
+    let byPlayer = this.bossDamage.get(bossId);
+    if (!byPlayer) { byPlayer = new Map(); this.bossDamage.set(bossId, byPlayer); }
+    byPlayer.set(playerId, (byPlayer.get(playerId) ?? 0) + dmg);
+  }
+
+  // The player who dealt the most damage to a boss (ties -> lowest player id), or null if none.
+  // Deterministic: explicit tie-break, independent of map iteration order.
+  private topBossDamager(bossId: number): number | null {
+    const byPlayer = this.bossDamage.get(bossId);
+    if (!byPlayer) return null;
+    let bestId = -1;
+    let bestDmg = -1;
+    for (const [pid, d] of byPlayer) {
+      if (d > bestDmg || (d === bestDmg && pid < bestId)) { bestDmg = d; bestId = pid; }
+    }
+    return bestId < 0 ? null : bestId;
   }
 
   // Distribute a kill's XP + SP to the killer's PARTY per its mode (GDD B6 / Silkroad):
