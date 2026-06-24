@@ -3,6 +3,7 @@
 // input. (The DB layer itself lives in the server and isn't unit-tested here.)
 import { describe, it, expect } from 'vitest';
 import { Sim } from '../src/sim/sim';
+import { STORAGE_SLOTS } from '../src/sim/inventory';
 
 // Drive a player to farm mobs so it gains REAL XP/levels/loot/gold (like a real session).
 function farm(sim: Sim, a: number, steps: number): void {
@@ -49,9 +50,25 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
         earring: null,
         ring: null,
       },
+      storage: [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }],
     };
     sim.restorePlayer(a, JSON.parse(JSON.stringify(save))); // through JSON, like the DB
     expect(sim.serializePlayer(a)).toEqual(save);
+  });
+
+  it('persiste e sanitiza o armazém (round-trip, corrupção, cap em STORAGE_SLOTS)', () => {
+    const sim = new Sim(1337, false);
+    const a = sim.addPlayer('A');
+    // round-trip de storage populado (via o path do DB)
+    sim.restorePlayer(a, { storage: [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 7 }] });
+    expect(sim.serializePlayer(a)!.storage).toEqual([{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 7 }]);
+    // storage corrompido -> [] (defensivo, nunca lança)
+    sim.restorePlayer(a, { storage: 'garbage' });
+    expect(sim.serializePlayer(a)!.storage).toEqual([]);
+    // excesso de stacks é capado em STORAGE_SLOTS
+    const oversized = Array.from({ length: STORAGE_SLOTS + 10 }, () => ({ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 1 }));
+    sim.restorePlayer(a, { storage: oversized });
+    expect(sim.serializePlayer(a)!.storage.length).toBe(STORAGE_SLOTS);
   });
 
   it('round-trips a REAL farmed character (serialize -> JSON -> restore -> serialize)', () => {

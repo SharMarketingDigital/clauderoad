@@ -311,7 +311,7 @@ export class Sim implements IWorld {
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
@@ -357,7 +357,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: tier.id,
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: tier.id,
       species: sp.id,
       boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
@@ -381,7 +381,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
@@ -408,7 +408,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: t.id, // the boss id, so kill/summon/render resolve its def
       boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
@@ -489,7 +489,7 @@ export class Sim implements IWorld {
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: def.minionSpecies,
       boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,
@@ -2305,6 +2305,11 @@ export class Sim implements IWorld {
       // Economy & bag (stacks are in deterministic insertion order).
       mix(e.gold);
       for (const s of e.bag) {
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+      }
+      // K5: armazém do jogador (mesmo fold da bag). Storage vazio => 0 iterações => FNV
+      // intocado => hash byte-idêntico para todos os mundos que não usam o armazém.
+      for (const s of e.storage) {
         mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
       }
       // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).

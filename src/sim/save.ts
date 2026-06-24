@@ -10,7 +10,7 @@
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type { EquipSlot, Rarity } from '../world_api';
 import { ITEMS } from './content/items';
-import { BAG_SLOTS, EQUIP_SLOTS } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS } from './inventory';
 import { MAX_PLUS } from './content/enhance';
 import { SKILL_MAX_RANK } from './content/skill_ranks';
 import { MAX_DURABILITY } from './content/durability';
@@ -30,6 +30,7 @@ export interface PlayerSave {
   gold: number;
   bag: ItemStack[];
   equipment: Record<EquipSlot, EquippedItem | null>;
+  storage: ItemStack[]; // K5: armazém/banco da cidade (mesma forma da bag)
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -53,6 +54,8 @@ export function toSave(e: Entity): PlayerSave {
     gold: e.gold,
     bag: e.bag.map((s) => ({ itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty })),
     equipment,
+    // map por-campo (NÃO spread) p/ preservar o deep-copy: nunca aliasa os stacks da entidade.
+    storage: e.storage.map((s) => ({ itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty })),
   };
 }
 
@@ -71,7 +74,8 @@ export function applySave(e: Entity, raw: unknown): void {
   if (isInt(raw.sp) && raw.sp >= 0) e.sp = raw.sp;
   if (isNum(raw.gold) && raw.gold >= 0) e.gold = Math.floor(raw.gold);
   e.skillRanks = sanitizeRanks(raw.skillRanks);
-  e.bag = sanitizeBag(raw.bag);
+  e.bag = sanitizeStacks(raw.bag, BAG_SLOTS);
+  e.storage = sanitizeStacks(raw.storage, STORAGE_SLOTS); // ausente => [] (back-compat de saves antigos)
   const eq = sanitizeEquipment(raw.equipment);
   for (const slot of EQUIP_SLOTS) e.equipment[slot] = eq[slot];
 }
@@ -103,13 +107,13 @@ function sanitizeRanks(raw: unknown): Record<string, number> {
   return out;
 }
 
-function sanitizeBag(raw: unknown): ItemStack[] {
+function sanitizeStacks(raw: unknown, maxSlots: number): ItemStack[] {
   if (!Array.isArray(raw)) return [];
   const out: ItemStack[] = [];
   for (const item of raw) {
     const st = sanitizeStack(item);
     if (st) out.push(st);
-    if (out.length >= BAG_SLOTS) break; // never exceed the bag capacity
+    if (out.length >= maxSlots) break; // never exceed the container capacity
   }
   return out;
 }

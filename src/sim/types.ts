@@ -86,6 +86,8 @@ export interface Entity {
   // economy & inventory (player; enemies carry 0 / empty)
   gold: number;
   bag: ItemStack[];
+  // K5: armazém/banco persistente do jogador (itens guardados na cidade). Vazio p/ inimigos/NPCs.
+  storage: ItemStack[];
   equipment: Record<EquipSlot, EquippedItem | null>; // slot -> equipped item
   // a world boss (special enemy): much more HP, boss loot, distinct visuals,
   // and a separate spawn/respawn timer.
