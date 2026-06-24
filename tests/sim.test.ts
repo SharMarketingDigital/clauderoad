@@ -32,6 +32,7 @@ import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE, levelHpM
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS, STORAGE_SLOTS } from '../src/sim/inventory';
+import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z } from '../src/sim/storage';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS, RISK_FLOOR } from '../src/sim/content/enhance';
 import { enhanceChance, enhanceStat } from '../src/sim/enhance';
@@ -3271,5 +3272,68 @@ describe('armazém (storage) — superfície na IWorld', () => {
     expect(st.capacity).toBe(STORAGE_SLOTS);
     expect(st.stacks.length).toBe(0); // nada guardado ainda
     expect(st.inRange).toBe(false); // o jogador nasce em (0,0), longe do armazém (10,18)
+  });
+});
+
+// --- K5: armazém (storage) — depósito/saque (comandos) ---
+describe('armazém (storage) — depósito/saque (comandos)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const seed = (sim: Sim, bag: unknown, storage: unknown) =>
+    sim.restorePlayer(sim.localPlayerId()!, { bag, storage, equipment: {} });
+  // o armazém (10,18) fica na zona segura da cidade (cheb 18 < 30) — sem mobs no caminho.
+  function walkToWarehouse(sim: Sim): void {
+    for (let i = 0; i < 800 && !sim.storage().inRange; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: WAREHOUSE_SPAWN_X - p.x, dz: WAREHOUSE_SPAWN_Z - p.z });
+      sim.step();
+    }
+  }
+  const holdsBag = (sim: Sim, id: string) => sim.inventory().stacks.some((s) => s.itemId === id);
+  const inStorage = (sim: Sim, id: string) => sim.storage().stacks.find((s) => s.itemId === id);
+
+  it('deposita um stack INTEIRO perto do armazém; recusa fora de alcance', () => {
+    const sim = new Sim(7);
+    seed(sim, [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 5 }], []);
+    // fora de alcance (spawn 0,0): recusado, fica na bolsa
+    sim.sendCommand({ t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(holdsBag(sim, 'health_potion')).toBe(true);
+    expect(sim.storage().stacks.length).toBe(0);
+    // perto do armazém: deposita o stack inteiro
+    walkToWarehouse(sim);
+    expect(sim.storage().inRange).toBe(true);
+    sim.sendCommand({ t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(holdsBag(sim, 'health_potion')).toBe(false); // saiu da bolsa
+    expect(inStorage(sim, 'health_potion')!.qty).toBe(5); // entrou inteiro
+  });
+
+  it('saca o stack de volta para a bolsa (perto do armazém)', () => {
+    const sim = new Sim(7);
+    seed(sim, [], [{ itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }]);
+    walkToWarehouse(sim);
+    sim.sendCommand({ t: 'withdraw', itemId: 'steel_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(holdsBag(sim, 'steel_sword')).toBe(true);
+    expect(sim.storage().stacks.length).toBe(0);
+  });
+
+  it('vendor e armazém têm zonas de interação mutuamente exclusivas', () => {
+    const sim = new Sim(7);
+    walkToWarehouse(sim);
+    expect(sim.storage().inRange).toBe(true);
+    expect(sim.shop().inRange).toBe(false); // (10,18) está longe do mercador (10,6)
+  });
+
+  it('um run com depósito é determinístico (mesma seed => mundo idêntico)', () => {
+    const runDep = (s: number): string => {
+      const sim = new Sim(s);
+      seed(sim, [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }], []);
+      walkToWarehouse(sim);
+      sim.sendCommand({ t: 'deposit', itemId: 'lucky_powder', rarity: 'normal', plus: 0 });
+      for (let i = 0; i < 60; i++) { sim.sendCommand({ t: 'move', dx: -1, dz: 0 }); sim.step(); }
+      return sim.hash();
+    };
+    expect(runDep(2024)).toBe(runDep(2024));
   });
 });

@@ -226,6 +226,8 @@ export type Command =
   | { t: 'rank-up'; slot: number } // spend SP to raise the rank of the ability in this action-bar slot
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
   | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
+  | { t: 'deposit'; itemId: string; rarity: Rarity; plus: number } // K5: bank a whole bag stack (near the warehouse)
+  | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number } // K5: take a whole stack back from the warehouse
   | { t: 'set-bot'; on: boolean } // toggle auto-play (the sim drives the player; manual input ignored)
   // --- party / co-op (GDD B6) ---
   | { t: 'party-create'; exp: PartyExpMode; loot: PartyLootMode } // form a party; you become leader

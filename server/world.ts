@@ -133,6 +133,18 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
         }
         return;
+      // K5: warehouse deposit/withdraw — mirror sell's wire validation (without the explicit
+      // case here the default branch silently drops these online — the K1 whitelist lesson).
+      case 'deposit':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
+      case 'withdraw':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
       // --- Layer 4: auto-play (each player toggles ITS OWN bot) ---
       case 'set-bot':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-bot', on: cmd.on });

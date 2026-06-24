@@ -47,7 +47,10 @@ import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
 import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag } from './inventory';
-import { WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID } from './storage';
+import {
+  WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID,
+  depositStack, withdrawStack,
+} from './storage';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
@@ -1254,6 +1257,12 @@ export class Sim implements IWorld {
       case 'sell':
         this.sell(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
+      case 'deposit':
+        this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
+      case 'withdraw':
+        this.withdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
         break;
@@ -1739,6 +1748,19 @@ export class Sim implements IWorld {
     if (value <= 0) return; // worthless here -> don't let the player give it away for nothing
     if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
     p.gold += value;
+  }
+
+  // K5: bank a whole bag stack into the player's own warehouse. Requires being near the
+  // warehouse NPC; the pure helper handles capacity + the non-destructive put-back on a full bank.
+  private deposit(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.nearWarehouse(p)) return;
+    depositStack(p.bag, p.storage, itemId, rarity, plus);
+  }
+
+  // K5: take a whole stack back from the warehouse to the bag (near the warehouse).
+  private withdraw(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.nearWarehouse(p)) return;
+    withdrawStack(p.storage, p.bag, itemId, rarity, plus);
   }
 
   // Pay the vendor to restore an equipped item's durability to full (GDD B8). Requires

@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { ServerWorld } from '../server/world';
 import { VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_STOCK } from '../src/sim/content/vendor';
+import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z } from '../src/sim/storage';
 import type { EquipSlot } from '../src/world_api';
 
 const enemyId = (w: ServerWorld) => w.snapshot().entities.find((e) => e.kind === 'enemy')!.id;
@@ -286,6 +287,28 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     w.command(a, { t: 'sell', itemId: sellable!.itemId, rarity: sellable!.rarity, plus: sellable!.plus });
     w.step(); // sell is drained BEFORE movement, so it lands while still in range
     expect(w.selfState(a).gold).toBeGreaterThan(gold0); // converted loot to gold
+  });
+
+  it('roteia depósito/saque pelo servidor e persiste o armazém por jogador (K5)', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const b = w.addPlayer('B');
+    // seed A's bag and walk it to the warehouse (town safe zone — no mobs en route)
+    w.restorePlayer(a, { bag: [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 6 }], storage: [], equipment: {} });
+    for (let i = 0; i < 1500 && !w.selfState(a).storage.inRange; i++) {
+      const me = w.snapshot().entities.find((e) => e.id === a)!;
+      w.setIntent(a, WAREHOUSE_SPAWN_X - me.x, WAREHOUSE_SPAWN_Z - me.z);
+      w.step();
+    }
+    expect(w.selfState(a).storage.inRange).toBe(true);
+    // the deposit command is ROUTED by the server whitelist (not silently dropped — K1 lesson)
+    w.command(a, { t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    w.step();
+    expect(w.selfState(a).storage.stacks.find((s) => s.itemId === 'health_potion')!.qty).toBe(6);
+    expect(w.selfState(a).inventory.stacks.some((s) => s.itemId === 'health_potion')).toBe(false);
+    expect(w.selfState(b).storage.stacks.length).toBe(0); // B's warehouse is independent (per-owner)
+    // persists in the save (serialize round-trips the warehouse)
+    expect(w.serializePlayer(a)!.storage).toEqual([{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 6 }]);
   });
 });
 
