@@ -293,14 +293,22 @@ export class Renderer {
       this.lastCd.set(a.slot, a.cooldownRemaining);
     }
 
-    // Did we deal damage to our target this frame? (auto-attack OR an attack ability).
+    // Did we deal damage to our target this frame? (auto-attack OR an attack ability.) Capture
+    // the hit's x/z too: the target can DIE on the cast tick (the sim removes it immediately),
+    // so the damage event's position snapshot is the only reliable anchor for an impact effect.
     const targetId = world.localTargetId();
     let dealt = false;
+    let hitX = 0;
+    let hitZ = 0;
     let maxSeq = this.lastSeenSeq;
     for (const ev of world.recentEvents()) {
       if (ev.seq > maxSeq) maxSeq = ev.seq;
       if (ev.seq <= this.lastSeenSeq) continue;
-      if (ev.kind === 'damage' && targetId != null && ev.targetId === targetId) dealt = true;
+      if (ev.kind === 'damage' && targetId != null && ev.targetId === targetId) {
+        dealt = true;
+        hitX = ev.x;
+        hitZ = ev.z;
+      }
     }
     this.lastSeenSeq = maxSeq;
 
@@ -314,15 +322,15 @@ export class Renderer {
       av.triggerAttack(false);
     }
 
-    // Ability VFX (GDD G2): on a cast, spawn the ability's particle effect from the caster to
-    // its target. Render-only — the sim already resolved the hit; this only shows it. Mapped by
-    // (mastery, slot); so far the Mago's Bola de Fogo (slot 1) flies a fireball to the target.
-    if (castSlot !== 0) {
+    // Ability VFX (GDD G2): on a damaging cast, spawn the ability's particle effect from the
+    // caster to the impact point. The target may die on the cast tick (the sim removes it at
+    // once), so the impact anchors on the damage event's x/z snapshot — NOT a live target lookup
+    // that would come up empty. Render-only — the sim already resolved the hit; this just shows it.
+    if (castSlot !== 0 && dealt) {
       const effect = abilityEffect(p.mastery, castSlot);
-      const target = targetId != null ? world.entities().find((e) => e.id === targetId) : undefined;
-      if (effect && target) {
+      if (effect) {
         const from = new THREE.Vector3(p.x, terrainHeight(p.x, p.z) + 1.3, p.z);
-        const to = new THREE.Vector3(target.x, terrainHeight(target.x, target.z) + 1.0, target.z);
+        const to = new THREE.Vector3(hitX, terrainHeight(hitX, hitZ) + 1.0, hitZ);
         this.abilityVfx.cast(effect, from, to);
       }
     }
