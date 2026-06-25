@@ -1083,15 +1083,28 @@ export class Sim implements IWorld {
   // (target.id !== attacker.id) is always true today (an enemy is never the attacking player) and
   // becomes load-bearing once players can target players.
   private canAttack(attacker: Entity, target: Entity): boolean {
-    return target.kind === 'enemy' && target.hp > 0 && target.id !== attacker.id;
+    if (target.hp <= 0 || target.id === attacker.id) return false;
+    if (target.kind === 'enemy') return true; // PvE (unchanged): any living enemy
+    // PvP (Tier 1 A2): the ONLY attackable player is the one you're in an ACTIVE duel with —
+    // consensual 1v1. The safe-zone is enforced at the DAMAGE step (hitPlayer), not here, so you
+    // can still target/approach the opponent across the town edge; only the blow is withheld inside.
+    return target.kind === 'player' && attacker.kind === 'player' && this.areDueling(attacker.id, target.id);
   }
 
-  // Routes a landed hit to the right apply-function. Today every player-initiated hit reaches an
-  // enemy (canAttack only allows enemies), so this always calls hitEnemy — byte-identical. The PvP
-  // slice extends it to route a player target to hitPlayer; the damage call sites go through this
-  // seam now so that change stays isolated.
+  // Whether two players are in the SAME active duel (consensual PvP). Both ids map to the same
+  // duel id exactly when they form a pair. Pure read of duel state — determinism-safe.
+  private areDueling(a: number, b: number): boolean {
+    const da = this.duelOf.get(a);
+    return da !== undefined && da === this.duelOf.get(b);
+  }
+
+  // Routes a landed hit to the right apply-function. A PvE hit reaches an enemy (hitEnemy); a PvP
+  // hit reaches the duel opponent (hitPlayer, which honors the safe-zone + ends/credits the duel on
+  // a down). canAttack already gated WHO is hittable, so a player target here is always the active
+  // duel opponent — the routing stays a simple kind switch.
   private hitTarget(t: Entity, hit: Damage, attacker: Entity): void {
-    this.hitEnemy(t, hit, attacker);
+    if (t.kind === 'player') this.hitPlayer(t, hit, attacker);
+    else this.hitEnemy(t, hit, attacker);
   }
 
   // swing every `swingTicks`. The timer is preserved while out of range, so a
@@ -2386,11 +2399,15 @@ export class Sim implements IWorld {
     e.facing = Math.atan2(dx / len, dz / len);
   }
 
-  // Apply a melee hit to the player. Emits the same 'damage' event the player's
-  // own swings use (so the renderer flashes the player and pops the number), and
-  // downs the player when HP hits 0.
-  private hitPlayer(p: Entity, hit: Damage): void {
+  // Apply a hit to the player. Emits the same 'damage' event the player's own swings use (so the
+  // renderer flashes the player and pops the number), and downs the player when HP hits 0. The
+  // optional `attacker` is set for PvP (a duel opponent) so the safe-zone can withhold the blow in
+  // town; mob bites pass none (their bite already gates the safe-zone), and a DoT passes its source.
+  private hitPlayer(p: Entity, hit: Damage, attacker?: Entity): void {
     if (hit.amount <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
+    // PvP safe-zone sanctuary: a PLAYER attacker deals NO damage while either side stands in the
+    // central town, mirroring the mob rule that won't bite a player in the safe-zone.
+    if (attacker?.kind === 'player' && (zoneAt(p.x, p.z).safe || zoneAt(attacker.x, attacker.z).safe)) return;
     // Gear/armor mitigation (combat.mitigate): passthrough today (no armor yet), so
     // `incoming` === hit.amount. Then the Postura Defensiva BUFF — a temporary STATUS, not
     // gear — applies here at the apply step (GDD option A), floored at 1 so a mitigated blow
@@ -2508,7 +2525,9 @@ export class Sim implements IWorld {
     // path (so it still mitigates on the player, can kill, and credits the source for loot).
     const hit: Damage = { amount: dmg, type: 'physical', crit: false };
     if (e.kind === 'player') {
-      this.hitPlayer(e, hit);
+      // Pass the source so a PvP bleed (a duel opponent's DoT) honors the safe-zone in hitPlayer
+      // just like a direct hit; a mob's DoT (source is an enemy) skips that PvP-only check.
+      this.hitPlayer(e, hit, this.ents.get(source));
     } else if (e.kind === 'enemy') {
       // Credit the source if it still exists; otherwise credit no one (use the
       // victim as a non-player "killer" so killEnemy grants no XP/loot) rather
@@ -2524,6 +2543,18 @@ export class Sim implements IWorld {
     p.deadUntil = this.tick + DEATH_RESPAWN_TICKS;
     p.targetId = null;
     p.effects.length = 0; // death clears debuffs (no DoT/stun carrying into the spirit/respawn)
+    // A DUEL loss (Tier 1 A2) is FRIENDLY: the opponent is credited simply by surviving (the duel
+    // resolves in their favor), and there is NO hard death penalty — no durability loss. The loser
+    // still spirits + respawns in town like any death. Dissolve the duel for BOTH, then emit the
+    // standard death event (text = the loser's name, so the normal death/respawn UI is unchanged).
+    if (this.duelOf.has(p.id)) {
+      this.removeFromDuel(p.id);
+      this.events.push({
+        seq: this.nextEventSeq++, tick: this.tick, kind: 'death',
+        targetId: p.id, amount: 0, x: p.x, z: p.z, text: p.name,
+      });
+      return;
+    }
     // Death penalty (GDD B8): equipped gear loses durability (floored at 0). Worn gear
     // gives less of its stat bonus until repaired at the vendor — so repeated dying
     // (e.g. attriting the boss) makes you progressively weaker, at a gold cost to undo.
