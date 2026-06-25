@@ -22,20 +22,26 @@ import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 import { MusicPlayer } from './ui/audio';
 import { SettingsMenu } from './ui/settings_menu';
+import { NameSelect, normalizeName, isValidName } from './ui/name_select';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 
 // Multiplayer is OPT-IN (?mp, or ?mp=ws://host:port). No flag => the offline game,
 // completely unchanged. So the single-player experience can never break by accident.
 const params = new URLSearchParams(location.search);
-if (params.has('mp')) startOnline(resolveServerUrl(params.get('mp')), playerName(params));
-else startOffline();
+// Character creation (GDD v0.4 §1.3): resolve the player NAME *before* the world is
+// built — in MP it's baked into the `join` handshake, in SP into the local player's
+// spawn. `?name=` stays a shortcut: present + valid skips the screen; absent shows it.
+withChosenName((name) => {
+  if (params.has('mp')) startOnline(resolveServerUrl(params.get('mp')), name);
+  else startOffline(name);
+});
 
 // ---------- single-player (offline) ----------
-function startOffline(): void {
+function startOffline(name: string): void {
   const WORLD_SEED = 1337; // fixed seed -> the world is the same place every load
 
-  const sim = new Sim(WORLD_SEED);
+  const sim = new Sim(WORLD_SEED, true, name); // local player spawns with the chosen name
   const renderer = new Renderer(canvas);
   const input = new Input(canvas, renderer);
   const hud = new Hud();
@@ -149,8 +155,19 @@ function resolveServerUrl(arg: string | null): string {
   return `ws://${location.hostname || 'localhost'}:8080`;
 }
 
-function playerName(p: URLSearchParams): string {
-  return p.get('name')?.trim() || `Jogador ${Math.floor(Math.random() * 900 + 100)}`;
+// Resolve the player name, then start. `?name=` is a shortcut that skips the screen;
+// otherwise the name-entry screen asks. The chosen name flows into world creation (SP:
+// the local Sim player; MP: the `join` handshake, which the server uses as the save
+// key). Host-only — no sim/protocol/IWorld change. The server re-validates the name.
+function withChosenName(start: (name: string) => void): void {
+  const fromUrl = params.get('name')?.trim();
+  if (fromUrl && isValidName(fromUrl)) {
+    start(normalizeName(fromUrl)); // ?name=… shortcut: skip the screen for a valid name
+    return;
+  }
+  // No name, or an invalid ?name=: ask. An invalid value pre-fills the field so the
+  // player can fix it rather than silently entering with a sub-minimum/garbage name.
+  new NameSelect((name) => start(name), fromUrl ? { initial: fromUrl } : {});
 }
 
 function statusLabel(s: NetStatus): string {

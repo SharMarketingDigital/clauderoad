@@ -110,6 +110,42 @@ describe('determinism', () => {
   });
 });
 
+// The local player's NAME (character-creation screen, GDD v0.4 §1.3). The name is an
+// optional 3rd constructor arg; the default 'Hero' keeps every other test bit-identical.
+describe('local player name', () => {
+  it('defaults to "Hero" when no name is given (backward-compatible)', () => {
+    const player = new Sim(7).entities().find((e) => e.kind === 'player')!;
+    expect(player.name).toBe('Hero');
+  });
+
+  it('the optional constructor name sets the local player name', () => {
+    const player = new Sim(7, true, 'Gabriel').entities().find((e) => e.kind === 'player')!;
+    expect(player.name).toBe('Gabriel');
+  });
+
+  it('the chosen name is cosmetic: it never perturbs the world fingerprint', () => {
+    const runNamed = (seed: number, name?: string): string => {
+      const sim = name === undefined ? new Sim(seed) : new Sim(seed, true, name);
+      const script: Command[] = [
+        { t: 'move', dx: 1, dz: 0 },
+        { t: 'stop' },
+        { t: 'move', dx: -1, dz: 1 },
+      ];
+      for (let i = 0; i < 300; i++) {
+        sim.sendCommand(script[Math.floor(i / 100) % script.length]);
+        sim.step();
+      }
+      return sim.hash();
+    };
+    // Same seed + same commands => identical world, REGARDLESS of the player's name:
+    // the name feeds no Rng substream and stays out of hash(). A future regression that
+    // leaked the name into world state (or into the fingerprint) would break this.
+    const base = runNamed(1337);
+    expect(runNamed(1337, 'Gabriel')).toBe(base);
+    expect(runNamed(1337, 'Hero')).toBe(base);
+  });
+});
+
 // Squared distance from the world origin (where the player spawns).
 const d2 = (e: { x: number; z: number }): number => e.x * e.x + e.z * e.z;
 
