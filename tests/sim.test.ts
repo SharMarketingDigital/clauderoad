@@ -5,8 +5,6 @@ import {
   abilityDamage,
   rollRarity,
   rarityStat,
-  enhanceChance,
-  enhanceStat,
   STR_TO_DAMAGE,
   WORLD_HALF,
   CITY_WALL_HALF,
@@ -36,9 +34,11 @@ import { Rng } from '../src/sim/rng';
 import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ROGUE_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
-import { addToBag, BAG_SLOTS } from '../src/sim/inventory';
+import { addToBag, BAG_SLOTS, STORAGE_SLOTS } from '../src/sim/inventory';
+import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_ENTITY_ID } from '../src/sim/storage';
 import { ITEMS } from '../src/sim/content/items';
-import { MAX_PLUS } from '../src/sim/content/enhance';
+import { MAX_PLUS, RISK_FLOOR } from '../src/sim/content/enhance';
+import { enhanceChance, enhanceStat } from '../src/sim/enhance';
 import { SKILL_SP_COST, SKILL_MAX_RANK } from '../src/sim/content/skill_ranks';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
@@ -1709,11 +1709,11 @@ describe('equipment', () => {
 
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: leather.rarity, plus: leather.plus });
     sim.step();
-    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
+    expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBe('wolf_leather');
     expect(player(sim).maxHp).toBe(maxBefore + expectedBonus);
     expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp);
 
-    sim.sendCommand({ t: 'unequip', slot: 'armor' });
+    sim.sendCommand({ t: 'unequip', slot: 'chest' });
     sim.step();
     expect(player(sim).maxHp).toBe(maxBefore);
     expect(player(sim).hp).toBeLessThanOrEqual(player(sim).maxHp); // clamp invariant holds
@@ -1853,7 +1853,7 @@ describe('consumables', () => {
 
     // Re-open the gap (unequip + re-equip the leather — equipping never tops HP
     // up) so every later refusal can ONLY be the cooldown, not a full-HP no-op.
-    sim.sendCommand({ t: 'unequip', slot: 'armor' });
+    sim.sendCommand({ t: 'unequip', slot: 'chest' });
     safeStep(sim);
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: 'normal', plus: 0 });
     safeStep(sim);
@@ -2184,7 +2184,11 @@ describe('alchemy ("+N")', () => {
 
     let sawSuccess = false;
     let sawFail = false;
-    for (let i = 0; i < ELIXIRS; i++) {
+    // K4: gate the loop to the GENTLE band (plus < RISK_FLOOR), where behavior is UNCHANGED
+    // (success +1, fail -1, 0->0 — never break/multi-drop). The risk band (>= RISK_FLOOR) is
+    // covered deterministically by tests/enhance.test.ts (the pure resolver), so this seeded
+    // loop never enters break territory and the assertions below stay valid.
+    for (let i = 0; i < ELIXIRS && weaponPlus(sim) < RISK_FLOOR; i++) {
       const before = weaponPlus(sim);
       sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
       sim.step();
@@ -2197,11 +2201,14 @@ describe('alchemy ("+N")', () => {
       if (after === before + 1) sawSuccess = true;
       else if (after === before - 1) sawFail = true;
       else if (before === 0 && after === 0) sawFail = true; // failed at +0 (floored)
-      else if (before === after && before === MAX_PLUS) continue; // refused at cap (no-op)
       else throw new Error(`unexpected "+" change ${before} -> ${after}`);
     }
-    expect(sawSuccess).toBe(true); // success raised the "+"
-    expect(sawFail).toBe(true); // failure dropped it (or held at +0)
+    expect(sawSuccess).toBe(true); // a success raised the "+" in the gentle band
+    // sawFail is seed-dependent once the loop is gated (the band may climb to RISK_FLOOR with
+    // no fail), so the "a sub-floor failure degrades by exactly 1, never breaks" guarantee is
+    // asserted deterministically in tests/enhance.test.ts; the in-loop else-throw above already
+    // enforces that ANY fail observed here was exactly -1.
+    expect(sawSuccess || sawFail).toBe(true);
   });
 
   it('an enhanced "+N" survives unequip and re-equip (carried on the bag stack)', () => {
@@ -2740,13 +2747,13 @@ describe('bot (auto-play): self-sufficiency', () => {
     let g = 0;
     while (bagQty(sim, 'wolf_leather') < 1 && g++ < 400) killNearestEnemy(sim);
     expect(bagQty(sim, 'wolf_leather')).toBeGreaterThanOrEqual(1);
-    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBeNull();
+    expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBeNull();
     const maxHp0 = player(sim).maxHp;
 
     sim.sendCommand({ t: 'set-bot', on: true });
     for (let i = 0; i < 12; i++) sim.step();
 
-    expect(sim.inventory().equipment.find((e) => e.slot === 'armor')!.itemId).toBe('wolf_leather');
+    expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBe('wolf_leather');
     expect(player(sim).maxHp).toBeGreaterThan(maxHp0); // the +HP armor is now folded in
   });
 
@@ -2935,7 +2942,7 @@ function dieOnceAndRespawn(sim: Sim): void {
 // bonus until repaired at the vendor for gold. Gentle — never breaks, fully restorable.
 describe('death penalty (durability / repair)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
-  const armor = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'armor')!;
+  const armor = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'chest')!;
 
   // Equip a freshly-looted Couro de Lobo (armor) at full durability.
   const equipFreshArmor = (sim: Sim): void => {
@@ -2989,7 +2996,7 @@ describe('death penalty (durability / repair)', () => {
     const cost = armor(sim).repairCost;
     expect(cost).toBeGreaterThan(0);
     expect(gold0).toBeGreaterThanOrEqual(cost);
-    sim.sendCommand({ t: 'repair', slot: 'armor' });
+    sim.sendCommand({ t: 'repair', slot: 'chest' });
     sim.step();
     expect(armor(sim).durability).toBe(MAX_DURABILITY); // fully repaired
     expect(player(sim).gold).toBe(gold0 - cost); // paid the repair cost
@@ -3007,7 +3014,7 @@ describe('death penalty (durability / repair)', () => {
     // away from the vendor: a repair command is a no-op (no gold spent)
     fleeToSafety(sim);
     const goldAway = player(sim).gold;
-    sim.sendCommand({ t: 'repair', slot: 'armor' });
+    sim.sendCommand({ t: 'repair', slot: 'chest' });
     sim.step();
     expect(armor(sim).durability).toBe(0); // not repaired (not at the vendor)
     expect(player(sim).gold).toBe(goldAway);
@@ -3017,7 +3024,7 @@ describe('death penalty (durability / repair)', () => {
     const cost = armor(sim).repairCost; // 100 at durability 0
     if (player(sim).gold < cost) {
       const gold0 = player(sim).gold;
-      sim.sendCommand({ t: 'repair', slot: 'armor' });
+      sim.sendCommand({ t: 'repair', slot: 'chest' });
       sim.step();
       expect(armor(sim).durability).toBe(0); // refused — can't afford it
       expect(player(sim).gold).toBe(gold0);
@@ -3044,7 +3051,14 @@ describe('sim invariants (static guard)', () => {
     const files = Object.keys(sources);
     expect(files.length).toBeGreaterThan(0);
     const forbidden = [/\bMath\.random\b/, /\bDate\.now\b/, /\bperformance\.now\b/];
-    const forbiddenImport = /from\s+['"](three|\.\.\/(?:render|ui|game|net))/;
+    // Catch forbidden imports at ANY depth: src/sim/content/** must go ../../ to reach
+    // render/ui/game/net, which a single-`../` matcher missed. The trailing slash-or-quote keeps
+    // it precise — `../net'` and `../net/x` match, but `../network` and `../../world_api` (the
+    // allowed seam) do NOT.
+    const forbiddenImport = /from\s+['"](three|(?:\.\.\/)+(?:render|ui|game|net)(?:\/|['"]))/;
+    // Guard the guard: it must catch a 2-level-up violation and must not flag world_api.
+    expect(forbiddenImport.test("from '../../render/foo'")).toBe(true);
+    expect(forbiddenImport.test("from '../../world_api'")).toBe(false);
     for (const f of files) {
       const code = stripComments(sources[f]);
       for (const pat of forbidden) {
@@ -3299,5 +3313,265 @@ describe('city wall collision (gates)', () => {
     const p = player(sim);
     expect(p.x).toBeGreaterThan(CITY_WALL_HALF); // exited east...
     expect(Math.abs(p.z)).toBeLessThanOrEqual(GATE_HALF + 1e-6); // ...through the east gate (z ~ 0)
+  });
+});
+
+// --- K2: equip level-requirement gate (degrees) ---
+// The gate is a pure `level >= reqLevel` check in Sim.equip; the bot's botEquipBest skips
+// gear it can't wear yet. We seed level + bag deterministically via restorePlayer (pure
+// data, like save.test.ts) so these tests need no farming/vendor and stay Rng-free.
+describe('degrees — gate de nível para equipar', () => {
+  function seed(sim: Sim, level: number, ...itemIds: string[]): void {
+    const id = sim.localPlayerId()!;
+    sim.restorePlayer(id, {
+      level,
+      gold: 0,
+      bag: itemIds.map((itemId) => ({ itemId, rarity: 'normal', plus: 0, qty: 1 })),
+      equipment: {},
+    });
+  }
+  const weapon = (sim: Sim) => sim.inventory().equipment.find((e) => e.slot === 'weapon')!;
+  const holds = (sim: Sim, itemId: string) => sim.inventory().stacks.some((s) => s.itemId === itemId);
+
+  it('refuses to equip a degree weapon below its required level (item stays in the bag)', () => {
+    const sim = new Sim(7);
+    seed(sim, 1, 'steel_sword'); // 3º grau, reqLevel 8
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(weapon(sim).itemId).toBeNull(); // nothing equipped
+    expect(holds(sim, 'steel_sword')).toBe(true); // still held — not consumed
+  });
+
+  it('equips the same degree weapon once the player meets the required level', () => {
+    const sim = new Sim(7);
+    seed(sim, 8, 'steel_sword'); // exactly at the floor (reqLevel 8)
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(weapon(sim).itemId).toBe('steel_sword');
+    expect(holds(sim, 'steel_sword')).toBe(false); // moved out of the bag into the slot
+  });
+
+  it('a legacy (degree-less) weapon is never gated — equips at level 1', () => {
+    const sim = new Sim(7);
+    seed(sim, 1, 'old_sword'); // no degree/reqLevel => req 0
+    sim.sendCommand({ t: 'equip', itemId: 'old_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(weapon(sim).itemId).toBe('old_sword');
+  });
+
+  it('a run that exercises the gate stays deterministic (same seed => identical world)', () => {
+    const runGated = (s: number): string => {
+      const sim = new Sim(s);
+      seed(sim, 1, 'steel_sword');
+      sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 }); // refused (lvl 1 < 8)
+      for (let i = 0; i < 120; i++) { sim.sendCommand({ t: 'move', dx: 1, dz: 0 }); sim.step(); }
+      return sim.hash();
+    };
+    expect(runGated(2024)).toBe(runGated(2024));
+  });
+
+  it('the auto-play bot wears the wearable weapon, not the higher-degree one it cannot equip yet', () => {
+    const sim = new Sim(7);
+    // bag: a stronger-but-unwearable D3 (steel_sword, reqLevel 8, higher botGearScore) AND a
+    // wearable base (old_sword). If the bot filtered AFTER scoring, `best` would be the D3 and
+    // the equip would silently refuse, leaving the slot empty. Filtering BEFORE scoring makes
+    // it fall back to old_sword.
+    seed(sim, 1, 'steel_sword', 'old_sword');
+    sim.sendCommand({ t: 'set-bot', on: true });
+    for (let i = 0; i < 3; i++) sim.step(); // botEquipBest runs each botStep
+    expect(weapon(sim).itemId).toBe('old_sword'); // the wearable lesser item — not null, not the D3
+  });
+});
+
+// --- K2: the vendor stocks degree gear (Slice 3) ---
+describe('degrees — mercador vende equipamento por grau', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+
+  it('sells a degree weapon into the bag; equipping it is still gated by level', () => {
+    const sim = new Sim(7);
+    const id = sim.localPlayerId()!;
+    // seed gold so we skip grinding; level 1 keeps the equip gated
+    sim.restorePlayer(id, { level: 1, gold: 1000, bag: [], equipment: {} });
+    for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
+      sim.step();
+    }
+    expect(sim.shop().inRange).toBe(true);
+    expect(sim.shop().stock.some((e) => e.itemId === 'steel_sword')).toBe(true); // vendor stocks the D3
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'buy', itemId: 'steel_sword' });
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'steel_sword')).toBe(true); // bought into the bag
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 }); // refused at lvl 1
+    sim.step();
+    expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBeNull();
+  });
+});
+
+// --- K2: IWorld surfaces grau/requisito/canEquip per stack (Slice 4a) ---
+describe('degrees — inventário expõe grau/requisito/canEquip', () => {
+  it('reports degree, reqLevel and canEquip per stack, by the owner level', () => {
+    const sim = new Sim(7);
+    const id = sim.localPlayerId()!;
+    const stackOf = (itemId: string) => sim.inventory().stacks.find((s) => s.itemId === itemId)!;
+    sim.restorePlayer(id, {
+      level: 1, gold: 0,
+      bag: [
+        { itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }, // D3, reqLevel 8
+        { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 1 }, // non-equippable
+      ],
+      equipment: {},
+    });
+    expect(stackOf('steel_sword').degree).toBe(3);
+    expect(stackOf('steel_sword').reqLevel).toBe(8);
+    expect(stackOf('steel_sword').canEquip).toBe(false); // level 1 < 8
+    // a non-equippable item carries no degree/requirement
+    expect(stackOf('health_potion').degree).toBeUndefined();
+    expect(stackOf('health_potion').reqLevel).toBeUndefined();
+    expect(stackOf('health_potion').canEquip).toBeUndefined();
+    // at level 8 the same weapon becomes equippable
+    sim.restorePlayer(id, {
+      level: 8, gold: 0,
+      bag: [{ itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }],
+      equipment: {},
+    });
+    expect(stackOf('steel_sword').canEquip).toBe(true);
+  });
+});
+
+// --- K5: armazém (storage) — superfície na IWorld ---
+describe('armazém (storage) — superfície na IWorld', () => {
+  it('storage() expõe o armazém vazio e fora de alcance no spawn', () => {
+    const sim = new Sim(7);
+    const st = sim.storage();
+    expect(st.name).toBe('Armazém');
+    expect(st.capacity).toBe(STORAGE_SLOTS);
+    expect(st.stacks.length).toBe(0); // nada guardado ainda
+    expect(st.inRange).toBe(false); // o jogador nasce em (0,0), longe do armazém (10,18)
+  });
+});
+
+// --- K5: armazém (storage) — depósito/saque (comandos) ---
+describe('armazém (storage) — depósito/saque (comandos)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const seed = (sim: Sim, bag: unknown, storage: unknown) =>
+    sim.restorePlayer(sim.localPlayerId()!, { bag, storage, equipment: {} });
+  // o armazém (10,18) fica na zona segura da cidade (cheb 18 < 30) — sem mobs no caminho.
+  function walkToWarehouse(sim: Sim): void {
+    for (let i = 0; i < 800 && !sim.storage().inRange; i++) {
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: WAREHOUSE_SPAWN_X - p.x, dz: WAREHOUSE_SPAWN_Z - p.z });
+      sim.step();
+    }
+  }
+  const holdsBag = (sim: Sim, id: string) => sim.inventory().stacks.some((s) => s.itemId === id);
+  const inStorage = (sim: Sim, id: string) => sim.storage().stacks.find((s) => s.itemId === id);
+
+  it('deposita um stack INTEIRO perto do armazém; recusa fora de alcance', () => {
+    const sim = new Sim(7);
+    seed(sim, [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 5 }], []);
+    // fora de alcance (spawn 0,0): recusado, fica na bolsa
+    sim.sendCommand({ t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(holdsBag(sim, 'health_potion')).toBe(true);
+    expect(sim.storage().stacks.length).toBe(0);
+    // perto do armazém: deposita o stack inteiro
+    walkToWarehouse(sim);
+    expect(sim.storage().inRange).toBe(true);
+    sim.sendCommand({ t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(holdsBag(sim, 'health_potion')).toBe(false); // saiu da bolsa
+    expect(inStorage(sim, 'health_potion')!.qty).toBe(5); // entrou inteiro
+  });
+
+  it('saca o stack de volta para a bolsa (perto do armazém)', () => {
+    const sim = new Sim(7);
+    seed(sim, [], [{ itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }]);
+    walkToWarehouse(sim);
+    sim.sendCommand({ t: 'withdraw', itemId: 'steel_sword', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(holdsBag(sim, 'steel_sword')).toBe(true);
+    expect(sim.storage().stacks.length).toBe(0);
+  });
+
+  it('vendor e armazém têm zonas de interação mutuamente exclusivas', () => {
+    const sim = new Sim(7);
+    walkToWarehouse(sim);
+    expect(sim.storage().inRange).toBe(true);
+    expect(sim.shop().inRange).toBe(false); // (10,18) está longe do mercador (10,6)
+  });
+
+  it('um run com depósito é determinístico (mesma seed => mundo idêntico)', () => {
+    const runDep = (s: number): string => {
+      const sim = new Sim(s);
+      seed(sim, [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }], []);
+      walkToWarehouse(sim);
+      sim.sendCommand({ t: 'deposit', itemId: 'lucky_powder', rarity: 'normal', plus: 0 });
+      for (let i = 0; i < 60; i++) { sim.sendCommand({ t: 'move', dx: -1, dz: 0 }); sim.step(); }
+      return sim.hash();
+    };
+    expect(runDep(2024)).toBe(runDep(2024));
+  });
+
+  it('recusa depósito com armazém CHEIO pelo gate de comando (não-destrutivo)', () => {
+    const sim = new Sim(7);
+    // enche o armazém com STORAGE_SLOTS stacks DISTINTOS (mesma arma, rarity×plus variados)
+    // e põe um id NOVO (não casável) na bolsa.
+    const full: { itemId: string; rarity: string; plus: number; qty: number }[] = [];
+    for (const r of ['normal', 'sos', 'som', 'sun']) {
+      for (let p = 0; p <= MAX_PLUS && full.length < STORAGE_SLOTS; p++) {
+        full.push({ itemId: 'old_sword', rarity: r, plus: p, qty: 1 });
+      }
+    }
+    expect(full.length).toBe(STORAGE_SLOTS);
+    seed(sim, [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 1 }], full);
+    walkToWarehouse(sim);
+    expect(sim.storage().inRange).toBe(true);
+    sim.sendCommand({ t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    // recusado: o stack novo fica na bolsa, o armazém segue cheio e NÃO ganhou o id novo
+    expect(holdsBag(sim, 'health_potion')).toBe(true);
+    expect(sim.storage().stacks.length).toBe(STORAGE_SLOTS);
+    expect(inStorage(sim, 'health_potion')).toBeUndefined();
+  });
+
+  it('o conteúdo do armazém entra no hash() (storage dobrado no fingerprint)', () => {
+    const withStore = new Sim(7);
+    seed(withStore, [], [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }]);
+    const empty = new Sim(7);
+    seed(empty, [], []);
+    // mesma seed e mesma bolsa (vazia); só o armazém difere. Se e.storage NÃO entrasse no hash(),
+    // os fingerprints seriam iguais — então a desigualdade prova o fold do storage no hash().
+    // (Obs.: mover bolsa<->armazém NÃO muda o hash — os dois folds são consecutivos — por isso
+    // o teste compara CONTEÚDO presente vs ausente, não depósito vs não-depósito.)
+    expect(withStore.hash()).not.toBe(empty.hash());
+    const h = (): string => {
+      const s = new Sim(7);
+      seed(s, [], [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }]);
+      return s.hash();
+    };
+    expect(h()).toBe(h()); // e segue determinístico run-vs-run
+  });
+
+  it('o NPC do armazém não pode ser alvo, atacado ou ferido (id reservado 1e9)', () => {
+    const sim = new Sim(7);
+    const wh = sim.entities().find((e) => e.id === WAREHOUSE_ENTITY_ID)!;
+    expect(wh.kind).toBe('npc');
+    const hp0 = wh.hp;
+    // clicar (set-target) no NPC é ignorado — só inimigos vivos são alvos válidos
+    sim.sendCommand({ t: 'set-target', id: WAREHOUSE_ENTITY_ID });
+    sim.step();
+    expect(sim.localTargetId()).toBeNull();
+    // Tab (cycle-target) nunca pousa no NPC
+    for (let i = 0; i < 20; i++) {
+      sim.sendCommand({ t: 'cycle-target' });
+      sim.step();
+      expect(sim.localTargetId()).not.toBe(WAREHOUSE_ENTITY_ID);
+    }
+    // combate ao redor nunca fere o armazém
+    for (let i = 0; i < 10; i++) killNearestEnemy(sim);
+    expect(sim.entities().find((e) => e.id === WAREHOUSE_ENTITY_ID)!.hp).toBe(hp0);
   });
 });

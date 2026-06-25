@@ -12,9 +12,9 @@
 import { Rng } from './rng';
 import { applyMove, slideThroughGates } from './movement';
 import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './party';
-import type { Entity, ItemStack } from './types';
+import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -25,11 +25,13 @@ import {
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
+import { meetsLevelReq, equipLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
 import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
 import {
-  MAX_PLUS, ENHANCE_SUCCESS, LUCKY_POWDER_BONUS, ENHANCE_CHANCE_CAP, ENHANCE_STAT_PER_PLUS,
+  MAX_PLUS, RISK_FLOOR, BREAK_CHANCE, DROP_ON_FAIL, PROTECT_STONE_ID,
 } from './content/enhance';
+import { enhanceChance, enhanceStat, resolveEnhance, needsBreakRoll } from './enhance';
 import {
   SKILL_MAX_RANK, skillUpgradeCost, rankEffectMult,
 } from './content/skill_ranks';
@@ -44,13 +46,23 @@ export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
-import { BAG_SLOTS, addToBag, removeFromBag } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag } from './inventory';
+import {
+  WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID,
+  depositStack, withdrawStack,
+} from './storage';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
 } from './content/vendor';
 
-const EQUIP_SLOTS: EquipSlot[] = ['weapon', 'armor'];
+// Fresh, fully-populated equipment record (every slot null). One source so every
+// spawn literal stays exhaustive under TS strict when EQUIP_SLOTS changes.
+function emptyEquipment(): Record<EquipSlot, EquippedItem | null> {
+  const eq = {} as Record<EquipSlot, EquippedItem | null>;
+  for (const slot of EQUIP_SLOTS) eq[slot] = null;
+  return eq;
+}
 
 export const TICK_RATE = 20;
 export const DT = 1 / TICK_RATE; // seconds per tick
@@ -181,6 +193,8 @@ export class Sim implements IWorld {
 
   // The town vendor NPC's entity id (a fixed, non-combat shopkeeper).
   private vendorId = 0;
+  // The town WAREHOUSE keeper NPC's entity id (K5 — the armazém/banco interaction anchor).
+  private warehouseId = 0;
   // Auto-play: the set of player ids whose bot is ON. The bot drives each of those
   // players (survive/evolve) through the SAME applyAction path a human's commands use,
   // and manual input from a bot-driven player is ignored. Per-player so the server can
@@ -222,6 +236,7 @@ export class Sim implements IWorld {
       }
     }
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
+    this.warehouseId = this.spawnWarehouse(); // AFTER the vendor (vendor stays the first 'npc')
   }
 
   // Wire up a player's per-player intent/command state and add it to the iteration
@@ -310,11 +325,12 @@ export class Sim implements IWorld {
       str: cls.baseStr, weaponDamage: cls.weaponDamage,
       baseStr: cls.baseStr, baseWeaponDamage: cls.weaponDamage,
       baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3: defense (player starts with none innate)
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
@@ -353,11 +369,12 @@ export class Sim implements IWorld {
       str: Math.round(sp.str * tier.damageMult * ldmg),
       weaponDamage: Math.round(sp.weaponDamage * tier.damageMult * ldmg),
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: hp, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3: enemies have no defense (take full damage)
       swingTicks: Math.round(sp.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: tier.id,
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: tier.id,
       species: sp.id,
       boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
@@ -376,15 +393,43 @@ export class Sim implements IWorld {
       targetId: null,
       str: 0, weaponDamage: 0,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: 0, nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
+    });
+    return id;
+  }
+
+  // The town WAREHOUSE keeper NPC (armazém) — same fixed, non-combat NPC shape as the vendor,
+  // at a distinct spot (10,18). Spawned AFTER the vendor so the vendor stays the first 'npc'
+  // (tests/UI that find "the npc" still resolve to the vendor). The bank items live on each
+  // PLAYER (Entity.storage); this NPC is only the interaction anchor.
+  private spawnWarehouse(): number {
+    const id = WAREHOUSE_ENTITY_ID; // RESERVED id (not this.nextId) — keeps networked player ids/positions stable
+    this.ents.set(id, {
+      id, kind: 'npc', name: WAREHOUSE_NAME,
+      x: WAREHOUSE_SPAWN_X, z: WAREHOUSE_SPAWN_Z, facing: 0,
+      hp: 100, maxHp: 100,
+      targetId: null,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      species: '',
+      boss: false, summoned: false, spawnZone: -1,
+      homeX: WAREHOUSE_SPAWN_X, homeZ: WAREHOUSE_SPAWN_Z,
+      targetX: WAREHOUSE_SPAWN_X, targetZ: WAREHOUSE_SPAWN_Z, repickAt: 0,
     });
     return id;
   }
@@ -402,11 +447,12 @@ export class Sim implements IWorld {
       targetId: null,
       str: t.str, weaponDamage: t.weaponDamage,
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: t.id, // the boss id, so kill/summon/render resolve its def
       boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
@@ -482,11 +528,12 @@ export class Sim implements IWorld {
       targetId: null,
       str: ms.str, weaponDamage: ms.weaponDamage,
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: def.template.minionHp, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: Math.round(ms.swingTime * TICK_RATE), nextSwingAt: 0,
       mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], equipment: { weapon: null, armor: null }, effects: [], tier: 'normal',
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: def.minionSpecies,
       boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,
@@ -554,17 +601,25 @@ export class Sim implements IWorld {
   inventoryFor(id: number): InventoryView {
     const p = this.ents.get(id);
     const stacks = p
-      ? p.bag.map((s) => ({
-          itemId: s.itemId,
-          name: ITEMS[s.itemId]?.name ?? s.itemId,
-          qty: s.qty,
-          rarity: s.rarity,
-          rarityName: rarityDef(s.rarity).name,
-          plus: s.plus,
-          equipSlot: ITEMS[s.itemId]?.slot,
-          consumable: ITEMS[s.itemId]?.consumable != null,
-          sellValue: rarityStat(ITEMS[s.itemId]?.value ?? 0, s.rarity),
-        }))
+      ? p.bag.map((s) => {
+          const def = ITEMS[s.itemId];
+          return {
+            itemId: s.itemId,
+            name: def?.name ?? s.itemId,
+            qty: s.qty,
+            rarity: s.rarity,
+            rarityName: rarityDef(s.rarity).name,
+            plus: s.plus,
+            equipSlot: def?.slot,
+            consumable: def?.consumable != null,
+            sellValue: rarityStat(def?.value ?? 0, s.rarity),
+            // K2 degrees: grau do item + requisito de nível + se o DONO (p) pode equipar agora.
+            // Só faz sentido para equipáveis (têm slot); não-equipáveis ficam undefined.
+            degree: def?.degree,
+            reqLevel: def && def.slot != null ? equipLevelReq(def) : undefined,
+            canEquip: def && def.slot != null ? meetsLevelReq(def, p.level) : undefined,
+          };
+        })
       : [];
     const equipment = EQUIP_SLOTS.map((slot) => {
       const eq = p ? p.equipment[slot] : null;
@@ -578,6 +633,9 @@ export class Sim implements IWorld {
         // both chances, so the UI shows the one matching the Lucky Powder toggle.
         enhanceChance: eq ? enhanceChance(eq.plus, false) : 0,
         enhanceChanceLucky: eq ? enhanceChance(eq.plus, true) : 0,
+        // K4 alchemy risk readout (0 / gentle below RISK_FLOOR).
+        breakChance: eq && eq.plus >= RISK_FLOOR ? (BREAK_CHANCE[eq.plus] ?? 0) : 0,
+        dropOnFail: eq && eq.plus >= RISK_FLOOR ? (DROP_ON_FAIL[eq.plus] ?? 1) : 1,
         durability: eq?.durability ?? 0,
         maxDurability: eq ? MAX_DURABILITY : 0,
         repairCost: eq ? repairCost(eq.durability) : 0,
@@ -603,6 +661,34 @@ export class Sim implements IWorld {
       })),
       inRange: p ? this.nearVendor(p) : false,
     };
+  }
+
+  storage(): StorageView {
+    return this.storageFor(this.localId);
+  }
+
+  // The warehouse (armazém) contents for a SPECIFIC player. `inRange` depends on that player's
+  // position; the items themselves live on the player (Entity.storage). Mirrors inventoryFor's
+  // stack mapping (storage holds no equipment).
+  storageFor(id: number): StorageView {
+    const p = this.ents.get(id);
+    const stacks = p
+      ? p.storage.map((s) => {
+          const def = ITEMS[s.itemId];
+          return {
+            itemId: s.itemId,
+            name: def?.name ?? s.itemId,
+            qty: s.qty,
+            rarity: s.rarity,
+            rarityName: rarityDef(s.rarity).name,
+            plus: s.plus,
+            equipSlot: def?.slot,
+            consumable: def?.consumable != null,
+            sellValue: rarityStat(def?.value ?? 0, s.rarity),
+          };
+        })
+      : [];
+    return { name: WAREHOUSE_NAME, capacity: STORAGE_SLOTS, stacks, inRange: p ? this.nearWarehouse(p) : false };
   }
 
   botActive(): boolean {
@@ -794,6 +880,7 @@ export class Sim implements IWorld {
         str: e.str, weaponDamage: e.weaponDamage,
         int: e.baseInt,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
+        phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva (base+gear) p/ a ficha
         boss: e.boss,
         tier: e.tier,
         species: e.species,
@@ -1192,7 +1279,7 @@ export class Sim implements IWorld {
         this.unequip(p, cmd.slot);
         break;
       case 'enhance':
-        this.enhance(p, cmd.slot, cmd.useLuckyPowder);
+        this.enhance(p, cmd.slot, cmd.useLuckyPowder, cmd.useProtection);
         break;
       case 'repair':
         this.repair(p, cmd.slot);
@@ -1214,6 +1301,12 @@ export class Sim implements IWorld {
         break;
       case 'select-class':
         this.selectClass(p, cmd.classId);
+        break;
+      case 'deposit':
+        this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
+      case 'withdraw':
+        this.withdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
@@ -1244,6 +1337,7 @@ export class Sim implements IWorld {
   private equip(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
+    if (!meetsLevelReq(def, p.level)) return; // K2: gate de nível (degrees) — recusa silenciosa. (1 linha no topo de equip(); avisar K1/Gabriel.)
     if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
     const prev = p.equipment[def.slot];
     p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY }; // a freshly equipped item is in full repair
@@ -1263,25 +1357,55 @@ export class Sim implements IWorld {
   }
 
   // ---------- alchemy ("+N") ----------
-  // Attempt to raise the equipped item's "+". Consumes the matching Elixir (and,
-  // if asked and available, a Lucky Powder for a better chance). Success: +1
-  // (cap MAX_PLUS). Failure: -1 (floored at 0 — never breaks, never resets).
-  // All randomness via the sim Rng. Refuses (no material cost) at the cap.
-  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean): void {
+  // Attempt to raise the equipped item's "+". Consumes the matching Elixir (and, if asked +
+  // held, a Lucky Powder for a better chance). K4 — REAL RISK at high "+": at/above
+  // RISK_FLOOR a failure can QUEBRAR (destroy) the item or drop multiple levels; a Pedra de
+  // Proteção (asked + held) caps the drop to <=1 and prevents the break, and is consumed
+  // ONLY when it actually prevents a bad outcome. Below RISK_FLOOR a failure stays a gentle
+  // -1. Determinism: a FIXED Rng draw order — roll1 (success) always; roll2 (break vs
+  // degrade) ONLY on an unprotected failure at/above RISK_FLOOR. Refuses (no cost) at the cap.
+  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean, useProtection?: boolean): void {
     const eq = p.equipment[slot];
     if (!eq || eq.plus >= MAX_PLUS) return; // nothing equipped, or already maxed
     const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
     if (!removeFromBag(p.bag, elixirId, 'normal', 0, 1)) return; // need the right Elixir
     let lucky = false;
     if (useLuckyPowder && removeFromBag(p.bag, 'lucky_powder', 'normal', 0, 1)) lucky = true;
+    // Protection: a NON-MUTATING held-check (botCount only sums the bag); the stone is
+    // consumed below ONLY when it actually prevents a break/multi-drop.
+    const protectedAttempt = !!useProtection && this.botCount(p, PROTECT_STONE_ID) > 0;
 
-    const success = this.rng.next() < enhanceChance(eq.plus, lucky);
-    eq.plus = success ? Math.min(MAX_PLUS, eq.plus + 1) : Math.max(0, eq.plus - 1);
+    // Fixed draw order: roll1 (success) always; roll2 (break vs degrade) ONLY when needsBreakRoll
+    // says so (unprotected failure at/above RISK_FLOOR) — the SAME predicate resolveEnhance uses to
+    // consume roll2, so the draw count here and the consumption there can never drift apart.
+    const roll1 = this.rng.next();
+    const roll2 = needsBreakRoll(eq.plus, lucky, protectedAttempt, roll1) ? this.rng.next() : 0;
+    const outcome = resolveEnhance(eq.plus, lucky, protectedAttempt, roll1, roll2);
+
+    if (outcome.kind === 'break') {
+      const brokenName = ITEMS[eq.itemId]?.name ?? eq.itemId;
+      p.equipment[slot] = null; // the item is destroyed
+      this.recomputeStats(p);
+      this.events.push({
+        seq: this.nextEventSeq++, tick: this.tick, kind: 'enhance-break',
+        targetId: p.id, amount: 0, x: p.x, z: p.z, text: brokenName,
+      });
+      return;
+    }
+    const wasAtRisk = eq.plus >= RISK_FLOOR; // captured before applying the new "+"
+    eq.plus = outcome.nextPlus;
+    // Consume the protection stone on ANY protected FAILURE (degrade) at/above RISK_FLOOR. It
+    // does NOT guarantee a break/level was actually averted: at +4 the protected drop (−1) equals
+    // the unprotected non-break drop, so there the stone only buys break-immunity (its drop-cap
+    // matters from +5 up). Success / low-"+" never burns it.
+    if (protectedAttempt && outcome.kind === 'degrade' && wasAtRisk) {
+      removeFromBag(p.bag, PROTECT_STONE_ID, 'normal', 0, 1);
+    }
     this.recomputeStats(p);
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
-      kind: success ? 'enhance-success' : 'enhance-fail',
+      kind: outcome.kind === 'success' ? 'enhance-success' : 'enhance-fail',
       targetId: p.id,
       amount: eq.plus,
       x: p.x,
@@ -1424,6 +1548,7 @@ export class Sim implements IWorld {
         const def = ITEMS[s.itemId];
         if (!def || def.slot !== slot) continue;
         if (slot === 'weapon' && (def.mastery ?? DEFAULT_MASTERY) !== activeId) continue;
+        if (!meetsLevelReq(def, p.level)) continue; // K2: só considerar gear que o bot PODE equipar — senão o 'best' vira inalcançável e ele nunca troca pelo item vestível
         const score = botGearScore(s.itemId, s.rarity, s.plus);
         if (score > bestScore) { bestScore = score; best = s; }
       }
@@ -1499,7 +1624,7 @@ export class Sim implements IWorld {
   private botEnhance(p: Entity): void {
     for (const slot of EQUIP_SLOTS) {
       const eq = p.equipment[slot];
-      if (!eq || eq.plus >= MAX_PLUS) continue;
+      if (!eq || eq.plus >= RISK_FLOOR) continue; // K4: bot never gambles into the break band
       const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
       if (this.botCount(p, elixirId) <= BOT_MATERIAL_RESERVE) continue; // keep a reserve
       const useLucky = enhanceChance(eq.plus, false) < BOT_LUCKY_BELOW_CHANCE
@@ -1693,6 +1818,19 @@ export class Sim implements IWorld {
     p.gold += value;
   }
 
+  // K5: bank a whole bag stack into the player's own warehouse. Requires being near the
+  // warehouse NPC; the pure helper handles capacity + the non-destructive put-back on a full bank.
+  private deposit(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.nearWarehouse(p)) return;
+    depositStack(p.bag, p.storage, itemId, rarity, plus);
+  }
+
+  // K5: take a whole stack back from the warehouse to the bag (near the warehouse).
+  private withdraw(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.nearWarehouse(p)) return;
+    withdrawStack(p.storage, p.bag, itemId, rarity, plus);
+  }
+
   // Pay the vendor to restore an equipped item's durability to full (GDD B8). Requires
   // being near the vendor and enough gold; refuses (no charge) at full or when broke.
   // Worn gear gives less of its bonus, so this buys the lost stats back.
@@ -1716,6 +1854,15 @@ export class Sim implements IWorld {
     return dx * dx + dz * dz <= VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
   }
 
+  // Whether the player is close enough to the warehouse NPC to deposit/withdraw.
+  private nearWarehouse(p: Entity): boolean {
+    const w = this.ents.get(this.warehouseId);
+    if (!w) return false;
+    const dx = p.x - w.x;
+    const dz = p.z - w.z;
+    return dx * dx + dz * dz <= WAREHOUSE_INTERACT_RANGE * WAREHOUSE_INTERACT_RANGE;
+  }
+
   // Recompute EFFECTIVE stats = base (class + level) + sum of equipped gear.
   // Combat reads p.str/p.weaponDamage/p.maxHp/p.maxMp, so this is what makes a
   // weapon actually change auto-attack and ability damage. Current HP/MP are
@@ -1725,6 +1872,8 @@ export class Sim implements IWorld {
     let bonusWeapon = 0;
     let bonusMaxHp = 0;
     let bonusMaxMp = 0;
+    let bonusPhyDef = 0; // K3: physical defense from gear
+    let bonusMagDef = 0; // K3: magical defense from gear
     for (const slot of EQUIP_SLOTS) {
       const eq = p.equipment[slot];
       const stats = eq ? ITEMS[eq.itemId]?.stats : undefined;
@@ -1738,6 +1887,8 @@ export class Sim implements IWorld {
       bonusWeapon += scale(stats.weaponDamage ?? 0);
       bonusMaxHp += scale(stats.maxHp ?? 0);
       bonusMaxMp += scale(stats.maxMp ?? 0);
+      bonusPhyDef += scale(stats.phyDef ?? 0); // K3: same rarity/+N/durability scale as the stats above
+      bonusMagDef += scale(stats.magDef ?? 0); // K3
     }
     // The active weapon mastery's passive is always on (e.g. Lança's +HP).
     const passive = this.activeMastery(p).passive;
@@ -1749,6 +1900,10 @@ export class Sim implements IWorld {
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
     p.maxHp = p.baseMaxHp + bonusMaxHp; // Strength's HP is folded into baseMaxHp on spend (see spendAttr)
     p.maxMp = p.baseMaxMp + p.baseInt * MP_PER_INT + bonusMaxMp; // Intelligence adds max MP
+    // K3: defense is a plain additive write (NOT routed through the Int/maxMp line). Combat does
+    // not read these yet; Gabriel's mitigate() will (phyDef reduces physical; magDef adds to Int resist).
+    p.phyDef = p.basePhyDef + bonusPhyDef;
+    p.magDef = p.baseMagDef + bonusMagDef;
     if (p.hp > p.maxHp) p.hp = p.maxHp;
     if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
@@ -2313,6 +2468,11 @@ export class Sim implements IWorld {
       for (const s of e.bag) {
         mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
       }
+      // K5: armazém do jogador (mesmo fold da bag). Storage vazio => 0 iterações => FNV
+      // intocado => hash byte-idêntico para todos os mundos que não usam o armazém.
+      for (const s of e.storage) {
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+      }
       // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).
       for (const slot of EQUIP_SLOTS) {
         const eq = e.equipment[slot];
@@ -2378,19 +2538,7 @@ export function rarityStat(value: number, rarity: Rarity): number {
   return Math.round(value * rarityDef(rarity).statMultiplier);
 }
 
-// Success chance of an enhance attempt from `plus` -> plus+1, optionally boosted
-// by a Lucky Powder. 0 at the cap. Pure & deterministic.
-export function enhanceChance(plus: number, lucky: boolean): number {
-  if (plus < 0 || plus >= MAX_PLUS) return 0;
-  const base = ENHANCE_SUCCESS[plus] ?? 0;
-  return Math.min(ENHANCE_CHANCE_CAP, base + (lucky ? LUCKY_POWDER_BONUS : 0));
-}
-
-// A "+N" item's bonus: the rarity-scaled stat, then +ENHANCE_STAT_PER_PLUS per
-// level. Pure & deterministic. So a higher "+" means a bigger stat.
-export function enhanceStat(rarityScaled: number, plus: number): number {
-  return Math.round(rarityScaled * (1 + ENHANCE_STAT_PER_PLUS * plus));
-}
+// enhanceChance / enhanceStat now live in ./enhance (K4 — alchemy logic in its own module).
 
 // True when the offset (dx,dz) points into the forward half-plane for `facing`
 // (the actor's forward is +Z at facing 0). Used by both target cycling and the

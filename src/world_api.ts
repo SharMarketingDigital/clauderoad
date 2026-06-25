@@ -11,7 +11,17 @@ export type EntityKind = 'player' | 'enemy' | 'npc';
 
 // Equipment slots a character can fill. Defined here (the seam) so both the
 // sim's item content and the UI agree on the set.
-export type EquipSlot = 'weapon' | 'armor';
+export type EquipSlot =
+  | 'weapon'
+  | 'shield'
+  | 'helmet'
+  | 'chest'
+  | 'hands'
+  | 'legs'
+  | 'feet'
+  | 'necklace'
+  | 'earring'
+  | 'ring';
 
 // Item rarity, common -> rarest (Silkroad-style lucky drops). Defined at the
 // seam so content, sim, and UI agree; the UI maps these to colors.
@@ -65,6 +75,11 @@ export interface EntityView {
   readonly int: number; // Intelligence (spent points); raises max MP
   readonly weaponDamage: number;
   readonly weaponPlus: number; // enhancement level of the equipped weapon (0 if none); drives the glow
+  // Defensive stats (K3, surfaced by the character sheet / K6). EFFECTIVE phyDef/magDef = base +
+  // equipped gear, recomputed like str/maxHp. Enemies carry 0 (full damage). Combat reads these
+  // later (Gabriel's mitigate()); today they are display-only.
+  readonly phyDef: number;
+  readonly magDef: number;
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly tier: EnemyTierId; // enemy strength tier ('normal' for the player/NPCs); render scales/tints by it
   readonly species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
@@ -91,6 +106,10 @@ export interface ItemStackView {
   readonly equipSlot?: EquipSlot;
   readonly consumable: boolean; // true => usable from the bag (a potion, etc.)
   readonly sellValue: number; // gold the vendor pays for ONE of this stack (rarity-scaled)
+  // --- K2 degrees (equipáveis): grau, requisito de nível, e se o DONO atual pode equipar ---
+  readonly degree?: number; // grau do item (>=1); ausente p/ itens sem grau / não-equipáveis
+  readonly reqLevel?: number; // nível mínimo p/ equipar; ausente p/ não-equipáveis
+  readonly canEquip?: boolean; // o dono cumpre o requisito? ausente => tratar como equipável (back-compat)
 }
 
 // One equipment slot's current contents (null fields when empty). `plus` is the
@@ -111,6 +130,10 @@ export interface EquipView {
   readonly durability: number;
   readonly maxDurability: number;
   readonly repairCost: number;
+  // K4 alchemy risk readout: the chance THIS next attempt destroys the item (0 below
+  // RISK_FLOOR, when empty, or at the cap), and how many "+" a non-breaking failure drops.
+  readonly breakChance: number; // 0..1
+  readonly dropOnFail: number; // levels lost on a failed (non-breaking) attempt; >= 1
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -132,6 +155,16 @@ export interface ShopEntryView {
 export interface ShopView {
   readonly name: string;
   readonly stock: ReadonlyArray<ShopEntryView>;
+  readonly inRange: boolean;
+}
+
+// The player's persistent warehouse (armazém/banco da cidade) — bag-like, stored at the town
+// warehouse and saved with the character (K5). `inRange` is whether the local player is close
+// enough to the warehouse NPC to deposit/withdraw (the sim enforces this too).
+export interface StorageView {
+  readonly name: string;
+  readonly capacity: number;
+  readonly stacks: ReadonlyArray<ItemStackView>;
   readonly inRange: boolean;
 }
 
@@ -190,7 +223,7 @@ export type Command =
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
-  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean } // alchemy "+N" attempt
+  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
   | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
@@ -198,6 +231,8 @@ export type Command =
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
   | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
   | { t: 'select-class'; classId: string } // pick a starter class on entry — equips its weapon/kit when unarmed (GDD G1)
+  | { t: 'deposit'; itemId: string; rarity: Rarity; plus: number } // K5: bank a whole bag stack (near the warehouse)
+  | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number } // K5: take a whole stack back from the warehouse
   | { t: 'set-bot'; on: boolean } // toggle auto-play (the sim drives the player; manual input ignored)
   // --- party / co-op (GDD B6) ---
   | { t: 'party-create'; exp: PartyExpMode; loot: PartyLootMode } // form a party; you become leader
@@ -237,6 +272,7 @@ export type SimEvent = {
   readonly tick: number;
   // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
+  // 'enhance-break': a failed high-"+" attempt destroyed the item; `text` = its name.
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
   // 'death'/'respawn': the player went down / came back; `text` = the player name.
   // 'boss-spawn'/'boss-defeat'/'boss-summon': `text` = the boss name, for the announcement.
@@ -246,6 +282,7 @@ export type SimEvent = {
     | 'levelup'
     | 'enhance-success'
     | 'enhance-fail'
+    | 'enhance-break'
     | 'heal'
     | 'death'
     | 'respawn'
@@ -276,6 +313,8 @@ export interface IWorld {
   inventory(): InventoryView;
   // The vendor's storefront (stock + whether the player is in range) for the shop.
   shop(): ShopView;
+  // The local player's warehouse (armazém) contents + whether in range to deposit/withdraw.
+  storage(): StorageView;
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;

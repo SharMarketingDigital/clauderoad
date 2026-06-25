@@ -12,3 +12,17 @@ export const ENHANCE_CHANCE_CAP = 0.95; // a Lucky Powder can't push a roll abov
 
 // Each "+" adds this fraction of the (rarity-scaled) stat. +10 => +100%.
 export const ENHANCE_STAT_PER_PLUS = 0.1;
+
+// ---- K4: alquimia com risco real (provisional; tune later) ----
+// At/above RISK_FLOOR a FAILED attempt can BREAK the item or drop multiple "+"; below it a
+// failure stays the gentle -1, so early game and the low-"+" tests are unchanged.
+export const RISK_FLOOR = 4;
+// Break chance ON A FAILURE, index = current plus (0..9); 0 below RISK_FLOOR. Rises toward
+// the cap — Silkroad's late brutality, but kinder and tunable.
+export const BREAK_CHANCE = [0, 0, 0, 0, 0.05, 0.1, 0.18, 0.28, 0.4, 0.55];
+// "+" levels lost ON A FAILURE that does NOT break, index = current plus (0..9).
+export const DROP_ON_FAIL = [1, 1, 1, 1, 1, 2, 2, 3, 3, 4];
+// A Pedra de Proteção caps a failure's drop to this and prevents the break (the "piso").
+export const PROTECT_DROP_CAP = 1;
+// The alchemy protection material's item id (its ITEMS entry lives in content/items.ts).
+export const PROTECT_STONE_ID = 'protect_stone';

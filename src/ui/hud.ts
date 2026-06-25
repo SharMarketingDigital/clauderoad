@@ -2,6 +2,10 @@
 import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
 import { isTyping } from './typing';
 import { registerOverlay } from './overlays';
+import { SLOT_LABELS } from './inventory';
+import { PROTECT_DROP_CAP } from '../sim/content/enhance';
+import { CharacterSheet } from './character_sheet';
+import { StoragePanel } from './storage';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -40,8 +44,10 @@ export class Hud {
   private refineRow: HTMLDivElement;
   private refineBtns: HTMLButtonElement[] = [];
   private luckyToggle: HTMLButtonElement;
+  private protectToggle: HTMLButtonElement;
   private matLine: HTMLDivElement;
   private luckyOn = false; // UI state: whether to spend a Lucky Powder
+  private protectOn = false; // UI state (K4): whether to spend a Pedra de Proteção
   private bagOpen = false;
   // vendor shop window (toggled with V)
   private shopEl: HTMLDivElement;
@@ -73,6 +79,10 @@ export class Hud {
   // unequip) can send commands against the current state.
   private world: IWorld | null = null;
   private lastInv: InventoryView | null = null;
+  // K6 — ficha de personagem (tecla C); auto-contida, registra a própria hotkey e lê o EntityView.
+  private sheet = new CharacterSheet();
+  // K5 — painel do armazém (tecla H); auto-contido, registra a própria hotkey e fala com a IWorld.
+  private storagePanel = new StoragePanel();
 
   constructor() {
     this.root = document.createElement('div');
@@ -110,6 +120,7 @@ export class Hud {
         </div>
         <div class="alchemy">
           <button class="lucky-toggle">Pó da Sorte: OFF</button>
+          <button class="protect-toggle">Proteção: OFF</button>
           <div class="refine-row"></div>
           <div class="mat-line"></div>
         </div>
@@ -173,9 +184,24 @@ export class Hud {
       this.luckyToggle.textContent = `Pó da Sorte: ${this.luckyOn ? 'ON' : 'OFF'}`;
       this.luckyToggle.classList.toggle('on', this.luckyOn);
     });
+    this.protectToggle = this.root.querySelector('.protect-toggle') as HTMLButtonElement;
+    this.protectToggle.addEventListener('click', () => {
+      this.protectOn = !this.protectOn;
+      this.protectToggle.textContent = `Proteção: ${this.protectOn ? 'ON' : 'OFF'}`;
+      this.protectToggle.classList.toggle('on', this.protectOn);
+    });
     this.botToggleBtn = this.root.querySelector('.bot-toggle') as HTMLButtonElement;
     this.botIndicator = this.root.querySelector('.bot-indicator') as HTMLDivElement;
     this.botToggleBtn.addEventListener('click', () => this.toggleBot());
+
+    // T1.1: the centered modals must paint ABOVE the map/party overlays. `.bag` and `.skills`
+    // live inside `.hud` (position:fixed => its own stacking context), so a z-index on them can
+    // never beat the body-level overlays. Reparent them to <body> (both are position:absolute,
+    // viewport-centered, so this is visually identical) where their z-index (style.css) competes
+    // at the root stacking context — mirroring `.storage`/`.sheet`, which are already body-level.
+    // All bag/skills descendants were queried above, so they ride along with the move.
+    document.body.appendChild(this.skillsEl);
+    document.body.appendChild(this.bag);
 
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
@@ -270,6 +296,8 @@ export class Hud {
     if (this.bagOpen) this.updateBag(world.inventory(), p);
     if (this.shopOpen) this.updateShop(world, p);
     if (this.skillsOpen) this.updateSkills(world, p);
+    if (this.sheet.isOpen()) this.sheet.update(p); // K6: ficha (só leitura)
+    if (this.storagePanel.isOpen()) this.storagePanel.update(world); // K5: armazém (depósito/saque)
   }
 
   // Skills panel (GDD B4): each ability's rank + the SP cost to raise it, with a
@@ -360,7 +388,7 @@ export class Hud {
       const btn = this.shopRepairCells[j];
       if (eq && eq.itemId != null && eq.durability < eq.maxDurability) {
         btn.style.display = '';
-        const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+        const slotName = SLOT_LABELS[eq.slot];
         btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] — ${eq.repairCost}`;
         btn.disabled = p.gold < eq.repairCost;
       } else {
@@ -425,7 +453,7 @@ export class Hud {
     for (let j = 0; j < this.equipCells.length; j++) {
       const eq = inv.equipment[j];
       const cell = this.equipCells[j];
-      const label = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      const label = SLOT_LABELS[eq.slot];
       cell.classList.toggle('filled', eq.itemId != null);
       if (eq.itemId) {
         cell.dataset.rarity = eq.rarity ?? '';
@@ -470,19 +498,26 @@ export class Hud {
       const stack = inv.stacks[i];
       if (stack) {
         slot.classList.add('filled');
-        slot.classList.toggle('equippable', stack.equipSlot != null);
+        // K2 degrees: a below-level equippable is LOCKED — no equip affordance, and the click
+        // is dead (the sim silently refuses it anyway). canEquip is undefined for non-equippables
+        // and true/false for gear (back-compat: undefined => treat as wearable).
+        const locked = stack.equipSlot != null && stack.canEquip === false;
+        slot.classList.toggle('equippable', stack.equipSlot != null && !locked);
+        slot.classList.toggle('locked', locked);
         slot.classList.toggle('usable', stack.consumable);
         slot.dataset.rarity = stack.rarity; // UI colors the border/text by this
         const plusTag = stack.plus > 0 ? ` +${stack.plus}` : '';
         const label = `${stack.name}${plusTag} (${stack.rarityName})`;
-        slot.title = stack.equipSlot
-          ? `${label} — clique p/ equipar`
-          : stack.consumable
-            ? `${label} — clique p/ usar`
-            : label;
+        slot.title = locked
+          ? `${label} — requer nível ${stack.reqLevel}`
+          : stack.equipSlot
+            ? `${label} — clique p/ equipar`
+            : stack.consumable
+              ? `${label} — clique p/ usar`
+              : label;
         slot.textContent = stack.qty > 1 ? `${label} ×${stack.qty}` : label;
       } else {
-        slot.classList.remove('filled', 'equippable', 'usable');
+        slot.classList.remove('filled', 'equippable', 'usable', 'locked');
         delete slot.dataset.rarity;
         slot.title = '';
         slot.textContent = '';
@@ -496,6 +531,7 @@ export class Hud {
     const stack = this.lastInv?.stacks[i];
     if (!stack || !this.world) return;
     if (stack.equipSlot) {
+      if (stack.canEquip === false) return; // K2: below required level — dead click (the sim would refuse it)
       this.world.sendCommand({
         t: 'equip',
         itemId: stack.itemId,
@@ -534,8 +570,9 @@ export class Hud {
     for (let j = 0; j < this.refineBtns.length; j++) {
       const eq = inv.equipment[j];
       const btn = this.refineBtns[j];
-      const slotName = eq.slot === 'weapon' ? 'Arma' : 'Armadura';
+      const slotName = SLOT_LABELS[eq.slot];
       const elixirId = eq.slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
+      btn.dataset.risk = 'safe'; // K4: risk tier for styling; overridden in the risk band below
       if (eq.itemId == null) {
         btn.textContent = `${slotName}: vazio`;
         btn.disabled = true;
@@ -546,10 +583,21 @@ export class Hud {
         btn.textContent = `${slotName} +${eq.plus} (sem Elixir)`;
         btn.disabled = true;
       } else {
-        // Show the chance that matches the toggle AND whether a powder is held.
+        // Success chance (matching the toggle + held powder). In the risk band (+ >= RISK_FLOOR)
+        // also state the break danger as TEXT — never color alone: protected => capped -1, else
+        // the break % and the multi-drop. CSS reinforces the tier via [data-risk].
         const ch = this.luckyOn && powder > 0 ? eq.enhanceChanceLucky : eq.enhanceChance;
-        btn.textContent = `Refinar ${slotName} +${eq.plus} (${Math.round(ch * 100)}%)`;
+        const warn = eq.breakChance > 0
+          ? (this.protectOn
+            // The cap only SHRINKS the drop when dropOnFail > cap (+5 and up); at +4 (dropOnFail
+            // == cap) a protected failure drops the same -1 as an unprotected non-break, so the
+            // only real benefit there is break-immunity — say so instead of faking a -N gain.
+            ? (eq.dropOnFail > PROTECT_DROP_CAP ? ` · protegido (−${PROTECT_DROP_CAP})` : ' · protegido (sem quebra)')
+            : ` · PODE QUEBRAR −${eq.dropOnFail} (quebra ${Math.round(eq.breakChance * 100)}%)`)
+          : '';
+        btn.textContent = `Refinar ${slotName} +${eq.plus} (${Math.round(ch * 100)}%)${warn}`;
         btn.disabled = false;
+        btn.dataset.risk = eq.breakChance <= 0 ? 'safe' : this.protectOn ? 'protected' : 'danger';
       }
     }
     this.matLine.textContent =
@@ -559,9 +607,18 @@ export class Hud {
   // Click "Refinar" -> attempt the "+N" upgrade on that slot (sim rolls it).
   private onRefineClick(j: number): void {
     const eq = this.lastInv?.equipment[j];
-    if (eq?.itemId && eq.enhanceChance > 0 && this.world) {
-      this.world.sendCommand({ t: 'enhance', slot: eq.slot, useLuckyPowder: this.luckyOn });
+    if (!eq?.itemId || eq.enhanceChance <= 0 || !this.world) return;
+    // K4: a risky attempt (can break) with protection OFF is irreversible — confirm first.
+    // Protected attempts (and sub-RISK_FLOOR ones) skip the prompt. (Simple native guard; a
+    // styled in-panel modal is a future polish.)
+    if (eq.breakChance > 0 && !this.protectOn) {
+      const ok = window.confirm(
+        `Refinar ${SLOT_LABELS[eq.slot]} +${eq.plus} pode QUEBRAR o item (chance ${Math.round(eq.breakChance * 100)}%) `
+        + `ou cair −${eq.dropOnFail} níveis, e você não está usando Pedra de Proteção. Continuar?`,
+      );
+      if (!ok) return;
     }
+    this.world.sendCommand({ t: 'enhance', slot: eq.slot, useLuckyPowder: this.luckyOn, useProtection: this.protectOn });
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {

@@ -4,6 +4,8 @@
 import { describe, it, expect } from 'vitest';
 import { ServerWorld } from '../server/world';
 import { VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_STOCK } from '../src/sim/content/vendor';
+import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z } from '../src/sim/storage';
+import type { EquipSlot } from '../src/world_api';
 
 const enemyId = (w: ServerWorld) => w.snapshot().entities.find((e) => e.kind === 'enemy')!.id;
 const selfOf = (w: ServerWorld, id: number) => w.snapshot().entities.find((e) => e.id === id)!;
@@ -195,7 +197,7 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
   it('accepts equip — a looted item goes onto the character (server applies it)', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
-    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: 'weapon' | 'armor' } | undefined;
+    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
     for (let r = 0; r < 10 && !gear; r++) {
       farm(w, a, 1200);
       gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null) as typeof gear;
@@ -205,6 +207,88 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     w.step();
     const eq = w.selfState(a).inventory.equipment.find((e) => e.slot === gear!.equipSlot);
     expect(eq!.itemId).toBe(gear!.itemId); // it's now equipped (the server decided it)
+  });
+
+  it('accepts unequip on a NON-weapon slot — the server whitelist covers all 10 equip slots (K1)', () => {
+    // Regression guard for K1: the server's VALID_SLOTS used to be {weapon,armor}, so online
+    // it silently dropped unequip/enhance/repair for the 8 real non-weapon slots. This drives
+    // that exact path through ServerWorld.command() with a looted armor piece (e.g. chest).
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
+    for (let r = 0; r < 15 && !gear; r++) {
+      farm(w, a, 1200);
+      gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null && s.equipSlot !== 'weapon') as typeof gear;
+    }
+    expect(gear).toBeDefined(); // looted a non-weapon piece (armor/accessory)
+    expect(gear!.equipSlot).not.toBe('weapon');
+    const slot = gear!.equipSlot!;
+    w.command(a, { t: 'equip', itemId: gear!.itemId, rarity: gear!.rarity, plus: gear!.plus });
+    w.step();
+    expect(w.selfState(a).inventory.equipment.find((e) => e.slot === slot)!.itemId).toBe(gear!.itemId);
+    // The regression assertion: unequip that non-weapon slot THROUGH THE SERVER. Under the old
+    // {weapon,armor} whitelist this command was silently discarded and the slot stayed filled.
+    w.command(a, { t: 'unequip', slot });
+    w.step();
+    expect(w.selfState(a).inventory.equipment.find((e) => e.slot === slot)!.itemId).toBeNull();
+  });
+
+  it('forwards the enhance useProtection flag — protection is NOT dropped online (K4)', () => {
+    // Regression guard for K4 (the same shape as the K1 whitelist bug): the server REBUILDS the
+    // enhance command from validated fields. If it forwarded only {slot, useLuckyPowder} and
+    // dropped useProtection, a high-"+" failure could DESTROY the weapon online while the
+    // single-player sim (which gets the flag directly) protected it. Set up a weapon in the RISK
+    // band (+5 >= RISK_FLOOR) with elixirs + protection stones via restore, then drive many
+    // PROTECTED enhances THROUGH THE SERVER and assert it never breaks and stones are spent.
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    w.restorePlayer(a, {
+      level: 30, xp: 0, attrPoints: 0, baseStr: 30, baseInt: 5, baseMaxHp: 400, baseMaxMp: 100,
+      sp: 0, skillRanks: {}, gold: 0,
+      bag: [
+        { itemId: 'elixir_weapon', rarity: 'normal', plus: 0, qty: 60 },
+        { itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 60 },
+      ],
+      equipment: { weapon: { itemId: 'old_sword', rarity: 'normal', plus: 5, durability: 100 } },
+    });
+    const weaponSlot = () => w.selfState(a).inventory.equipment.find((e) => e.slot === 'weapon')!;
+    const stones = (): number =>
+      w.selfState(a).inventory.stacks.filter((s) => s.itemId === 'protect_stone').reduce((n, s) => n + s.qty, 0);
+    expect(weaponSlot().itemId).toBe('old_sword'); // equipped in the risk band (+5)
+    const stones0 = stones();
+
+    for (let i = 0; i < 40; i++) {
+      w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: false, useProtection: true });
+      w.step();
+      expect(weaponSlot().itemId).not.toBeNull(); // protected: the weapon is NEVER destroyed
+    }
+    // A protected failure in the risk band consumes a stone; over 40 attempts at least one
+    // failed. If the server had dropped useProtection, NO stone would be spent (and the weapon
+    // could have broken above) — exactly the regression this guards.
+    expect(stones()).toBeLessThan(stones0);
+  });
+
+  it('encaminha useProtection VERBATIM para o comando do sim (direto, sem depender de seed) (K4)', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    // Espiona a fronteira servidor->sim: prova o forward diretamente, sem depender de uma falha
+    // sorteada (mais robusto que inferir pela quebra/gasto de pedra ao longo de N tentativas).
+    const sim = (w as unknown as { sim: { sendCommandFor(id: number, cmd: Record<string, unknown>): void } }).sim;
+    const orig = sim.sendCommandFor.bind(sim);
+    const seen: Record<string, unknown>[] = [];
+    sim.sendCommandFor = (id, cmd) => { seen.push(cmd); orig(id, cmd); };
+
+    w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: false, useProtection: true });
+    const fwd = seen.find((c) => c.t === 'enhance')!;
+    expect(fwd).toBeDefined();
+    expect(fwd.useProtection).toBe(true);
+    expect(fwd.useLuckyPowder).toBe(false);
+    expect(fwd.slot).toBe('weapon');
+
+    // o caso undefined é preservado (não coagido para false)
+    seen.length = 0;
+    w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: true });
+    expect(seen.find((c) => c.t === 'enhance')!.useProtection).toBeUndefined();
   });
 
   it('the vendor loop works in MP — walk into range, sell loot for gold', () => {
@@ -226,6 +310,33 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     w.command(a, { t: 'sell', itemId: sellable!.itemId, rarity: sellable!.rarity, plus: sellable!.plus });
     w.step(); // sell is drained BEFORE movement, so it lands while still in range
     expect(w.selfState(a).gold).toBeGreaterThan(gold0); // converted loot to gold
+  });
+
+  it('roteia depósito/saque pelo servidor e persiste o armazém por jogador (K5)', () => {
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    const b = w.addPlayer('B');
+    // seed A's bag and walk it to the warehouse (town safe zone — no mobs en route)
+    w.restorePlayer(a, { bag: [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 6 }], storage: [], equipment: {} });
+    for (let i = 0; i < 1500 && !w.selfState(a).storage.inRange; i++) {
+      const me = w.snapshot().entities.find((e) => e.id === a)!;
+      w.setIntent(a, WAREHOUSE_SPAWN_X - me.x, WAREHOUSE_SPAWN_Z - me.z);
+      w.step();
+    }
+    expect(w.selfState(a).storage.inRange).toBe(true);
+    // the deposit command is ROUTED by the server whitelist (not silently dropped — K1 lesson)
+    w.command(a, { t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    w.step();
+    expect(w.selfState(a).storage.stacks.find((s) => s.itemId === 'health_potion')!.qty).toBe(6);
+    expect(w.selfState(a).inventory.stacks.some((s) => s.itemId === 'health_potion')).toBe(false);
+    expect(w.selfState(b).storage.stacks.length).toBe(0); // B's warehouse is independent (per-owner)
+    // persists in the save (serialize round-trips the warehouse)
+    expect(w.serializePlayer(a)!.storage).toEqual([{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 6 }]);
+    // and the WITHDRAW path is routed by the server whitelist too (round-trip back to the bag)
+    w.command(a, { t: 'withdraw', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    w.step();
+    expect(w.selfState(a).inventory.stacks.find((s) => s.itemId === 'health_potion')!.qty).toBe(6);
+    expect(w.selfState(a).storage.stacks.length).toBe(0);
   });
 });
 
