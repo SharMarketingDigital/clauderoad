@@ -140,7 +140,7 @@ function startOnline(url: string, name: string): void {
     map.update(world); // world map (M) — player position on the zones
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
-    duelHud.update(world); // PvP duel banner + challenge popup (from localDuel/localDuelInvite)
+    duelHud.update(world, renderer, input.duelTargetId()); // PvP: banner + challenge popup + floating "Duelar" button on the left-click-selected player
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     music.update(world, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);

@@ -18,9 +18,13 @@ export class Input {
   // one-shot commands (Tab, click-to-target) queued by event handlers and
   // flushed to the world once per frame in apply().
   private pending: Command[] = [];
-  // A right-clicked entity id awaiting a duel challenge — resolved to a player NAME in apply()
-  // (which has the world to look the name up). Null when there's nothing pending.
-  private pendingChallengeId: number | null = null;
+  // Duel target SELECTION (render/UI state only). The sim's target is enemy-only (canAttack), so a
+  // player can never be the sim target — instead we track the left-click-selected OTHER player here
+  // and expose it to the duel HUD. `leftClickId` holds the most recent clean left-click (incl. null
+  // for empty ground), resolved in apply() which has the world to classify what was clicked.
+  private uiSelectedPlayerId: number | null = null;
+  private leftClickId: number | null = null;
+  private hasLeftClick = false;
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
@@ -49,19 +53,19 @@ export class Input {
       this.moved = false;
     });
     window.addEventListener('mouseup', (e) => {
-      // mouseup is on window so a drag that releases off-canvas still ends; but
-      // a SELECT only counts when the release is over the canvas itself (so a
-      // future interactive HUD element can't be click-through-selected).
-      const clicked = this.dragging && !this.moved && e.target === canvas;
-      const button = this.downButton;
+      // mouseup is on window so a drag that releases off-canvas still ends; but a SELECT only
+      // counts on a non-drag LEFT click released over the canvas itself (right-click is camera
+      // orbit only now — the old right-click-to-duel was replaced by the floating "Duelar" button).
+      const clicked = this.dragging && !this.moved && this.downButton === 0 && e.target === canvas;
       this.dragging = false;
       if (!clicked) return;
+      // A clean left click: record what's under it (id, or null for empty ground) for apply() to
+      // classify — an enemy still goes to the sim as a target; another player becomes the duel
+      // selection; empty ground clears it. Same raycast the mob-targeting already uses.
       const id = this.renderer.pick(e.clientX, e.clientY);
-      if (id == null) return;
-      // Left click selects whatever is under it (the sim only keeps an enemy). Right click
-      // challenges a player to a duel — resolved to its name in apply().
-      if (button === 0) this.pending.push({ t: 'set-target', id });
-      else if (button === 2) this.pendingChallengeId = id;
+      this.leftClickId = id;
+      this.hasLeftClick = true;
+      if (id != null) this.pending.push({ t: 'set-target', id }); // the sim keeps it only if it's an enemy
     });
     window.addEventListener('mousemove', (e) => {
       if (!this.dragging) return;
@@ -78,8 +82,14 @@ export class Input {
       },
       { passive: false },
     );
-    // Suppress the browser context menu so right-click is free for the duel challenge.
+    // Suppress the browser context menu so a right-drag orbits the camera without the menu popping.
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  // The OTHER player currently selected for a duel (from a left click), or null. Pure client/UI
+  // state the duel HUD reads to offer the "Duelar" button; it never reaches the sim.
+  duelTargetId(): number | null {
+    return this.uiSelectedPlayerId;
   }
 
   // Push queued actions + the current movement intent into the world. Called
@@ -88,14 +98,15 @@ export class Input {
     // Auto-play drives the player from the sim; ignore (and drop) manual input.
     if (world.botActive()) {
       this.pending.length = 0;
-      this.pendingChallengeId = null;
+      this.hasLeftClick = false;
+      this.uiSelectedPlayerId = null;
       return;
     }
     // While typing in the chat, the player must NOT move/act: drop queued actions,
     // forget held keys (so a key pressed before opening chat doesn't stick), and stop.
     if (isTyping()) {
       this.pending.length = 0;
-      this.pendingChallengeId = null;
+      this.hasLeftClick = false;
       this.keys.clear();
       world.sendCommand({ t: 'stop' });
       return;
@@ -103,14 +114,21 @@ export class Input {
     for (const cmd of this.pending) world.sendCommand(cmd);
     this.pending.length = 0;
 
-    // Resolve a pending right-click duel challenge: look the picked entity up and, if it's another
-    // player, send a duel-challenge by name (the sim/server validate it; a non-player is ignored).
-    if (this.pendingChallengeId != null) {
-      const tid = this.pendingChallengeId;
-      this.pendingChallengeId = null;
+    // Resolve the duel SELECTION from the last clean left click — render/UI state only (the sim
+    // won't hold a player as its target). Clicking another player selects them (the duel HUD then
+    // offers the "Duelar" button); clicking an enemy, the NPC, yourself, or empty ground clears it.
+    if (this.hasLeftClick) {
+      this.hasLeftClick = false;
+      const id = this.leftClickId;
       const me = world.localPlayerId();
-      const t = world.entities().find((en) => en.id === tid);
-      if (t && t.kind === 'player' && t.id !== me) world.sendCommand({ t: 'duel-challenge', name: t.name });
+      const e = id != null ? world.entities().find((en) => en.id === id) : undefined;
+      this.uiSelectedPlayerId = e && e.kind === 'player' && e.id !== me ? e.id : null;
+    }
+    // Keep the selection truthful so the "Duelar" button never lingers: drop it once a duel is
+    // active or the selected player is no longer present.
+    if (this.uiSelectedPlayerId != null) {
+      const sel = world.entities().find((en) => en.id === this.uiSelectedPlayerId);
+      if (!sel || sel.kind !== 'player' || world.localDuel() != null) this.uiSelectedPlayerId = null;
     }
 
     let fwd = 0;

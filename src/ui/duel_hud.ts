@@ -1,18 +1,28 @@
-// Duel UI (Tier 1 A3, presentation only). Reads the local player's duel + pending challenge from
+// Duel UI (Tier 1, presentation only). Reads the local player's duel + pending challenge from
 // IWorld (localDuel / localDuelInvite — the server's authoritative state, mirrored over the
-// snapshot) and SENDS duel commands back. It never decides anything: accept / decline are intent
-// the sim validates; the CHALLENGE itself is sent by right-clicking a player (see game/input.ts).
+// snapshot) and SENDS duel commands back. It never decides anything: accept / decline / challenge
+// are intent the sim validates.
 //
-// Two pieces:
-//   • a top-centre BANNER while a duel is active ("⚔ Duelo — vs <opponent>");
-//   • a CHALLENGE popup (Aceitar / Recusar) when someone challenges you, mirroring the party-invite
-//     popup so the interaction is familiar.
+// Flow (A3 refinado): the player LEFT-CLICKS another player (the same raycast the mob-targeting
+// uses); Input tracks that selection CLIENT-SIDE (the sim's target is enemy-only — canAttack — so a
+// player can never be the sim target). While a player is selected, a floating "⚔ Duelar <nome>"
+// button shows over their head; clicking it sends the challenge and pops a "Desafio enviado" toast
+// (the challenger otherwise sees nothing — the Aceitar/Recusar popup lands on the OTHER player). The
+// challenge popup (challenged side) and the active-duel banner are unchanged from A3.
 import type { IWorld } from '../world_api';
+import type { Renderer } from '../render/renderer';
+
+const DUEL_BTN_Y = 3.1; // world height above the selected player's feet (above the MP name tag at 2.4)
+const TOAST_MS = 2500; // how long the "Desafio enviado" feedback stays up
 
 export class DuelHud {
   private banner: HTMLDivElement;
   private popup: HTMLDivElement;
   private popupText: HTMLDivElement;
+  private challengeBtn: HTMLButtonElement; // floating "Duelar" button over the selected player
+  private toast: HTMLDivElement; // transient "Desafio enviado para X" feedback for the challenger
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
+  private challengeName: string | null = null; // the selected player's name, read by the button's click
 
   constructor(private readonly world: IWorld) {
     injectStyle();
@@ -29,10 +39,21 @@ export class DuelHud {
     btns.append(accept, decline);
     this.popup.append(this.popupText, btns);
 
-    document.body.append(this.banner, this.popup);
+    // The floating challenge button reads the CURRENT selected name at click time (set each frame in
+    // update), so it can never send a stale target even as the selection changes under it.
+    this.challengeBtn = button('duel-challenge-btn', '⚔ Duelar', () => this.sendChallenge());
+    this.challengeBtn.style.display = 'none';
+
+    this.toast = el('duel-toast');
+    this.toast.style.display = 'none';
+
+    document.body.append(this.banner, this.popup, this.challengeBtn, this.toast);
   }
 
-  update(world: IWorld): void {
+  // `selectedPlayerId` is the OTHER player the local player left-click-selected (from Input — pure
+  // client/UI state, since the sim's target is enemy-only). `renderer` projects that player's head to
+  // screen so the button floats over them, exactly like the MP name tags.
+  update(world: IWorld, renderer: Renderer, selectedPlayerId: number | null): void {
     const duel = world.localDuel();
     const invite = world.localDuelInvite();
 
@@ -51,6 +72,43 @@ export class DuelHud {
     } else {
       this.popup.style.display = 'none';
     }
+
+    // Floating "Duelar" button over the selected player. Shows only for a present OTHER player while
+    // NOT already dueling; hides when the selection clears, the player leaves, or a duel begins.
+    const me = world.localPlayerId();
+    const target = selectedPlayerId != null && !duel
+      ? world.entities().find((e) => e.id === selectedPlayerId && e.kind === 'player' && e.id !== me)
+      : undefined;
+    if (!target) {
+      this.challengeBtn.style.display = 'none';
+      this.challengeName = null;
+      return;
+    }
+    this.challengeName = target.name; // the click handler challenges THIS name
+    const p = renderer.project(target.x, DUEL_BTN_Y, target.z);
+    if (!p.visible) {
+      this.challengeBtn.style.display = 'none'; // off-screen / behind the camera (name kept, so it returns)
+      return;
+    }
+    this.challengeBtn.textContent = `⚔ Duelar ${target.name}`;
+    this.challengeBtn.style.display = 'block';
+    this.challengeBtn.style.left = `${p.x}px`;
+    this.challengeBtn.style.top = `${p.y}px`;
+  }
+
+  // Send the challenge to the currently selected player and confirm it on-screen.
+  private sendChallenge(): void {
+    const name = this.challengeName;
+    if (!name) return;
+    this.world.sendCommand({ t: 'duel-challenge', name });
+    this.showToast(`Desafio enviado para ${name}`);
+  }
+
+  private showToast(text: string): void {
+    this.toast.textContent = text;
+    this.toast.style.display = 'block';
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => { this.toast.style.display = 'none'; }, TOAST_MS);
   }
 }
 
@@ -89,6 +147,19 @@ function injectStyle(): void {
       border-radius: 7px; cursor: pointer; }
     .duel-btn:hover { background: rgba(60,30,32,0.95); }
     .duel-btn.primary { color: #2a0c0e; background: #e2849a; border-color: #e2849a; }
+    /* Floating challenge button: anchored over the selected player's head (left/top = projected
+       point; the transform lifts it above and centers it, like the MP name tags). */
+    .duel-challenge-btn { position: fixed; z-index: 44; transform: translate(-50%, -100%);
+      display: none; padding: 5px 12px; font: 700 12px/1.1 system-ui, sans-serif; color: #2a0c0e;
+      background: #e2849a; border: 1px solid #e2849a; border-radius: 999px; cursor: pointer;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.5); pointer-events: auto; white-space: nowrap; }
+    .duel-challenge-btn:hover { background: #ec98ac; }
+    /* Challenger-side feedback toast (bottom-centre, clear of the top banners/popups). */
+    .duel-toast { position: fixed; left: 50%; bottom: 86px; transform: translateX(-50%); z-index: 44;
+      display: none; padding: 7px 16px; background: rgba(40,12,14,0.92);
+      border: 1px solid rgba(220,90,90,0.8); border-radius: 8px;
+      font: 700 13px/1.2 system-ui, sans-serif; color: #ffd0d0; text-shadow: 0 1px 2px #000;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.5); pointer-events: none; }
   `;
   document.head.appendChild(s);
 }
