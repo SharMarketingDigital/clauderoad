@@ -309,6 +309,11 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     expect(w.selfState(b).storage.stacks.length).toBe(0); // B's warehouse is independent (per-owner)
     // persists in the save (serialize round-trips the warehouse)
     expect(w.serializePlayer(a)!.storage).toEqual([{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 6 }]);
+    // and the WITHDRAW path is routed by the server whitelist too (round-trip back to the bag)
+    w.command(a, { t: 'withdraw', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    w.step();
+    expect(w.selfState(a).inventory.stacks.find((s) => s.itemId === 'health_potion')!.qty).toBe(6);
+    expect(w.selfState(a).storage.stacks.length).toBe(0);
   });
 });
 

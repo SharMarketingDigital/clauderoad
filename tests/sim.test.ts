@@ -3336,4 +3336,44 @@ describe('armazém (storage) — depósito/saque (comandos)', () => {
     };
     expect(runDep(2024)).toBe(runDep(2024));
   });
+
+  it('recusa depósito com armazém CHEIO pelo gate de comando (não-destrutivo)', () => {
+    const sim = new Sim(7);
+    // enche o armazém com STORAGE_SLOTS stacks DISTINTOS (mesma arma, rarity×plus variados)
+    // e põe um id NOVO (não casável) na bolsa.
+    const full: { itemId: string; rarity: string; plus: number; qty: number }[] = [];
+    for (const r of ['normal', 'sos', 'som', 'sun']) {
+      for (let p = 0; p <= MAX_PLUS && full.length < STORAGE_SLOTS; p++) {
+        full.push({ itemId: 'old_sword', rarity: r, plus: p, qty: 1 });
+      }
+    }
+    expect(full.length).toBe(STORAGE_SLOTS);
+    seed(sim, [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 1 }], full);
+    walkToWarehouse(sim);
+    expect(sim.storage().inRange).toBe(true);
+    sim.sendCommand({ t: 'deposit', itemId: 'health_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    // recusado: o stack novo fica na bolsa, o armazém segue cheio e NÃO ganhou o id novo
+    expect(holdsBag(sim, 'health_potion')).toBe(true);
+    expect(sim.storage().stacks.length).toBe(STORAGE_SLOTS);
+    expect(inStorage(sim, 'health_potion')).toBeUndefined();
+  });
+
+  it('o conteúdo do armazém entra no hash() (storage dobrado no fingerprint)', () => {
+    const withStore = new Sim(7);
+    seed(withStore, [], [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }]);
+    const empty = new Sim(7);
+    seed(empty, [], []);
+    // mesma seed e mesma bolsa (vazia); só o armazém difere. Se e.storage NÃO entrasse no hash(),
+    // os fingerprints seriam iguais — então a desigualdade prova o fold do storage no hash().
+    // (Obs.: mover bolsa<->armazém NÃO muda o hash — os dois folds são consecutivos — por isso
+    // o teste compara CONTEÚDO presente vs ausente, não depósito vs não-depósito.)
+    expect(withStore.hash()).not.toBe(empty.hash());
+    const h = (): string => {
+      const s = new Sim(7);
+      seed(s, [], [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }]);
+      return s.hash();
+    };
+    expect(h()).toBe(h()); // e segue determinístico run-vs-run
+  });
 });
