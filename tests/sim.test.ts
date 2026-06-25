@@ -2993,7 +2993,14 @@ describe('sim invariants (static guard)', () => {
     const files = Object.keys(sources);
     expect(files.length).toBeGreaterThan(0);
     const forbidden = [/\bMath\.random\b/, /\bDate\.now\b/, /\bperformance\.now\b/];
-    const forbiddenImport = /from\s+['"](three|\.\.\/(?:render|ui|game|net))/;
+    // Catch forbidden imports at ANY depth: src/sim/content/** must go ../../ to reach
+    // render/ui/game/net, which a single-`../` matcher missed. The trailing slash-or-quote keeps
+    // it precise — `../net'` and `../net/x` match, but `../network` and `../../world_api` (the
+    // allowed seam) do NOT.
+    const forbiddenImport = /from\s+['"](three|(?:\.\.\/)+(?:render|ui|game|net)(?:\/|['"]))/;
+    // Guard the guard: it must catch a 2-level-up violation and must not flag world_api.
+    expect(forbiddenImport.test("from '../../render/foo'")).toBe(true);
+    expect(forbiddenImport.test("from '../../world_api'")).toBe(false);
     for (const f of files) {
       const code = stripComments(sources[f]);
       for (const pat of forbidden) {
