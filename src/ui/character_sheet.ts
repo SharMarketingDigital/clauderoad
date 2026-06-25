@@ -129,7 +129,9 @@ function bar(label: string, cur: number, max: number, kind: 'hp' | 'mp' | 'xp'):
   track.className = kind;
   const fill = document.createElement('div');
   fill.className = `${kind}-fill`;
-  const pct = max > 0 ? Math.max(0, Math.min(1, cur / max)) : 0;
+  // Round cur for the fill width too (the readout text below already rounds), so a fractional
+  // vital can't desync the bar from the rebuild signature (which compares rounded values).
+  const pct = max > 0 ? Math.max(0, Math.min(1, Math.round(cur) / max)) : 0;
   fill.style.width = `${pct * 100}%`;
   const txt = document.createElement('span');
   txt.className = `${kind}-text`;
