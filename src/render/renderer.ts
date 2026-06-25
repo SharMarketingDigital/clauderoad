@@ -25,6 +25,13 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
+// O4 frustum cull: an actor whose generous bounding sphere is fully outside the camera frustum is
+// hidden — skipping its draw AND its shadow-map contribution. Sized large so a partly-off-screen
+// actor (a swing/weapon reaching in) is never wrongly hidden: oversize costs only a few edge draws,
+// undersize would pop a visible actor.
+const CULL_RADIUS = 6; // units — comfortably covers the tallest boss + reach + tier/boss scale
+const CULL_CENTER_Y = 1.5; // sphere centre above the mesh base (bodies sit on the ground, ~2-4 tall)
+
 // "Clipe do Commit" framing. IMPORTANT: a clip changes ONLY pitch + distance,
 // NEVER the camera yaw. `yaw` is the reference input.ts uses to map WASD to world
 // space, and it's what decides how world-space motion reads on screen — so rotating
@@ -71,6 +78,11 @@ export class Renderer {
   private lastInterpTick = -1;
   private alpha = 1; // interpolation fraction toward the current tick, refreshed each render()
   private _ip = { x: 0, z: 0, facing: 0 }; // scratch returned by interpPos() — use immediately, never store
+
+  // O4 — off-screen actor culling. Reused each frame; the sphere's centre is moved onto each mesh.
+  private cullFrustum = new THREE.Frustum();
+  private cullProj = new THREE.Matrix4();
+  private cullSphere = new THREE.Sphere(new THREE.Vector3(), CULL_RADIUS);
 
   // OTHER (remote) players' animated Knights — one loaded model, cloned per player.
   // Capsule is the fallback until the model loads. Read-only consumer of IWorld.
@@ -229,6 +241,7 @@ export class Renderer {
     this.env.update(dt, px, pz, terrainHeight(px, pz), serverWeather);
     for (const av of this.npcAvatars.values()) if (av.ready) av.update(dt); // keep each NPC's idle playing
     this.updateCamera(world);
+    this.cullOffscreen(); // O4: hide actors fully off-screen (skips their colour + shadow pass)
     this.gl.render(this.scene, this.camera);
   }
 
@@ -559,6 +572,22 @@ export class Renderer {
       pz + Math.cos(this.camYaw) * this.camDist * cy,
     );
     this.camera.lookAt(px, py + 1.2, pz);
+  }
+
+  // Hide entity meshes whose sphere is fully outside the view frustum, so off-screen actors cost
+  // nothing in the colour OR shadow pass. Runs after updateCamera() (so the frustum is THIS frame's)
+  // and before gl.render, using each mesh's already-interpolated position. The inner skinned meshes
+  // keep frustumCulled=false, so a VISIBLE actor is never self-culled mid-animation; we cull the
+  // whole group here instead, with a generous radius so a partly-on-screen actor stays drawn.
+  private cullOffscreen(): void {
+    this.camera.updateMatrixWorld();
+    this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+    this.cullProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.cullFrustum.setFromProjectionMatrix(this.cullProj);
+    for (const m of this.meshes.values()) {
+      this.cullSphere.center.set(m.position.x, m.position.y + CULL_CENTER_Y, m.position.z);
+      m.visible = this.cullFrustum.intersectsSphere(this.cullSphere);
+    }
   }
 
   private resize(): void {
