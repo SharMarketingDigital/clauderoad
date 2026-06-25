@@ -32,7 +32,7 @@ export class StoragePanel {
       <div class="storage-hint"></div>
       <div class="storage-dual">
         <div class="storage-col">
-          <div class="storage-col-title bag-title"></div>
+          <div class="storage-col-title storage-bag-title"></div>
           <div class="storage-grid bag-side"></div>
         </div>
         <div class="storage-col">
@@ -43,7 +43,9 @@ export class StoragePanel {
     `;
     document.body.appendChild(this.root);
     this.hint = this.root.querySelector('.storage-hint') as HTMLDivElement;
-    this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
+    // Dedicated hook (not the HUD's global `.bag-title`) so the storage title's styling can't
+    // hinge on CSS source order; `.storage-col-title` provides the look for both columns.
+    this.bagTitle = this.root.querySelector('.storage-bag-title') as HTMLDivElement;
     this.storeTitle = this.root.querySelector('.store-title') as HTMLDivElement;
     this.bagGrid = this.root.querySelector('.bag-side') as HTMLDivElement;
     this.storeGrid = this.root.querySelector('.store-side') as HTMLDivElement;
