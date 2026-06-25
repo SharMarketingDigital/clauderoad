@@ -208,7 +208,7 @@ html, body {
 }
 .bag-grid {
   display: grid;
-  grid-template-columns: repeat(5, var(--slot-size));
+  grid-template-columns: repeat(4, var(--slot-size)); /* 4x5: 4 colunas -> 5 linhas, alinham com os 5 slots de equip */
   gap: 8px;
 }
 .bag-slot {
@@ -286,15 +286,16 @@ html, body {
   display: grid;
   grid-template-columns: var(--slot-size) var(--viewport-w) var(--slot-size);
   gap: 8px;
-  align-items: center;
+  align-items: stretch; /* o viewport estica p/ a altura das colunas de equip (5 slots) -> #3 */
   justify-content: center;
   margin-bottom: 8px;
 }
 .equip-col { display: flex; flex-direction: column; gap: 8px; }
 .char-viewport {
   width: 100%;
-  aspect-ratio: 3 / 4;
+  height: 100%; /* altura adaptativa: do topo do 1º slot até o fundo do último (altura das colunas de equip) */
   min-width: 0;
+  min-height: 0;
   background: radial-gradient(circle at 50% 35%, #1b2230 0%, #0e1219 70%);
   border: 1px solid #2c3645;
   border-radius: 6px;
@@ -357,8 +358,9 @@ html, body {
   .char-cols { flex-direction: column; align-items: center; }
 }
 @media (max-width: 640px) {
-  .char-screen { grid-template-columns: 1fr; }
-  .char-viewport { width: min(240px, 70vw); margin: 0 auto; }
+  .char-screen { grid-template-columns: 1fr; align-items: center; }
+  /* empilhado: sem coluna de equip ao lado p/ ditar a altura -> volta a uma proporção fixa */
+  .char-viewport { width: min(240px, 70vw); height: auto; aspect-ratio: 3 / 4; margin: 0 auto; }
 }
 
 /* Drag-and-drop: estados de alvo de soltar. Vêm DEPOIS das regras de raridade, então ganham o
@@ -379,6 +381,8 @@ html, body {
 }
 .equip-tile.drop-dim { opacity: 0.32; }
 .bag-grid.drop-ok { outline: 2px solid #6bff8a; outline-offset: 3px; border-radius: 6px; }
+/* a célula da bolsa exata onde o item vai cair (pista de posicionamento durante o arrasto). */
+.bag-slot.drop-hover { outline: 2px solid #6bff8a; outline-offset: 1px; }
 .dragging-src { opacity: 0.4; }
 .dnd-ghost {
   position: fixed;

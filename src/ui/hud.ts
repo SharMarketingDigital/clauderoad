@@ -17,7 +17,7 @@ const EQUIP_LAYOUT: { col: 'left' | 'right'; slots: EquipSlot[] }[] = [
 
 // What a drag is carrying, resolved from the latest inventory snapshot at drag start.
 type DragInfo =
-  | { kind: 'bag'; index: number; targetSlot: EquipSlot } // a bag stack -> its equip square
+  | { kind: 'bag'; index: number; targetSlot: EquipSlot | null; key: string } // bag stack; key = item identity at drag start; targetSlot set only if it can equip
   | { kind: 'equip'; slot: EquipSlot }; // an equipped item -> back to the bag
 import { CharacterSheet } from './character_sheet';
 import { StoragePanel } from './storage';
@@ -53,6 +53,8 @@ export class Hud {
   private dragGhost: HTMLElement | null = null; // floating clone that follows the cursor
   private dragFrom: HTMLElement | null = null; // the slot/tile the drag started on
   private justDragged = false; // suppress the click that can trail a drag's pointerup
+  private hoverCell: HTMLElement | null = null; // bag cell currently under the drag (live placement cue)
+  private dragInfo: DragInfo | null = null; // the active drag's info (kind/target), for the hover cue
   private bagStats: HTMLDivElement;
   // attribute spending (inside the bag window)
   private attrPointsEl: HTMLSpanElement;
@@ -540,7 +542,7 @@ export class Hud {
     this.bagTitle.textContent = `Inventário (${inv.stacks.length}/${inv.capacity})`;
     for (let i = 0; i < this.bagSlots.length; i++) {
       const slot = this.bagSlots[i];
-      const stack = inv.stacks[i];
+      const stack = inv.slots[i]; // positional: grid cell i shows the item AT bag slot i (or empty)
       if (stack) {
         slot.classList.add('filled');
         // K2 degrees: a below-level equippable is LOCKED — no equip affordance, and the click
@@ -578,7 +580,7 @@ export class Hud {
   // No-op for anything else (materials, etc.).
   private onBagClick(i: number): void {
     if (this.justDragged) return; // ignore the click that can trail a drag
-    const stack = this.lastInv?.stacks[i];
+    const stack = this.lastInv?.slots[i]; // positional: act on the item at grid slot i
     if (!stack || !this.world) return;
     if (stack.equipSlot) {
       if (stack.canEquip === false) return; // K2: below required level — dead click (the sim would refuse it)
@@ -699,9 +701,12 @@ export class Hud {
   private dragInfoFor(el: HTMLElement): DragInfo | null {
     if (el.classList.contains('bag-slot')) {
       const idx = Number(el.dataset.index);
-      const st = this.lastInv?.stacks[idx];
-      if (!st || !st.equipSlot || st.canEquip === false) return null; // empty / não-gear / abaixo do nível
-      return { kind: 'bag', index: idx, targetSlot: st.equipSlot };
+      if (!Number.isInteger(idx)) return null;
+      const st = this.lastInv?.slots[idx];
+      if (!st) return null; // empty slot -> nothing to drag
+      // ANY held item can be repositioned in the bag; targetSlot is set only if it can ALSO equip.
+      const targetSlot = st.equipSlot && st.canEquip !== false ? st.equipSlot : null;
+      return { kind: 'bag', index: idx, targetSlot, key: `${st.itemId}|${st.rarity}|${st.plus}` };
     }
     if (el.classList.contains('equip-tile')) {
       const slot = el.dataset.slot as EquipSlot | undefined;
@@ -719,6 +724,7 @@ export class Hud {
     if (!info) { ev.interaction.stop(); return; } // vazio / não arrastável -> cancela o gesto
     this.dragging = true;
     this.dragFrom = el;
+    this.dragInfo = info;
     const ghost = el.cloneNode(true) as HTMLElement;
     ghost.className = `${el.className} dnd-ghost`;
     ghost.classList.remove('dragging-src');
@@ -733,6 +739,19 @@ export class Hud {
 
   private onDragMove(ev: any): void {
     this.positionGhost(ev.clientX, ev.clientY);
+    // Live placement cue: highlight the bag cell the item would land in (positional drop).
+    let cell = (document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.bag-slot') ?? null) as HTMLElement | null;
+    // Honest cue: dragging EQUIPPED gear into the bag lands EXACTLY only on an EMPTY cell (an
+    // occupied cell falls back to the first free hole), so don't green-highlight occupied cells.
+    if (cell && this.dragInfo?.kind === 'equip') {
+      const to = Number(cell.dataset.index);
+      if (!(Number.isInteger(to) && this.lastInv?.slots[to] == null)) cell = null;
+    }
+    if (cell !== this.hoverCell) {
+      this.hoverCell?.classList.remove('drop-hover');
+      this.hoverCell = cell;
+      cell?.classList.add('drop-hover');
+    }
   }
 
   private onDragEnd(ev: any): void {
@@ -757,40 +776,68 @@ export class Hud {
     if (!info || !this.world) return;
     const inv = this.world.inventory();
     if (info.kind === 'bag') {
+      // Guard the (rare) case where the grabbed slot's contents changed mid-drag (e.g. the bot
+      // sold/used it while the panel was open): only act if the SAME item is still there.
+      // Positional loot fills holes (never shifts), so a normal drag is always safe.
+      const cur = inv.slots[info.index];
+      if (!cur || `${cur.itemId}|${cur.rarity}|${cur.plus}` !== info.key) return;
+      // (a) onto a COMPATIBLE equip square -> equip
       const sq = target?.closest('.equip-tile') as HTMLElement | null;
-      if (!sq) return; // solto fora de uma quadrícula de equip -> volta em silêncio
-      const slot = sq.dataset.slot as EquipSlot | undefined;
-      if (!slot || slot !== info.targetSlot) { this.announceDnd('Esse item não vai nesse espaço'); return; }
-      const st = inv.stacks[info.index];
-      if (!st || st.equipSlot !== slot || st.canEquip === false) return;
-      this.world.sendCommand({ t: 'equip', itemId: st.itemId, rarity: st.rarity, plus: st.plus });
-      this.announceDnd(`Equipado: ${st.name}`);
+      if (sq) {
+        const slot = sq.dataset.slot as EquipSlot | undefined;
+        if (slot && slot === info.targetSlot && cur.equipSlot === slot && cur.canEquip !== false) {
+          this.world.sendCommand({ t: 'equip', itemId: cur.itemId, rarity: cur.rarity, plus: cur.plus });
+          this.announceDnd(`Equipado: ${cur.name}`);
+        } else {
+          this.announceDnd('Esse item não vai nesse espaço');
+        }
+        return;
+      }
+      // (b) onto ANOTHER bag cell -> reposition (swap/move) to EXACTLY that slot (no auto-organize)
+      const cell = target?.closest('.bag-slot') as HTMLElement | null;
+      if (cell) {
+        const to = Number(cell.dataset.index);
+        if (Number.isInteger(to) && to >= 0 && to < inv.capacity && to !== info.index) {
+          this.world.sendCommand({ t: 'move-item', from: info.index, to });
+        }
+      }
       return;
     }
-    // equip -> bolsa (desequipar): o drop tem de cair na coluna do inventário.
-    if (!target?.closest('.col-inv')) { this.announceDnd('Solte na bolsa para desequipar'); return; }
-    const eq = inv.equipment.find((e) => e.slot === info.slot);
-    if (!eq || !eq.itemId) return;
-    this.world.sendCommand({ t: 'unequip', slot: info.slot });
-    this.announceDnd(`Desequipado: ${eq.name ?? ''}`);
+    // (c) equipped item -> dropped on a SPECIFIC bag cell: unequip exactly there (the sim places it
+    // at that slot if empty, else the first free hole); on the column generally -> first free hole.
+    const cell = target?.closest('.bag-slot') as HTMLElement | null;
+    if (cell) {
+      const to = Number(cell.dataset.index);
+      const toBagSlot = Number.isInteger(to) && to >= 0 && to < inv.capacity ? to : undefined;
+      this.world.sendCommand({ t: 'unequip', slot: info.slot, toBagSlot });
+      this.announceDnd('Desequipado');
+      return;
+    }
+    if (target?.closest('.col-inv')) {
+      this.world.sendCommand({ t: 'unequip', slot: info.slot });
+      this.announceDnd('Desequipado');
+    }
   }
 
   // Mark valid drop targets at drag start (non-color cue via .drop-ok/.drop-dim in CSS).
   private highlightTargets(info: DragInfo): void {
     if (info.kind === 'bag') {
       for (const tile of this.equipCells) {
-        const ok = (tile.dataset.slot as EquipSlot) === info.targetSlot;
+        const ok = info.targetSlot != null && (tile.dataset.slot as EquipSlot) === info.targetSlot;
         tile.classList.toggle('drop-ok', ok);
-        tile.classList.toggle('drop-dim', !ok);
+        tile.classList.toggle('drop-dim', !ok); // equip squares that can't take this item dim out
       }
     } else {
-      this.bagGrid.classList.add('drop-ok'); // qualquer ponto da bolsa serve para desequipar
+      this.bagGrid.classList.add('drop-ok'); // dragging equipped gear -> the whole bag accepts it
     }
   }
 
   private highlightAllOff(): void {
     for (const tile of this.equipCells) tile.classList.remove('drop-ok', 'drop-dim');
     this.bagGrid.classList.remove('drop-ok');
+    this.hoverCell?.classList.remove('drop-hover'); // also clears the live placement cue
+    this.hoverCell = null;
+    this.dragInfo = null;
   }
 
   private positionGhost(x: number, y: number): void {

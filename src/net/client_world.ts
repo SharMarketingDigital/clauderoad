@@ -253,7 +253,7 @@ function mergeSelf(v: EntityView, s: SelfSnap): EntityView {
 }
 
 const EMPTY_ABILITIES: ReadonlyArray<AbilityView> = [];
-const EMPTY_INVENTORY: InventoryView = { capacity: 0, stacks: [], equipment: [] };
+const EMPTY_INVENTORY: InventoryView = { capacity: 0, stacks: [], slots: [], equipment: [] };
 const EMPTY_SHOP: ShopView = { name: '', stock: [], inRange: false };
 const EMPTY_STORAGE: StorageView = { name: '', capacity: 0, stacks: [], inRange: false }; // capacity 0 like EMPTY_INVENTORY; the panel reads capacity per-update
 

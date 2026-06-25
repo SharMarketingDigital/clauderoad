@@ -85,9 +85,12 @@ export interface Entity {
   skillRanks: Record<string, number>; // ability id -> current rank (absent = rank 1)
   // economy & inventory (player; enemies carry 0 / empty)
   gold: number;
-  bag: ItemStack[];
+  // SPARSE/positional: fixed-length grid (length = BAG_SLOTS for players), holes are null so an
+  // item stays at the slot the player dragged it to (loot refills the lowest hole in F-order).
+  bag: (ItemStack | null)[];
   // K5: armazém/banco persistente do jogador (itens guardados na cidade). Vazio p/ inimigos/NPCs.
-  storage: ItemStack[];
+  // Mesmo modelo esparso da bag (holes = null); a view filtra os holes.
+  storage: (ItemStack | null)[];
   equipment: Record<EquipSlot, EquippedItem | null>; // slot -> equipped item
   // a world boss (special enemy): much more HP, boss loot, distinct visuals,
   // and a separate spawn/respawn timer.

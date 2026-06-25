@@ -103,7 +103,17 @@ export class ServerWorld {
         }
         return;
       case 'unequip':
-        if (VALID_SLOTS.has(cmd.slot)) this.sim.sendCommandFor(id, { t: 'unequip', slot: cmd.slot });
+        if (VALID_SLOTS.has(cmd.slot)) {
+          // optional drag target slot; the sim re-validates bounds + that the slot is empty
+          const toBagSlot = typeof cmd.toBagSlot === 'number' && Number.isInteger(cmd.toBagSlot) ? cmd.toBagSlot : undefined;
+          this.sim.sendCommandFor(id, { t: 'unequip', slot: cmd.slot, toBagSlot });
+        }
+        return;
+      case 'move-item':
+        // positional bag rearrange; the sim re-validates the indices + a non-empty source
+        if (Number.isInteger(cmd.from) && Number.isInteger(cmd.to)) {
+          this.sim.sendCommandFor(id, { t: 'move-item', from: cmd.from, to: cmd.to });
+        }
         return;
       case 'enhance':
         if (VALID_SLOTS.has(cmd.slot) && typeof cmd.useLuckyPowder === 'boolean'

@@ -28,9 +28,9 @@ export interface PlayerSave {
   sp: number;
   skillRanks: Record<string, number>;
   gold: number;
-  bag: ItemStack[];
+  bag: (ItemStack | null)[]; // SPARSE/positional (holes = null); trailing nulls trimmed on save
   equipment: Record<EquipSlot, EquippedItem | null>;
-  storage: ItemStack[]; // K5: armazém/banco da cidade (mesma forma da bag)
+  storage: (ItemStack | null)[]; // K5: armazém/banco da cidade (mesmo modelo esparso da bag)
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -52,10 +52,12 @@ export function toSave(e: Entity): PlayerSave {
     sp: e.sp,
     skillRanks: { ...e.skillRanks },
     gold: e.gold,
-    bag: e.bag.map((s) => ({ itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty })),
-    equipment,
+    // SPARSE bags: preserve each item's POSITION (holes = null), trimming trailing nulls so an
+    // empty bag round-trips to [] and a packed bag to a plain list (back-compat with old saves).
     // map por-campo (NÃO spread) p/ preservar o deep-copy: nunca aliasa os stacks da entidade.
-    storage: e.storage.map((s) => ({ itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty })),
+    bag: trimTrailingNulls(e.bag.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
+    equipment,
+    storage: trimTrailingNulls(e.storage.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
   };
 }
 
@@ -74,8 +76,8 @@ export function applySave(e: Entity, raw: unknown): void {
   if (isInt(raw.sp) && raw.sp >= 0) e.sp = raw.sp;
   if (isNum(raw.gold) && raw.gold >= 0) e.gold = Math.floor(raw.gold);
   e.skillRanks = sanitizeRanks(raw.skillRanks);
-  e.bag = sanitizeStacks(raw.bag, BAG_SLOTS);
-  e.storage = sanitizeStacks(raw.storage, STORAGE_SLOTS); // ausente => [] (back-compat de saves antigos)
+  e.bag = sanitizeBag(raw.bag, BAG_SLOTS);
+  e.storage = sanitizeBag(raw.storage, STORAGE_SLOTS); // ausente => holes (back-compat de saves antigos)
   const eq = sanitizeEquipment(raw.equipment);
   for (const slot of EQUIP_SLOTS) e.equipment[slot] = eq[slot];
 }
@@ -107,15 +109,24 @@ function sanitizeRanks(raw: unknown): Record<string, number> {
   return out;
 }
 
-function sanitizeStacks(raw: unknown, maxSlots: number): ItemStack[] {
-  if (!Array.isArray(raw)) return [];
-  const out: ItemStack[] = [];
-  for (const item of raw) {
-    const st = sanitizeStack(item);
-    if (st) out.push(st);
-    if (out.length >= maxSlots) break; // never exceed the container capacity
+// Place each validated stack at its INPUT INDEX into a fixed-length sparse array (holes = null),
+// preserving drag-placed positions. Handles BOTH old compact saves (items packed at 0..n-1) and
+// new sparse saves (with nulls) uniformly. Missing/invalid/out-of-range entries become holes.
+function sanitizeBag(raw: unknown, maxSlots: number): (ItemStack | null)[] {
+  const out: (ItemStack | null)[] = new Array(maxSlots).fill(null);
+  if (!Array.isArray(raw)) return out;
+  for (let i = 0; i < raw.length && i < maxSlots; i++) {
+    out[i] = sanitizeStack(raw[i]); // null when the entry is missing/invalid
   }
   return out;
+}
+
+// Drop trailing nulls so an empty bag serializes to [] and a packed bag to a plain list (keeps the
+// save compact + back-compatible while still preserving interior holes / item positions).
+function trimTrailingNulls<T>(arr: (T | null)[]): (T | null)[] {
+  let end = arr.length;
+  while (end > 0 && arr[end - 1] == null) end--;
+  return arr.slice(0, end);
 }
 function sanitizeStack(raw: unknown): ItemStack | null {
   if (!isObj(raw)) return null;

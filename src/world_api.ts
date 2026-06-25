@@ -139,7 +139,12 @@ export interface EquipView {
 // The player's bag + equipped slots, for the inventory window.
 export interface InventoryView {
   readonly capacity: number;
+  // DENSE list of the held stacks (no holes) — convenient for counts, the vendor sell list, and
+  // the warehouse transfer list. `stacks.length` is the number of items held.
   readonly stacks: ReadonlyArray<ItemStackView>;
+  // POSITIONAL view of the bag grid: length === capacity, with `null` for empty slots. `slots[i]`
+  // is exactly what sits in grid cell `i`, so the inventory panel renders/drag-drops by position.
+  readonly slots: ReadonlyArray<ItemStackView | null>;
   readonly equipment: ReadonlyArray<EquipView>;
 }
 
@@ -222,7 +227,8 @@ export type Command =
   | { t: 'set-target'; id: number | null } // click a specific entity (null clears)
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
-  | { t: 'unequip'; slot: EquipSlot } // move an equipped item back to the bag
+  | { t: 'unequip'; slot: EquipSlot; toBagSlot?: number } // move an equipped item back to the bag (optionally to a SPECIFIC bag slot index — drag placement)
+  | { t: 'move-item'; from: number; to: number } // rearrange the bag: swap/move the stacks at two slot indices (positional inventory)
   | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
   | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
