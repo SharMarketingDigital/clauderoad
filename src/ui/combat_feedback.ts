@@ -43,6 +43,11 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
       } else if (ev.kind === 'enhance-fail') {
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
         if (p.visible) combatText.spawn(p.x, p.y, `Falhou (+${ev.amount})`, 'fail');
+      } else if (ev.kind === 'enhance-break') {
+        // K4: a high-"+" failure destroyed the item. Distinct destructive feedback.
+        renderer.flash(ev.targetId);
+        const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
+        if (p.visible) combatText.spawn(p.x, p.y, 'QUEBROU!', 'fail');
       } else if (ev.kind === 'heal') {
         renderer.flash(ev.targetId);
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);

@@ -9,6 +9,7 @@
 // and offline because it's literally the same simulation.
 import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
+import { EQUIP_SLOTS } from '../src/sim/inventory';
 import type { Command, PartyView, EntityView } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
 import type { PlayerSave } from '../src/sim/save';
@@ -105,8 +106,13 @@ export class ServerWorld {
         if (VALID_SLOTS.has(cmd.slot)) this.sim.sendCommandFor(id, { t: 'unequip', slot: cmd.slot });
         return;
       case 'enhance':
-        if (VALID_SLOTS.has(cmd.slot) && typeof cmd.useLuckyPowder === 'boolean') {
-          this.sim.sendCommandFor(id, { t: 'enhance', slot: cmd.slot, useLuckyPowder: cmd.useLuckyPowder });
+        if (VALID_SLOTS.has(cmd.slot) && typeof cmd.useLuckyPowder === 'boolean'
+          && (cmd.useProtection === undefined || typeof cmd.useProtection === 'boolean')) {
+          // K4: forward useProtection too — dropping it would silently disable protection
+          // online (the K1 whitelist bug). The sim re-validates that a stone is held.
+          this.sim.sendCommandFor(id, {
+            t: 'enhance', slot: cmd.slot, useLuckyPowder: cmd.useLuckyPowder, useProtection: cmd.useProtection,
+          });
         }
         return;
       case 'repair':
@@ -132,6 +138,18 @@ export class ServerWorld {
         // (unarmed) character, so this can't be abused to re-roll an equipped weapon.
         if (typeof cmd.classId === 'string' && cmd.classId.length > 0 && cmd.classId.length <= 32) {
           this.sim.sendCommandFor(id, { t: 'select-class', classId: cmd.classId });
+        }
+        return;
+      // K5: warehouse deposit/withdraw — mirror sell's wire validation (without the explicit
+      // case here the default branch silently drops these online — the K1 whitelist lesson).
+      case 'deposit':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
+      case 'withdraw':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
         }
         return;
       // --- Layer 4: auto-play (each player toggles ITS OWN bot) ---
@@ -310,6 +328,7 @@ export class ServerWorld {
     const abilities = [...this.sim.abilitiesFor(id)];
     const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
+    const storage = this.sim.storageFor(id); // K5: the player's warehouse view (inRange too)
     const e = this.sim.entities().find((v) => v.id === id);
     // Party state is the same for either branch (it survives a dead/missing entity view).
     const party = this.sim.partyViewFor(id);
@@ -323,7 +342,8 @@ export class ServerWorld {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
-        botActive: false, abilities, inventory, shop, party, invite,
+        phyDef: 0, magDef: 0,
+        botActive: false, abilities, inventory, shop, storage, party, invite,
         matching, partyRequests, myRequestPartyId,
       };
     }
@@ -333,8 +353,9 @@ export class ServerWorld {
       level: e.level, xp: e.xp, xpToNext: e.xpToNext, attrPoints: e.attrPoints,
       gold: e.gold, sp: e.sp, str: e.str, int: e.int,
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
+      phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
-      abilities, inventory, shop, party, invite,
+      abilities, inventory, shop, storage, party, invite,
       matching, partyRequests, myRequestPartyId,
     };
   }
@@ -394,7 +415,10 @@ export class ServerWorld {
   }
 }
 
-const VALID_SLOTS: ReadonlySet<string> = new Set(['weapon', 'armor']);
+// Derived from the single EQUIP_SLOTS source (the full Silkroad set), so the server's
+// input whitelist accepts every equip slot the sim knows — never a hand-written subset
+// that silently drops 9 of 10 slots online (K1: was {'weapon','armor'}).
+const VALID_SLOTS: ReadonlySet<string> = new Set(EQUIP_SLOTS);
 const VALID_RARITIES: ReadonlySet<string> = new Set(['normal', 'sos', 'som', 'sun']);
 const PARTY_EXP: ReadonlySet<string> = new Set(['each-get', 'auto-share']);
 const PARTY_LOOT: ReadonlySet<string> = new Set(['distribution', 'auto-share']);

@@ -225,6 +225,9 @@ html, body {
 .bag-slot.equippable:hover { border-color: #fff; }
 .bag-slot.usable { cursor: pointer; }
 .bag-slot.usable:hover { border-color: #6bff8a; } /* green: "drink me" */
+/* K2 degrees: gear the player can't equip yet (below its required level) — dimmed, no-go cursor. */
+.bag-slot.locked { cursor: not-allowed; opacity: 0.5; }
+.bag-slot.locked:hover { border-color: #ff6b6b; } /* red: requires a higher level */
 
 /* Rarity colors (placed AFTER .filled so they win the equal-specificity tie).
    Normal gray · SOS blue · SOM purple · SUN gold (with a glow). */
@@ -236,6 +239,34 @@ html, body {
   color: #ffe9a8;
   box-shadow: 0 0 7px rgba(242, 196, 74, 0.7);
 }
+
+/* K5 — Painel do Armazém (banco). Container largo p/ duas grades lado a lado; as células
+   reusam .bag-slot (tamanho, borda, cores de raridade). */
+.storage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 680px;
+  max-width: 94vw;
+  padding: 12px;
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+.storage[hidden] { display: none; }
+.storage-titlebar { font-weight: 700; font-size: 14px; color: var(--gold); text-align: center; }
+.storage-hint { font-size: 11px; color: var(--ink); text-align: center; margin: 4px 0 10px; opacity: 0.85; }
+.storage-dual { display: flex; gap: 16px; }
+.storage-col { flex: 1; min-width: 0; }
+.storage-col-title { font-size: 11px; font-weight: 600; color: var(--gold); margin-bottom: 6px; text-align: center; }
+.storage-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-height: 46vh; overflow-y: auto; }
+/* clicável quando perto do armazém; esmaecido + inerte quando longe (storage().inRange === false) */
+.storage .bag-slot.filled:not(.disabled) { cursor: pointer; }
+.storage .bag-slot.filled:not(.disabled):hover { border-color: #fff; }
+.storage .bag-slot.disabled { opacity: 0.5; cursor: default; }
 
 /* Equipped-slots row inside the bag window. */
 .equip-row {
@@ -287,6 +318,7 @@ html, body {
 }
 .refine-row { display: flex; gap: 6px; }
 .lucky-toggle,
+.protect-toggle,
 .refine-btn {
   flex: 1;
   padding: 5px 6px;
@@ -301,6 +333,10 @@ html, body {
 .lucky-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
 .refine-btn:hover:not(:disabled) { background: #26344a; }
 .refine-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+.protect-toggle.on { background: #1c2f3a; border-color: #4a9fd1; color: #b0e6f5; }
+/* K4 alchemy risk tiers on a refine button (the label already states the danger; color reinforces). */
+.refine-btn[data-risk="danger"] { background: #3a1c1c; border-color: #d14a4a; color: #f5b0b0; }
+.refine-btn[data-risk="protected"] { border-color: #4a9fd1; color: #b0e6f5; }
 .mat-line { font-size: 10px; color: #9fd0ff; text-align: center; }
 
 /* Attribute spending row (inside the bag): points + the two "+" buttons. */
@@ -545,3 +581,67 @@ html, body {
   35%  { transform: translate(-50%, -22px) scale(1); opacity: 1; }
   100% { transform: translate(-50%, -54px) scale(1); opacity: 0; }
 }
+
+/* K6 — Character sheet ("ficha"): a dedicated, READ-ONLY stats panel (toggle C). Anchored
+   left-center so it doesn't overlap the centered .bag/.skills modals. */
+.sheet {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 300px;
+  padding: 12px 14px;
+  pointer-events: auto; /* HUD root is pointer-events:none; opt back in (also blocks click-through) */
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink);
+}
+.sheet[hidden] { display: none; } /* the [hidden] attribute must beat display:flex */
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(200, 168, 90, 0.4);
+}
+.sheet-portrait { font-size: 18px; color: var(--gold); }
+.sheet-name { font-weight: 700; font-size: 14px; letter-spacing: 0.02em; }
+.sheet-level { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--gold); }
+.sheet-body { display: flex; flex-direction: column; gap: 4px; }
+.sheet-section {
+  margin-top: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.sheet-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; }
+.sheet-label { opacity: 0.85; }
+.sheet-val { font-weight: 600; }
+.sheet-barrow {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+/* The reused .hp/.mp/.xp tracks carry a small top margin from the unit-frame context — drop it
+   here so they sit centered in the row. */
+.sheet-barrow .hp,
+.sheet-barrow .mp,
+.sheet-barrow .xp { margin-top: 0; }
+
+/* T1.1: inventory/skills/character panels are centered modals that must sit ABOVE the gameplay
+   overlays (map .wm=45, party .pm=44, party-popup=43, chat=42, mp-* 39-41) and BELOW the recorder
+   UI (dock=60, clip=70). `.bag`/`.skills` are reparented to <body> in hud.ts so this z-index
+   competes in the root stacking context (it can't escape `.hud`'s position:fixed context). */
+.bag,
+.skills,
+.storage,
+.sheet { z-index: 50; }
