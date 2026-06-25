@@ -49,6 +49,7 @@ html, body {
   background: #1c2530;
   border: 1px solid var(--gold);
   border-radius: 4px;
+  overflow: hidden; /* clip the 3D head badge to the rounded portrait box */
 }
 
 .bars { flex: 1; }
@@ -199,13 +200,9 @@ html, body {
   backdrop-filter: blur(4px);
 }
 .bag[hidden] { display: none; }
-.bag-title {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--gold);
-  margin-bottom: 10px;
-  text-align: center;
-}
+/* (legacy .bag-title rule removed: the Inventário header is a .char-col-title now. Its old
+   margin-bottom:10px pushed the bag grid 10px BELOW the equip squares — breaking the alignment
+   the user asked for. The `bag-title` class stays only as a JS query hook, with no styles.) */
 .bag-grid {
   display: grid;
   grid-template-columns: repeat(4, var(--slot-size)); /* 4x5: 4 colunas -> 5 linhas, alinham com os 5 slots de equip */

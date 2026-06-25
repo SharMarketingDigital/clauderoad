@@ -6,6 +6,7 @@
 //
 // Note: performance.now() / Date.now() / Math.random() are fine HERE (the host). They
 // are forbidden only inside src/sim/, which must stay deterministic.
+import './render/model_cache'; // enable THREE.Cache at startup -> each player-model file downloads ONCE (proxy)
 import { Sim, DT } from './sim/sim';
 import { Renderer } from './render/renderer';
 import { Input } from './game/input';

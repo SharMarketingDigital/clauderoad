@@ -64,8 +64,9 @@ export class Hud {
   private equipColRight: HTMLDivElement;
   private charViewport: HTMLDivElement;
   private charDetail: HTMLDivElement;
-  private charViewer: CharacterViewer;
-  private lastMastery: MasteryId = 'sword'; // last-known local class, for the 3D viewer
+  private charViewer: CharacterViewer; // inventory paper-doll (full body)
+  private headViewer: CharacterViewer; // unit-frame badge (the SAME component, head-framed)
+  private lastMastery: MasteryId = 'sword'; // last-known local class, shared by both viewers
   private equipCells: HTMLButtonElement[] = []; // paper-doll equip tiles (one per slot, fixed order)
   // alchemy ("+N") controls inside the bag window
   private refineRow: HTMLDivElement;
@@ -116,7 +117,7 @@ export class Hud {
     this.root.className = 'hud';
     this.root.innerHTML = `
       <div class="unit-frame">
-        <div class="portrait">&#9733;</div>
+        <div class="portrait"></div>
         <div class="bars">
           <span class="name player-name"></span><span class="level"></span>
           <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
@@ -225,8 +226,15 @@ export class Hud {
     this.equipColRight = this.root.querySelector('.equip-col-right') as HTMLDivElement;
     this.charViewport = this.root.querySelector('.char-viewport') as HTMLDivElement;
     this.charDetail = this.root.querySelector('.char-detail') as HTMLDivElement;
-    this.charViewer = new CharacterViewer(); // 3D paper-doll (reuses the world's PlayerAvatar)
+    this.charViewer = new CharacterViewer(); // 3D paper-doll (full body), reuses PlayerAvatar
     this.charViewport.appendChild(this.charViewer.canvas);
+    // Head badge in the top-left unit frame: the SAME viewer component, head-framed, replacing the
+    // ★ glyph. THREE.Cache (enabled at startup) means its model files are already downloaded by the
+    // world/inventory — only this context re-uploads them (an unavoidable per-canvas WebGL cost).
+    const portrait = this.root.querySelector('.portrait:not(.portrait-target)') as HTMLDivElement;
+    this.headViewer = new CharacterViewer({ framing: 'head', rotatable: false });
+    portrait.appendChild(this.headViewer.canvas);
+    this.headViewer.setActive(true); // always-on: the unit frame is always visible
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
     this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
     this.matLine = this.root.querySelector('.mat-line') as HTMLDivElement;
@@ -312,14 +320,17 @@ export class Hud {
     this.botToggleBtn.classList.toggle('on', bot);
     this.botIndicator.hidden = !bot;
 
-    // Paper-doll: drive the 3D viewer every frame the panel is open, BEFORE the early-returns below
-    // — a momentary missing player entity (death/respawn window) must not freeze it or stale its dt.
-    if (this.bagOpen) {
-      const lid = world.localPlayerId();
-      const me = lid != null ? world.entities().find((e) => e.id === lid) : undefined;
-      if (me) this.lastMastery = me.mastery;
-      this.charViewer.tick(this.lastMastery);
+    // 3D viewers, driven BEFORE the early-returns below (a momentary missing player entity during
+    // the death/respawn window must not freeze them or stale their dt). The head badge renders
+    // EVERY frame (the unit frame is always visible); the inventory paper-doll only while open.
+    // Both share the local player's class (mastery), kept current even while the bag is closed.
+    const lid = world.localPlayerId();
+    const me = lid != null ? world.entities().find((e) => e.id === lid) : undefined;
+    if (me) {
+      this.lastMastery = me.mastery;
+      this.headViewer.tick(this.lastMastery); // cheap 44px idle; skipped only before the player exists
     }
+    if (this.bagOpen) this.charViewer.tick(this.lastMastery);
 
     const id = world.localPlayerId();
     if (id == null) return;
