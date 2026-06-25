@@ -985,13 +985,31 @@ export class Sim implements IWorld {
 
   // ---------- combat (melee auto-attack) ----------
   // When the player has a living target that is in range and in front, land a
+  // The single PvP-eligibility chokepoint: may `attacker` damage/target `target`? Today only living
+  // enemies are valid (the game is 100% PvE), so this returns exactly what the scattered
+  // `kind === 'enemy'` guards did — A0 is byte-identical. Later slices OR duel-pair / guild-war
+  // membership in here, so every attack/target path shares one rule. The self-exclusion
+  // (target.id !== attacker.id) is always true today (an enemy is never the attacking player) and
+  // becomes load-bearing once players can target players.
+  private canAttack(attacker: Entity, target: Entity): boolean {
+    return target.kind === 'enemy' && target.hp > 0 && target.id !== attacker.id;
+  }
+
+  // Routes a landed hit to the right apply-function. Today every player-initiated hit reaches an
+  // enemy (canAttack only allows enemies), so this always calls hitEnemy — byte-identical. The PvP
+  // slice extends it to route a player target to hitPlayer; the damage call sites go through this
+  // seam now so that change stays isolated.
+  private hitTarget(t: Entity, hit: Damage, attacker: Entity): void {
+    this.hitEnemy(t, hit, attacker);
+  }
+
   // swing every `swingTicks`. The timer is preserved while out of range, so a
   // ready swing fires the moment the target comes back into reach.
   private autoAttack(p: Entity): void {
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // no swinging while downed or stunned
     if (p.targetId == null || p.swingTicks <= 0) return;
     const t = this.ents.get(p.targetId);
-    if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // validateTarget clears it
+    if (!t || !this.canAttack(p, t)) return; // validateTarget clears it
     const dx = t.x - p.x;
     const dz = t.z - p.z;
     const dist = Math.hypot(dx, dz);
@@ -1010,7 +1028,7 @@ export class Sim implements IWorld {
     p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
     // Auto-attack: a basic physical weapon swing (no ability). compute() does the same crit
     // roll the old rollCrit did; combat.mitigate (inside hitEnemy) is passthrough today.
-    this.hitEnemy(t, combat.compute({
+    this.hitTarget(t, combat.compute({
       attacker: p, rank: 1, damageType: this.damageTypeOf(p), critChance: this.critChance(p), rng: this.rng,
     }), p);
   }
@@ -1978,14 +1996,14 @@ export class Sim implements IWorld {
     if (def.shape === 'cone') {
       if (p.targetId == null) return; // press it with a target to orient the sweep
       const t = this.ents.get(p.targetId);
-      if (!t || t.kind !== 'enemy' || t.hp <= 0) return;
+      if (!t || !this.canAttack(p, t)) return;
       if (Math.hypot(t.x - p.x, t.z - p.z) > this.attackRange(p)) return; // anchor must be in reach
       p.facing = Math.atan2(t.x - p.x, t.z - p.z); // face the target so the cone is predictable
       this.commitCast(p, def, slot);
       for (const e of this.enemiesInCone(p)) {
         // One compute() per enemy => one crit roll per enemy, exactly as the old per-enemy
         // rollCrit. Same rng draw order, so the hash is unchanged.
-        this.hitEnemy(e, combat.compute({
+        this.hitTarget(e, combat.compute({
           attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
           critChance: this.critChance(p), rng: this.rng,
         }), p);
@@ -1996,7 +2014,7 @@ export class Sim implements IWorld {
 
     if (p.targetId == null) return;
     const t = this.ents.get(p.targetId);
-    if (!t || t.kind !== 'enemy' || t.hp <= 0) return; // needs a living enemy target
+    if (!t || !this.canAttack(p, t)) return; // needs a living enemy target
     let dx = t.x - p.x;
     let dz = t.z - p.z;
     let dist = Math.hypot(dx, dz);
@@ -2021,7 +2039,7 @@ export class Sim implements IWorld {
       }
     }
     this.commitCast(p, def, slot);
-    this.hitEnemy(t, combat.compute({
+    this.hitTarget(t, combat.compute({
       attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
       critChance: this.critChance(p), rng: this.rng,
     }), p);
@@ -2055,7 +2073,7 @@ export class Sim implements IWorld {
     const range = this.attackRange(p);
     const hit: Entity[] = [];
     for (const e of this.ents.values()) {
-      if (e.kind !== 'enemy' || e.hp <= 0) continue;
+      if (!this.canAttack(p, e)) continue;
       const dx = e.x - p.x;
       const dz = e.z - p.z;
       const d = Math.hypot(dx, dz);
@@ -2088,7 +2106,7 @@ export class Sim implements IWorld {
   private cycleTarget(p: Entity): void {
     const enemies: Entity[] = [];
     for (const e of this.ents.values()) {
-      if (e.kind === 'enemy' && e.hp > 0) enemies.push(e);
+      if (this.canAttack(p, e)) enemies.push(e);
     }
     if (enemies.length === 0) {
       p.targetId = null;
@@ -2114,13 +2132,13 @@ export class Sim implements IWorld {
       return;
     }
     const e = this.ents.get(id);
-    if (e && e.kind === 'enemy' && e.hp > 0) p.targetId = id;
+    if (e && this.canAttack(p, e)) p.targetId = id;
   }
 
   private validateTarget(p: Entity): void {
     if (p.targetId == null) return;
     const t = this.ents.get(p.targetId);
-    if (!t || t.kind !== 'enemy' || t.hp <= 0) p.targetId = null;
+    if (!t || !this.canAttack(p, t)) p.targetId = null;
   }
 
   private stepPlayer(p: Entity): void {
