@@ -32,7 +32,7 @@ import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ASSASSIN_TEMPLATE, levelHpM
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS, STORAGE_SLOTS } from '../src/sim/inventory';
-import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z } from '../src/sim/storage';
+import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_ENTITY_ID } from '../src/sim/storage';
 import { ITEMS } from '../src/sim/content/items';
 import { MAX_PLUS, RISK_FLOOR } from '../src/sim/content/enhance';
 import { enhanceChance, enhanceStat } from '../src/sim/enhance';
@@ -3382,5 +3382,25 @@ describe('armazém (storage) — depósito/saque (comandos)', () => {
       return s.hash();
     };
     expect(h()).toBe(h()); // e segue determinístico run-vs-run
+  });
+
+  it('o NPC do armazém não pode ser alvo, atacado ou ferido (id reservado 1e9)', () => {
+    const sim = new Sim(7);
+    const wh = sim.entities().find((e) => e.id === WAREHOUSE_ENTITY_ID)!;
+    expect(wh.kind).toBe('npc');
+    const hp0 = wh.hp;
+    // clicar (set-target) no NPC é ignorado — só inimigos vivos são alvos válidos
+    sim.sendCommand({ t: 'set-target', id: WAREHOUSE_ENTITY_ID });
+    sim.step();
+    expect(sim.localTargetId()).toBeNull();
+    // Tab (cycle-target) nunca pousa no NPC
+    for (let i = 0; i < 20; i++) {
+      sim.sendCommand({ t: 'cycle-target' });
+      sim.step();
+      expect(sim.localTargetId()).not.toBe(WAREHOUSE_ENTITY_ID);
+    }
+    // combate ao redor nunca fere o armazém
+    for (let i = 0; i < 10; i++) killNearestEnemy(sim);
+    expect(sim.entities().find((e) => e.id === WAREHOUSE_ENTITY_ID)!.hp).toBe(hp0);
   });
 });

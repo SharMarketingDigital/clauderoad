@@ -268,6 +268,29 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     expect(stones()).toBeLessThan(stones0);
   });
 
+  it('encaminha useProtection VERBATIM para o comando do sim (direto, sem depender de seed) (K4)', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    // Espiona a fronteira servidor->sim: prova o forward diretamente, sem depender de uma falha
+    // sorteada (mais robusto que inferir pela quebra/gasto de pedra ao longo de N tentativas).
+    const sim = (w as unknown as { sim: { sendCommandFor(id: number, cmd: Record<string, unknown>): void } }).sim;
+    const orig = sim.sendCommandFor.bind(sim);
+    const seen: Record<string, unknown>[] = [];
+    sim.sendCommandFor = (id, cmd) => { seen.push(cmd); orig(id, cmd); };
+
+    w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: false, useProtection: true });
+    const fwd = seen.find((c) => c.t === 'enhance')!;
+    expect(fwd).toBeDefined();
+    expect(fwd.useProtection).toBe(true);
+    expect(fwd.useLuckyPowder).toBe(false);
+    expect(fwd.slot).toBe('weapon');
+
+    // o caso undefined é preservado (não coagido para false)
+    seen.length = 0;
+    w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: true });
+    expect(seen.find((c) => c.t === 'enhance')!.useProtection).toBeUndefined();
+  });
+
   it('the vendor loop works in MP — walk into range, sell loot for gold', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
