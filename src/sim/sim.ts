@@ -201,11 +201,13 @@ export class Sim implements IWorld {
   // run a bot for each client independently; single-player just has the one local id.
   private botPlayers = new Set<number>();
 
-  // `spawnLocal` controls whether a local "Hero" player is created. Offline (and the
-  // tests) keep the default — one local player, bit-identical to before. The SERVER
+  // `spawnLocal` controls whether a local player is created; `localName` is its name.
+  // The default 'Hero' keeps offline + tests bit-identical to before; the name-entry
+  // screen passes the player's chosen name (identity only — never part of the item
+  // save). Offline keeps the default — one local player. The SERVER
   // passes `false`: it has NO local player and instead adds networked players via
   // addPlayer(), so its world is purely the connected clients + the shared mobs.
-  constructor(seed: number, spawnLocal = true) {
+  constructor(seed: number, spawnLocal = true, localName = 'Hero') {
     this.rng = new Rng(seed);
     // Enemy tiers roll from an INDEPENDENT deterministic substream so adding the
     // feature doesn't reshuffle the main loot/position Rng — worlds stay comparable.
@@ -221,7 +223,7 @@ export class Sim implements IWorld {
     // the rings never perturbs the main loot/position stream (determinism stays clean).
     this.spawnRng = new Rng((seed ^ 0x165667b1) >>> 0);
     if (spawnLocal) {
-      this.localId = this.spawnPlayer('Hero');
+      this.localId = this.spawnPlayer(localName);
       this.registerPlayer(this.localId);
     } else {
       this.localId = 0; // server world: no local player (clients join via addPlayer)

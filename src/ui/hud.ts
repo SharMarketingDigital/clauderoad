@@ -23,6 +23,7 @@ export class Hud {
   private mpFill: HTMLDivElement;
   private mpText: HTMLSpanElement;
   private levelBadge: HTMLSpanElement;
+  private playerName: HTMLSpanElement; // the local player's name shown in the unit frame
   private xpFill: HTMLDivElement;
   private xpText: HTMLSpanElement;
   private announceEl: HTMLDivElement; // center-screen boss announcements
@@ -104,7 +105,7 @@ export class Hud {
       <div class="unit-frame">
         <div class="portrait">&#9733;</div>
         <div class="bars">
-          <span class="name">Hero</span><span class="level"></span>
+          <span class="name player-name"></span><span class="level"></span>
           <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
           <div class="mp"><div class="mp-fill"></div><span class="mp-text"></span></div>
           <div class="xp"><div class="xp-fill"></div><span class="xp-text"></span></div>
@@ -165,6 +166,7 @@ export class Hud {
     this.mpFill = this.root.querySelector('.mp-fill') as HTMLDivElement;
     this.mpText = this.root.querySelector('.mp-text') as HTMLSpanElement;
     this.levelBadge = this.root.querySelector('.level') as HTMLSpanElement;
+    this.playerName = this.root.querySelector('.player-name') as HTMLSpanElement;
     this.xpFill = this.root.querySelector('.xp-fill') as HTMLDivElement;
     this.xpText = this.root.querySelector('.xp-text') as HTMLSpanElement;
     this.targetFrame = this.root.querySelector('.target-frame') as HTMLDivElement;
@@ -297,6 +299,7 @@ export class Hud {
     const p = ents.find((e) => e.id === id);
     if (!p) return;
 
+    this.playerName.textContent = p.name; // the chosen name (SP) / join name (MP), not a literal
     const hpPct = Math.max(0, Math.min(1, p.hp / p.maxHp));
     this.hpFill.style.width = `${hpPct * 100}%`;
     this.hpText.textContent = `${Math.round(p.hp)} / ${p.maxHp}`;
