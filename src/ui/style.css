@@ -636,3 +636,12 @@ html, body {
 .sheet-barrow .hp,
 .sheet-barrow .mp,
 .sheet-barrow .xp { margin-top: 0; }
+
+/* T1.1: inventory/skills/character panels are centered modals that must sit ABOVE the gameplay
+   overlays (map .wm=45, party .pm=44, party-popup=43, chat=42, mp-* 39-41) and BELOW the recorder
+   UI (dock=60, clip=70). `.bag`/`.skills` are reparented to <body> in hud.ts so this z-index
+   competes in the root stacking context (it can't escape `.hud`'s position:fixed context). */
+.bag,
+.skills,
+.storage,
+.sheet { z-index: 50; }

@@ -190,6 +190,15 @@ export class Hud {
     this.botIndicator = this.root.querySelector('.bot-indicator') as HTMLDivElement;
     this.botToggleBtn.addEventListener('click', () => this.toggleBot());
 
+    // T1.1: the centered modals must paint ABOVE the map/party overlays. `.bag` and `.skills`
+    // live inside `.hud` (position:fixed => its own stacking context), so a z-index on them can
+    // never beat the body-level overlays. Reparent them to <body> (both are position:absolute,
+    // viewport-centered, so this is visually identical) where their z-index (style.css) competes
+    // at the root stacking context — mirroring `.storage`/`.sheet`, which are already body-level.
+    // All bag/skills descendants were queried above, so they ride along with the move.
+    document.body.appendChild(this.skillsEl);
+    document.body.appendChild(this.bag);
+
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
