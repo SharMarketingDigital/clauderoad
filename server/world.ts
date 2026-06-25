@@ -103,15 +103,25 @@ export class ServerWorld {
         }
         return;
       case 'unequip':
-        if (VALID_SLOTS.has(cmd.slot)) this.sim.sendCommandFor(id, { t: 'unequip', slot: cmd.slot });
+        if (VALID_SLOTS.has(cmd.slot)) {
+          // optional drag target slot; the sim re-validates bounds + that the slot is empty
+          const toBagSlot = typeof cmd.toBagSlot === 'number' && Number.isInteger(cmd.toBagSlot) ? cmd.toBagSlot : undefined;
+          this.sim.sendCommandFor(id, { t: 'unequip', slot: cmd.slot, toBagSlot });
+        }
+        return;
+      case 'move-item':
+        // positional bag rearrange; the sim re-validates the indices + a non-empty source
+        if (Number.isInteger(cmd.from) && Number.isInteger(cmd.to)) {
+          this.sim.sendCommandFor(id, { t: 'move-item', from: cmd.from, to: cmd.to });
+        }
         return;
       case 'enhance':
-        if (VALID_SLOTS.has(cmd.slot) && typeof cmd.useLuckyPowder === 'boolean'
+        if (VALID_SLOTS.has(cmd.slot)
           && (cmd.useProtection === undefined || typeof cmd.useProtection === 'boolean')) {
-          // K4: forward useProtection too — dropping it would silently disable protection
+          // K4: forward useProtection — dropping it would silently disable protection
           // online (the K1 whitelist bug). The sim re-validates that a stone is held.
           this.sim.sendCommandFor(id, {
-            t: 'enhance', slot: cmd.slot, useLuckyPowder: cmd.useLuckyPowder, useProtection: cmd.useProtection,
+            t: 'enhance', slot: cmd.slot, useProtection: cmd.useProtection,
           });
         }
         return;

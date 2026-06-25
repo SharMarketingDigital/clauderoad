@@ -24,16 +24,18 @@ export const WAREHOUSE_ENTITY_ID = 1_000_000_000;
 // `arr` aceitaria (itemId,rarity,plus)? true se já há um stack CASÁVEL (cresce a qty) OU se há
 // slot livre. ESPELHA exatamente addToBag (inventory.ts): um stack casável cresce mesmo com o
 // array cheio, então checar-antes nunca rejeita um movimento que addToBag aceitaria.
-function canAccept(arr: ItemStack[], itemId: string, rarity: Rarity, plus: number, maxSlots: number): boolean {
-  const matchable = arr.some((s) => s.itemId === itemId && s.rarity === rarity && s.plus === plus);
-  return matchable || arr.length < maxSlots;
+function canAccept(arr: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number, maxSlots: number): boolean {
+  const matchable = arr.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+  // Há espaço se a lista ainda pode crescer (armazém compacto) OU se existe um hole (bag esparsa).
+  const hasRoom = arr.length < maxSlots || arr.some((s) => s == null);
+  return matchable || hasRoom;
 }
 
 // Move o STACK INTEIRO (a qty atual) da bolsa para o armazém. Put-back NÃO-destrutivo: se o
 // armazém não aceitar, retorna false SEM tocar a bolsa (preserva ordem de inserção → preserva
 // o hash numa recusa). Determinístico (puro).
-export function depositStack(bag: ItemStack[], storage: ItemStack[], itemId: string, rarity: Rarity, plus: number): boolean {
-  const stack = bag.find((s) => s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+export function depositStack(bag: (ItemStack | null)[], storage: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number): boolean {
+  const stack = bag.find((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
   if (!stack) return false; // não possui esse stack
   if (!canAccept(storage, itemId, rarity, plus, STORAGE_SLOTS)) return false; // armazém cheio
   const qty = stack.qty;
@@ -43,8 +45,8 @@ export function depositStack(bag: ItemStack[], storage: ItemStack[], itemId: str
 }
 
 // Move o STACK INTEIRO do armazém para a bolsa. Espelho de depositStack (capacidade da bolsa).
-export function withdrawStack(storage: ItemStack[], bag: ItemStack[], itemId: string, rarity: Rarity, plus: number): boolean {
-  const stack = storage.find((s) => s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+export function withdrawStack(storage: (ItemStack | null)[], bag: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number): boolean {
+  const stack = storage.find((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
   if (!stack) return false;
   if (!canAccept(bag, itemId, rarity, plus, BAG_SLOTS)) return false; // bolsa cheia
   const qty = stack.qty;

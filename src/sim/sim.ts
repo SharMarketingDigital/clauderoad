@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -47,7 +47,7 @@ export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
-import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag, freeBagSlots, moveBagSlot } from './inventory';
 import {
   WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID,
   depositStack, withdrawStack,
@@ -109,9 +109,8 @@ const BOT_BAG_HEADROOM = 3; // make a vendor run to sell once free bag slots dro
 const BOT_POTION_STOCK = 5; // restock Health Potions up to this many
 const BOT_GOLD_RESERVE = 80; // keep at least this much gold for non-essential (material) buys
 // Alchemy (enhance): refine equipped gear with spare materials, always keep a reserve
-export const BOT_MATERIAL_RESERVE = 2; // never spend an Elixir / Lucky Powder below this count
+export const BOT_MATERIAL_RESERVE = 2; // never spend a material (Elixir/Pedra) below this count
 const BOT_ENHANCE_SAFE_RADIUS = 11; // only enhance during a lull (nearest enemy beyond this)
-const BOT_LUCKY_BELOW_CHANCE = 0.7; // spend a Lucky Powder only when base success dips under this
 // Target selection: braver as it levels up
 const BOT_CHAMPION_MIN_LEVEL = 3;
 const BOT_ELITE_MIN_LEVEL = 5;
@@ -349,7 +348,8 @@ export class Sim implements IWorld {
       mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
-      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      // SPARSE/positional bag: a fixed 20-slot grid (holes = null) so a drag-placed item keeps its slot.
+      gold: 0, bag: Array(BAG_SLOTS).fill(null), storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
@@ -619,27 +619,30 @@ export class Sim implements IWorld {
   // snapshot). The IWorld inventory() uses the local player.
   inventoryFor(id: number): InventoryView {
     const p = this.ents.get(id);
-    const stacks = p
-      ? p.bag.map((s) => {
-          const def = ITEMS[s.itemId];
-          return {
-            itemId: s.itemId,
-            name: def?.name ?? s.itemId,
-            qty: s.qty,
-            rarity: s.rarity,
-            rarityName: rarityDef(s.rarity).name,
-            plus: s.plus,
-            equipSlot: def?.slot,
-            consumable: def?.consumable != null,
-            sellValue: rarityStat(def?.value ?? 0, s.rarity),
-            // K2 degrees: grau do item + requisito de nível + se o DONO (p) pode equipar agora.
-            // Só faz sentido para equipáveis (têm slot); não-equipáveis ficam undefined.
-            degree: def?.degree,
-            reqLevel: def && def.slot != null ? equipLevelReq(def) : undefined,
-            canEquip: def && def.slot != null ? meetsLevelReq(def, p.level) : undefined,
-          };
-        })
-      : [];
+    // Build a view for ONE stack; reused to produce the positional `slots` and the dense `stacks`.
+    const toView = (s: ItemStack): ItemStackView => {
+      const def = ITEMS[s.itemId];
+      return {
+        itemId: s.itemId,
+        name: def?.name ?? s.itemId,
+        qty: s.qty,
+        rarity: s.rarity,
+        rarityName: rarityDef(s.rarity).name,
+        plus: s.plus,
+        equipSlot: def?.slot,
+        consumable: def?.consumable != null,
+        sellValue: rarityStat(def?.value ?? 0, s.rarity),
+        // K2 degrees: grau do item + requisito de nível + se o DONO (p) pode equipar agora.
+        // Só faz sentido para equipáveis (têm slot); não-equipáveis ficam undefined.
+        degree: def?.degree,
+        reqLevel: def && def.slot != null ? equipLevelReq(def) : undefined,
+        canEquip: def && def.slot != null ? meetsLevelReq(def, p ? p.level : 1) : undefined,
+      };
+    };
+    // POSITIONAL view: one entry per grid cell (null = empty hole), ALWAYS length === capacity (the
+    // seam contract) — even with no player. DENSE view: holes filtered out.
+    const slots: (ItemStackView | null)[] = p ? p.bag.map((s) => (s ? toView(s) : null)) : new Array(BAG_SLOTS).fill(null);
+    const stacks = slots.filter((s): s is ItemStackView => s != null);
     const equipment = EQUIP_SLOTS.map((slot) => {
       const eq = p ? p.equipment[slot] : null;
       return {
@@ -649,9 +652,7 @@ export class Sim implements IWorld {
         rarity: eq?.rarity ?? null,
         rarityName: eq ? rarityDef(eq.rarity).name : null,
         plus: eq?.plus ?? 0,
-        // both chances, so the UI shows the one matching the Lucky Powder toggle.
-        enhanceChance: eq ? enhanceChance(eq.plus, false) : 0,
-        enhanceChanceLucky: eq ? enhanceChance(eq.plus, true) : 0,
+        enhanceChance: eq ? enhanceChance(eq.plus) : 0,
         // K4 alchemy risk readout (0 / gentle below RISK_FLOOR).
         breakChance: eq && eq.plus >= RISK_FLOOR ? (BREAK_CHANCE[eq.plus] ?? 0) : 0,
         dropOnFail: eq && eq.plus >= RISK_FLOOR ? (DROP_ON_FAIL[eq.plus] ?? 1) : 1,
@@ -660,7 +661,7 @@ export class Sim implements IWorld {
         repairCost: eq ? repairCost(eq.durability) : 0,
       };
     });
-    return { capacity: BAG_SLOTS, stacks, equipment };
+    return { capacity: BAG_SLOTS, stacks, slots, equipment };
   }
 
   shop(): ShopView {
@@ -692,7 +693,7 @@ export class Sim implements IWorld {
   storageFor(id: number): StorageView {
     const p = this.ents.get(id);
     const stacks = p
-      ? p.storage.map((s) => {
+      ? p.storage.filter((s): s is ItemStack => s != null).map((s) => {
           const def = ITEMS[s.itemId];
           return {
             itemId: s.itemId,
@@ -1427,10 +1428,13 @@ export class Sim implements IWorld {
         this.equip(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
       case 'unequip':
-        this.unequip(p, cmd.slot);
+        this.unequip(p, cmd.slot, cmd.toBagSlot);
+        break;
+      case 'move-item':
+        this.moveItem(p, cmd.from, cmd.to);
         break;
       case 'enhance':
-        this.enhance(p, cmd.slot, cmd.useLuckyPowder, cmd.useProtection);
+        this.enhance(p, cmd.slot, cmd.useProtection);
         break;
       case 'repair':
         this.repair(p, cmd.slot);
@@ -1489,22 +1493,42 @@ export class Sim implements IWorld {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
     if (!meetsLevelReq(def, p.level)) return; // K2: gate de nível (degrees) — recusa silenciosa. (1 linha no topo de equip(); avisar K1/Gabriel.)
-    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
+    // Remember WHERE this stack sat so the displaced item can take the vacated slot (a clean
+    // positional swap), instead of being auto-organized into the first free hole.
+    const srcIdx = p.bag.findIndex((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+    if (srcIdx < 0) return; // must hold that exact stack
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return;
     const prev = p.equipment[def.slot];
     p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY }; // a freshly equipped item is in full repair
-    // Return the displaced item to the bag, keeping its "+N". (Removing the new
-    // item above frees room in the common qty-1 case; only a full bag of other
-    // stacks could lose it — acceptable for now, like the loot-on-full case.)
-    if (prev) addToBag(p.bag, prev.itemId, prev.rarity, prev.plus, 1);
+    if (prev) {
+      // Land the displaced item in the slot just vacated (qty-1 case); if the source stack still
+      // holds items (equipped one of a qty>1 stack), fall back to the first free hole.
+      if (p.bag[srcIdx] == null) {
+        p.bag[srcIdx] = { itemId: prev.itemId, rarity: prev.rarity, plus: prev.plus, qty: 1 };
+      } else {
+        addToBag(p.bag, prev.itemId, prev.rarity, prev.plus, 1); // bag full -> acceptable loss, like loot-on-full
+      }
+    }
     this.recomputeStats(p);
   }
 
-  private unequip(p: Entity, slot: EquipSlot): void {
+  private unequip(p: Entity, slot: EquipSlot, toBagSlot?: number): void {
     const eq = p.equipment[slot];
     if (!eq) return;
-    if (!addToBag(p.bag, eq.itemId, eq.rarity, eq.plus, 1)) return; // bag full: keep it
+    // Drag placement: if a specific EMPTY bag slot is named, put the item exactly there; otherwise
+    // (click/keyboard, or an occupied/invalid target) fall back to the first free hole in F-order.
+    if (toBagSlot != null && Number.isInteger(toBagSlot) && toBagSlot >= 0 && toBagSlot < BAG_SLOTS && p.bag[toBagSlot] == null) {
+      p.bag[toBagSlot] = { itemId: eq.itemId, rarity: eq.rarity, plus: eq.plus, qty: 1 };
+    } else if (!addToBag(p.bag, eq.itemId, eq.rarity, eq.plus, 1)) {
+      return; // bag full: keep it equipped
+    }
     p.equipment[slot] = null;
     this.recomputeStats(p);
+  }
+
+  // Rearrange the bag: swap/move the stacks at two slot indices (positional drag-and-drop). Pure.
+  private moveItem(p: Entity, from: number, to: number): void {
+    moveBagSlot(p.bag, from, to); // bounds/empty-source checked inside; no stat change
   }
 
   // ---------- alchemy ("+N") ----------
@@ -1515,13 +1539,11 @@ export class Sim implements IWorld {
   // ONLY when it actually prevents a bad outcome. Below RISK_FLOOR a failure stays a gentle
   // -1. Determinism: a FIXED Rng draw order — roll1 (success) always; roll2 (break vs
   // degrade) ONLY on an unprotected failure at/above RISK_FLOOR. Refuses (no cost) at the cap.
-  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean, useProtection?: boolean): void {
+  private enhance(p: Entity, slot: EquipSlot, useProtection?: boolean): void {
     const eq = p.equipment[slot];
     if (!eq || eq.plus >= MAX_PLUS) return; // nothing equipped, or already maxed
     const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
     if (!removeFromBag(p.bag, elixirId, 'normal', 0, 1)) return; // need the right Elixir
-    let lucky = false;
-    if (useLuckyPowder && removeFromBag(p.bag, 'lucky_powder', 'normal', 0, 1)) lucky = true;
     // Protection: a NON-MUTATING held-check (botCount only sums the bag); the stone is
     // consumed below ONLY when it actually prevents a break/multi-drop.
     const protectedAttempt = !!useProtection && this.botCount(p, PROTECT_STONE_ID) > 0;
@@ -1530,8 +1552,8 @@ export class Sim implements IWorld {
     // says so (unprotected failure at/above RISK_FLOOR) — the SAME predicate resolveEnhance uses to
     // consume roll2, so the draw count here and the consumption there can never drift apart.
     const roll1 = this.rng.next();
-    const roll2 = needsBreakRoll(eq.plus, lucky, protectedAttempt, roll1) ? this.rng.next() : 0;
-    const outcome = resolveEnhance(eq.plus, lucky, protectedAttempt, roll1, roll2);
+    const roll2 = needsBreakRoll(eq.plus, protectedAttempt, roll1) ? this.rng.next() : 0;
+    const outcome = resolveEnhance(eq.plus, protectedAttempt, roll1, roll2);
 
     if (outcome.kind === 'break') {
       const brokenName = ITEMS[eq.itemId]?.name ?? eq.itemId;
@@ -1696,6 +1718,7 @@ export class Sim implements IWorld {
       let bestScore = eq ? botGearScore(eq.itemId, eq.rarity, eq.plus) : -1;
       let best: ItemStack | undefined;
       for (const s of p.bag) {
+        if (!s) continue; // skip empty slots (sparse bag)
         const def = ITEMS[s.itemId];
         if (!def || def.slot !== slot) continue;
         if (slot === 'weapon' && (def.mastery ?? DEFAULT_MASTERY) !== activeId) continue;
@@ -1719,7 +1742,7 @@ export class Sim implements IWorld {
   // Worth a trip to the vendor? When the bag is nearly full of sellable surplus, or
   // we've run dry on Health Potions and can afford to restock at least one.
   private botWantsVendor(p: Entity): boolean {
-    const bagPressure = BAG_SLOTS - p.bag.length <= BOT_BAG_HEADROOM && this.botJunkCount(p) > 0;
+    const bagPressure = freeBagSlots(p.bag) <= BOT_BAG_HEADROOM && this.botJunkCount(p) > 0;
     const potionPrice = botPrice('health_potion');
     const outOfPotions = !this.bagStack(p, 'health_potion') && potionPrice > 0 && p.gold >= potionPrice;
     // worn gear it can afford to repair -> worth a trip (it lost stats on death)
@@ -1734,7 +1757,7 @@ export class Sim implements IWorld {
   // first, so this may spend down to the last gold), then put any gold above the
   // reserve into alchemy materials so it can keep enhancing.
   private botTrade(p: Entity): void {
-    for (const s of p.bag.filter((b) => this.botIsJunk(b)).map((b) => ({ ...b }))) {
+    for (const s of p.bag.filter((b): b is ItemStack => b != null && this.botIsJunk(b)).map((b) => ({ ...b }))) {
       for (let i = 0; i < s.qty; i++) {
         this.applyAction(p, { t: 'sell', itemId: s.itemId, rarity: s.rarity, plus: s.plus });
       }
@@ -1751,7 +1774,7 @@ export class Sim implements IWorld {
         this.applyAction(p, { t: 'repair', slot });
       }
     }
-    for (const mat of ['elixir_weapon', 'elixir_armor', 'lucky_powder'] as const) {
+    for (const mat of ['elixir_weapon', 'elixir_armor'] as const) {
       const price = botPrice(mat);
       while (price > 0 && this.botCount(p, mat) < BOT_MATERIAL_RESERVE + 2
         && p.gold - price >= BOT_GOLD_RESERVE && this.botCanStock(p, mat)) {
@@ -1764,8 +1787,8 @@ export class Sim implements IWorld {
   // is a free bag slot, or a matching stack to grow — so a buy-loop can never spin
   // forever refusing the purchase on a full bag.
   private botCanStock(p: Entity, itemId: string): boolean {
-    if (p.bag.length < BAG_SLOTS) return true;
-    return p.bag.some((s) => s.itemId === itemId && s.rarity === 'normal' && s.plus === 0);
+    if (freeBagSlots(p.bag) > 0) return true;
+    return p.bag.some((s) => s != null && s.itemId === itemId && s.rarity === 'normal' && s.plus === 0);
   }
 
   // Refine the equipped gear when we hold materials ABOVE the reserve (never spend
@@ -1778,9 +1801,7 @@ export class Sim implements IWorld {
       if (!eq || eq.plus >= RISK_FLOOR) continue; // K4: bot never gambles into the break band
       const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
       if (this.botCount(p, elixirId) <= BOT_MATERIAL_RESERVE) continue; // keep a reserve
-      const useLucky = enhanceChance(eq.plus, false) < BOT_LUCKY_BELOW_CHANCE
-        && this.botCount(p, 'lucky_powder') > BOT_MATERIAL_RESERVE;
-      this.applyAction(p, { t: 'enhance', slot, useLuckyPowder: useLucky });
+      this.applyAction(p, { t: 'enhance', slot });
       return; // at most one enhance attempt per tick
     }
   }
@@ -1888,7 +1909,7 @@ export class Sim implements IWorld {
   // Total quantity of an item id across the bag (stacks may split by rarity/plus).
   private botCount(p: Entity, itemId: string): number {
     let n = 0;
-    for (const s of p.bag) if (s.itemId === itemId) n += s.qty;
+    for (const s of p.bag) if (s != null && s.itemId === itemId) n += s.qty;
     return n;
   }
 
@@ -1901,14 +1922,14 @@ export class Sim implements IWorld {
   }
   private botJunkCount(p: Entity): number {
     let n = 0;
-    for (const s of p.bag) if (this.botIsJunk(s)) n += s.qty;
+    for (const s of p.bag) if (s != null && this.botIsJunk(s)) n += s.qty;
     return n;
   }
 
   // The first held stack of an item (so the bot uses the exact rarity/plus the
   // use-item command needs to match), or undefined if none is carried.
   private bagStack(p: Entity, itemId: string): ItemStack | undefined {
-    return p.bag.find((s) => s.itemId === itemId && s.qty > 0);
+    return p.bag.find((s) => s != null && s.itemId === itemId && s.qty > 0) ?? undefined;
   }
 
   // ---------- attributes ----------
@@ -2632,14 +2653,17 @@ export class Sim implements IWorld {
       // Skill progression: the SP wallet + each ability's rank (sorted keys -> stable).
       mix(e.sp);
       for (const sid of Object.keys(e.skillRanks).sort()) { mix(strHash(sid)); mix(e.skillRanks[sid]); }
-      // Economy & bag (stacks are in deterministic insertion order).
+      // Economy & bag. The bag is SPARSE (positional) — fold by SLOT order (index 0..n), skipping
+      // holes, so the fingerprint reflects WHERE each item sits (same layout => same hash).
       mix(e.gold);
       for (const s of e.bag) {
+        if (s == null) continue; // empty slot (hole) — contributes nothing
         mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
       }
-      // K5: armazém do jogador (mesmo fold da bag). Storage vazio => 0 iterações => FNV
+      // K5: armazém do jogador (mesmo fold esparso da bag). Storage vazio => 0 iterações => FNV
       // intocado => hash byte-idêntico para todos os mundos que não usam o armazém.
       for (const s of e.storage) {
+        if (s == null) continue;
         mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
       }
       // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).

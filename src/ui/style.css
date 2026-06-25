@@ -49,6 +49,7 @@ html, body {
   background: #1c2530;
   border: 1px solid var(--gold);
   border-radius: 4px;
+  overflow: hidden; /* clip the 3D head badge to the rounded portrait box */
 }
 
 .bars { flex: 1; }
@@ -181,11 +182,13 @@ html, body {
 
 /* Inventory window — centered modal-ish panel, toggled with I. */
 .bag {
+  --slot-size: 56px; /* tamanho 1:1 compartilhado por TODOS os slots (equip + bolsa) */
+  --viewport-w: 200px; /* largura do paper-doll 3D */
   position: absolute;
   top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 680px;
+  left: 24px; /* alinhado à esquerda: libera o campo de visão (mundo) à direita */
+  transform: translateY(-50%);
+  width: fit-content;
   max-width: 94vw;
   max-height: 90vh;
   overflow-y: auto;
@@ -197,35 +200,32 @@ html, body {
   backdrop-filter: blur(4px);
 }
 .bag[hidden] { display: none; }
-.bag-title {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--gold);
-  margin-bottom: 10px;
-  text-align: center;
-}
+/* (legacy .bag-title rule removed: the Inventário header is a .char-col-title now. Its old
+   margin-bottom:10px pushed the bag grid 10px BELOW the equip squares — breaking the alignment
+   the user asked for. The `bag-title` class stays only as a JS query hook, with no styles.) */
 .bag-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 6px;
-  max-height: 30vh;
-  overflow-y: auto;
+  grid-template-columns: repeat(4, var(--slot-size)); /* 4x5: 4 colunas -> 5 linhas, alinham com os 5 slots de equip */
+  gap: 8px;
 }
-.bag-section-title { font-size: 11px; font-weight: 600; color: var(--gold); margin: 4px 0 6px; }
 .bag-slot {
-  aspect-ratio: 1;
+  width: var(--slot-size);
+  height: var(--slot-size);
   display: grid;
   place-items: center;
-  padding: 2px;
-  font-size: 9px;
-  line-height: 1.1;
+  padding: 3px;
+  font-family: inherit; /* <button> reset */
+  font-size: 10px;
+  line-height: 1.12;
   text-align: center;
   color: var(--ink);
   background: #161c25;
   border: 1px solid #2c3645;
   border-radius: 4px;
   overflow: hidden;
+  cursor: default;
 }
+.bag-slot:focus-visible { outline: none; border-color: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45); }
 .bag-slot.filled { border-color: var(--gold); background: #1c2533; }
 .bag-slot.equippable { cursor: pointer; }
 .bag-slot.equippable:hover { border-color: #fff; }
@@ -274,37 +274,31 @@ html, body {
 .storage .bag-slot.filled:not(.disabled):hover { border-color: #fff; }
 .storage .bag-slot.disabled { opacity: 0.5; cursor: default; }
 
-/* Character screen ("I"): a 3D paper-doll flanked by two columns of equipment tiles.
-   minmax(0,...) on the side columns lets the tile labels ellipsize instead of stretching the panel. */
+/* Painel "I": duas colunas de conteúdo (Inventário | Personagem). A coluna Personagem traz o
+   paper-doll 3D ladeado por duas colunas de quadrículas de equipamento (mesmo tamanho da bolsa). */
+.char-cols { display: flex; gap: 16px; align-items: flex-start; }
+.char-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.char-col-title { font-size: 12px; font-weight: 700; color: var(--gold); text-align: center; letter-spacing: 0.02em; }
 .char-screen {
   display: grid;
-  grid-template-columns: minmax(0, 150px) 1fr minmax(0, 150px);
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: var(--slot-size) var(--viewport-w) var(--slot-size);
+  gap: 8px;
+  align-items: stretch; /* o viewport estica p/ a altura das colunas de equip (5 slots) -> #3 */
+  justify-content: center;
   margin-bottom: 8px;
 }
-.equip-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.equip-col { display: flex; flex-direction: column; gap: 8px; }
 .char-viewport {
   width: 100%;
-  aspect-ratio: 3 / 4;
+  height: 100%; /* altura adaptativa: do topo do 1º slot até o fundo do último (altura das colunas de equip) */
   min-width: 0;
+  min-height: 0;
   background: radial-gradient(circle at 50% 35%, #1b2230 0%, #0e1219 70%);
   border: 1px solid #2c3645;
   border-radius: 6px;
   overflow: hidden;
 }
 .char-canvas { width: 100%; height: 100%; display: block; }
-.char-detail {
-  font-size: 11px;
-  color: var(--ink);
-  opacity: 0.9;
-  text-align: center;
-  min-height: 1.2em;
-  margin-bottom: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* Equipment TILE: slot label + item name, fixed-size so text can never overflow (the row layout's
    old bug). The shared `.equip-slot[data-rarity]` rules above color the border by rarity (the tile
@@ -315,11 +309,12 @@ html, body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
-  min-width: 0;
-  height: 50px;
-  padding: 4px 8px;
-  text-align: left;
+  align-items: center;
+  gap: 1px;
+  width: var(--slot-size);
+  height: var(--slot-size);
+  padding: 3px;
+  text-align: center;
   color: var(--ink);
   background: #161c25;
   border: 1px dashed #3a4757;
@@ -327,9 +322,9 @@ html, body {
   font-family: inherit;
   cursor: default;
 }
-.equip-tile-slot { font-size: 9px; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.equip-tile-name { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.equip-tile-plus { position: absolute; top: 3px; right: 6px; font-size: 10px; font-weight: 700; color: var(--gold); }
+.equip-tile-slot { font-size: 8px; opacity: 0.7; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.equip-tile-name { font-size: 9px; line-height: 1.05; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.equip-tile-plus { position: absolute; top: 2px; right: 3px; font-size: 9px; font-weight: 700; color: var(--gold); }
 .equip-tile.filled { border-style: solid; background: #241c12; cursor: pointer; }
 .equip-tile.filled:hover, .equip-tile:focus-visible { border-color: #fff; outline: none; }
 /* worn gear (durability < half): an amber corner dot — keeps the rarity border intact. */
@@ -343,10 +338,60 @@ html, body {
   border-radius: 50%;
   background: #ffb35a;
 }
-/* Collapse to one column on narrow viewports; the panel scrolls (max-height) if it gets tall. */
+/* Responsivo: empilha as DUAS colunas externas (Inventário acima de Personagem) e, mais estreito,
+   também as colunas internas de equip. O painel rola (max-height) se ficar alto. */
+@media (max-width: 860px) {
+  .char-cols { flex-direction: column; align-items: center; }
+}
 @media (max-width: 640px) {
-  .char-screen { grid-template-columns: 1fr; }
-  .char-viewport { width: min(240px, 70vw); margin: 0 auto; }
+  .char-screen { grid-template-columns: 1fr; align-items: center; }
+  /* empilhado: sem coluna de equip ao lado p/ ditar a altura -> volta a uma proporção fixa */
+  .char-viewport { width: min(240px, 70vw); height: auto; aspect-ratio: 3 / 4; margin: 0 auto; }
+}
+
+/* Drag-and-drop: estados de alvo de soltar. Vêm DEPOIS das regras de raridade, então ganham o
+   empate de especificidade. A pista de alvo válido NÃO é só cor (borda sólida + marcador "✓"). */
+.equip-tile.drop-ok {
+  border-style: solid;
+  border-color: #6bff8a;
+  box-shadow: 0 0 9px rgba(107, 255, 138, 0.65);
+}
+.equip-tile.drop-ok::before {
+  content: '✓';
+  position: absolute;
+  top: 0;
+  left: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6bff8a;
+}
+.equip-tile.drop-dim { opacity: 0.32; }
+.bag-grid.drop-ok { outline: 2px solid #6bff8a; outline-offset: 3px; border-radius: 6px; }
+/* a célula da bolsa exata onde o item vai cair (pista de posicionamento durante o arrasto). */
+.bag-slot.drop-hover { outline: 2px solid #6bff8a; outline-offset: 1px; }
+.dragging-src { opacity: 0.4; }
+.dnd-ghost {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 55; /* acima dos painéis (50), abaixo da UI do gravador (60) */
+  opacity: 0.92;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+/* aria-live para anunciar o resultado do arrasto a leitores de tela (visualmente oculto). */
+.dnd-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dnd-ghost { box-shadow: none; }
 }
 
 .bag-stats {
@@ -357,24 +402,35 @@ html, body {
   text-align: center;
 }
 
-/* Alchemy ("+N") controls inside the bag window. */
-.alchemy {
+/* Alchemy ("+N") — STANDALONE panel (tecla L), mirror of the inventory: vertically centered and
+   anchored to the RIGHT edge (the inventory sits on the left). No collapse; always its full content. */
+.alchemy-panel {
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  width: 300px;
+  max-width: 94vw;
+  max-height: 90vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
-  padding: 8px;
-  background: #12161e;
-  border: 1px solid #2c3645;
-  border-radius: 6px;
+  gap: 8px;
+  padding: 12px;
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
 }
+.alchemy-panel[hidden] { display: none; }
 /* 2-col grid (not a 10-wide flex row) so the longest button labels can't overflow the panel. */
 .refine-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .refine-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lucky-toggle,
 .protect-toggle,
 .refine-btn {
   flex: 1;
+  min-height: 38px; /* alvo de toque confortável (a faixa de refino tem espaço de largura total) */
   padding: 5px 6px;
   font-size: 11px;
   color: var(--ink);
@@ -384,7 +440,6 @@ html, body {
   cursor: pointer;
   font-family: inherit;
 }
-.lucky-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
 .refine-btn:hover:not(:disabled) { background: #26344a; }
 .refine-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
 .protect-toggle.on { background: #1c2f3a; border-color: #4a9fd1; color: #b0e6f5; }
@@ -698,4 +753,5 @@ html, body {
 .bag,
 .skills,
 .storage,
-.sheet { z-index: 50; }
+.sheet,
+.alchemy-panel { z-index: 50; }

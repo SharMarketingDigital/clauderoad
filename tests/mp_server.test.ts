@@ -258,7 +258,7 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     const stones0 = stones();
 
     for (let i = 0; i < 40; i++) {
-      w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: false, useProtection: true });
+      w.command(a, { t: 'enhance', slot: 'weapon', useProtection: true });
       w.step();
       expect(weaponSlot().itemId).not.toBeNull(); // protected: the weapon is NEVER destroyed
     }
@@ -278,16 +278,15 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     const seen: Record<string, unknown>[] = [];
     sim.sendCommandFor = (id, cmd) => { seen.push(cmd); orig(id, cmd); };
 
-    w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: false, useProtection: true });
+    w.command(a, { t: 'enhance', slot: 'weapon', useProtection: true });
     const fwd = seen.find((c) => c.t === 'enhance')!;
     expect(fwd).toBeDefined();
     expect(fwd.useProtection).toBe(true);
-    expect(fwd.useLuckyPowder).toBe(false);
     expect(fwd.slot).toBe('weapon');
 
     // o caso undefined é preservado (não coagido para false)
     seen.length = 0;
-    w.command(a, { t: 'enhance', slot: 'weapon', useLuckyPowder: true });
+    w.command(a, { t: 'enhance', slot: 'weapon' });
     expect(seen.find((c) => c.t === 'enhance')!.useProtection).toBeUndefined();
   });
 

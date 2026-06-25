@@ -6,6 +6,7 @@
 //
 // Note: performance.now() / Date.now() / Math.random() are fine HERE (the host). They
 // are forbidden only inside src/sim/, which must stay deterministic.
+import './render/model_cache'; // enable THREE.Cache at startup -> each player-model file downloads ONCE (proxy)
 import { Sim, DT } from './sim/sim';
 import { Renderer } from './render/renderer';
 import { Input } from './game/input';
@@ -23,6 +24,7 @@ import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 import { MusicPlayer } from './ui/audio';
 import { SettingsMenu } from './ui/settings_menu';
+import { EscMenu } from './ui/esc_menu';
 import { NameSelect, normalizeName, isValidName } from './ui/name_select';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -48,7 +50,8 @@ function startOffline(name: string): void {
   const hud = new Hud();
   const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; never touches the sim)
-  new SettingsMenu(music); // ESC settings menu (audio controls); self-driven, no per-frame update
+  new SettingsMenu(music); // settings (abre no Backspace / via menu Esc); self-driven
+  new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
   // Class selection on entry (G1): pick a starter class -> the sim equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {
@@ -106,7 +109,8 @@ function startOnline(url: string, name: string): void {
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const map = new WorldMap(); // world map (tecla M) — same module as SP, reads IWorld
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; same module as SP)
-  new SettingsMenu(music); // ESC settings menu (audio controls); self-driven, no per-frame update
+  new SettingsMenu(music); // settings (abre no Backspace / via menu Esc); self-driven
+  new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
   // Class selection on entry (G1): pick a starter class -> the server equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {

@@ -10,8 +10,6 @@
 import {
   MAX_PLUS,
   ENHANCE_SUCCESS,
-  LUCKY_POWDER_BONUS,
-  ENHANCE_CHANCE_CAP,
   ENHANCE_STAT_PER_PLUS,
   RISK_FLOOR,
   BREAK_CHANCE,
@@ -19,12 +17,10 @@ import {
   PROTECT_DROP_CAP,
 } from './content/enhance';
 
-// Success chance of an enhance attempt from `plus` -> plus+1, optionally boosted by a Lucky
-// Powder. 0 at the cap. Pure & deterministic. (Moved here from sim.ts in K4.)
-export function enhanceChance(plus: number, lucky: boolean): number {
+// Success chance of an enhance attempt from `plus` -> plus+1. 0 at the cap. Pure & deterministic.
+export function enhanceChance(plus: number): number {
   if (plus < 0 || plus >= MAX_PLUS) return 0;
-  const base = ENHANCE_SUCCESS[plus] ?? 0;
-  return Math.min(ENHANCE_CHANCE_CAP, base + (lucky ? LUCKY_POWDER_BONUS : 0));
+  return ENHANCE_SUCCESS[plus] ?? 0;
 }
 
 // A "+N" item's bonus: the rarity-scaled stat, then +ENHANCE_STAT_PER_PLUS per level.
@@ -45,8 +41,8 @@ export type EnhanceOutcome =
 // SINGLE SOURCE of "do we need roll2" — both sim.enhance() (to decide whether to pull a 2nd
 // this.rng.next()) and resolveEnhance() (to decide whether to consume roll2) call it, so the
 // draw COUNT and the draw CONSUMPTION can never drift apart. Pure & deterministic.
-export function needsBreakRoll(plus: number, lucky: boolean, protectedAttempt: boolean, roll1: number): boolean {
-  return roll1 >= enhanceChance(plus, lucky) && plus >= RISK_FLOOR && !protectedAttempt;
+export function needsBreakRoll(plus: number, protectedAttempt: boolean, roll1: number): boolean {
+  return roll1 >= enhanceChance(plus) && plus >= RISK_FLOOR && !protectedAttempt;
 }
 
 // Resolve ONE attempt. PURE — the caller passes the two unit draws in [0,1):
@@ -56,18 +52,17 @@ export function needsBreakRoll(plus: number, lucky: boolean, protectedAttempt: b
 // `protectedAttempt` = the player asked for protection AND a Pedra de Proteção is held.
 export function resolveEnhance(
   plus: number,
-  lucky: boolean,
   protectedAttempt: boolean,
   roll1: number,
   roll2: number,
 ): EnhanceOutcome {
-  if (roll1 < enhanceChance(plus, lucky)) {
+  if (roll1 < enhanceChance(plus)) {
     return { kind: 'success', nextPlus: Math.min(MAX_PLUS, plus + 1) };
   }
   // --- failure ---
   // roll2 matters ONLY when needsBreakRoll is true — the SAME gate sim.enhance() uses to decide
   // whether it pulled roll2 from the Rng, so the consumption matches the draw count exactly.
-  if (needsBreakRoll(plus, lucky, protectedAttempt, roll1)) {
+  if (needsBreakRoll(plus, protectedAttempt, roll1)) {
     if (roll2 < (BREAK_CHANCE[plus] ?? 0)) return { kind: 'break' };
     const drop = DROP_ON_FAIL[plus] ?? 1;
     return { kind: 'degrade', nextPlus: Math.max(0, plus - drop), drop };

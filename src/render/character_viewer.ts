@@ -30,7 +30,9 @@ export class CharacterViewer {
   private reduceMotion = false;
   private posed = false; // reduced-motion: idle already advanced to a representative pose
 
-  constructor() {
+  constructor(opts: { framing?: 'full' | 'head'; rotatable?: boolean } = {}) {
+    const framing = opts.framing ?? 'full';
+    const rotatable = opts.rotatable ?? (framing === 'full');
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'char-canvas';
     this.gl = new THREE.WebGLRenderer({
@@ -41,9 +43,18 @@ export class CharacterViewer {
     });
     this.gl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-    this.camera.position.set(0, 1.05, 3.4);
-    this.camera.lookAt(0, 1.0, 0);
+    // Two framings of the SAME avatar: 'full' = the inventory paper-doll (whole body, drag to spin);
+    // 'head' = the unit-frame badge (camera tight on the head — the body falls below the small,
+    // overflow-clipped portrait, so only the head shows; the idle still plays).
+    if (framing === 'head') {
+      this.camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+      this.camera.position.set(0, 1.66, 0.92);
+      this.camera.lookAt(0, 1.66, 0);
+    } else {
+      this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+      this.camera.position.set(0, 1.05, 3.4);
+      this.camera.lookAt(0, 1.0, 0);
+    }
 
     // Simple fixed lighting (NOT the world's day/night environment — overkill for a preview).
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
@@ -52,25 +63,30 @@ export class CharacterViewer {
     this.scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x23232b, 1.1));
 
     // Horizontal-only rotation by drag (custom — NOT OrbitControls, which would also zoom/pitch/pan).
-    this.canvas.style.cursor = 'grab';
-    this.canvas.addEventListener('pointerdown', (e) => {
-      this.dragging = true;
-      this.lastX = e.clientX;
-      this.canvas.style.cursor = 'grabbing';
-      try { this.canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    });
-    this.canvas.addEventListener('pointermove', (e) => {
-      if (!this.dragging) return;
-      this.yaw += (e.clientX - this.lastX) * ROT_SENSITIVITY; // dx only — vertical is ignored
-      this.lastX = e.clientX;
-    });
-    const endDrag = (e: PointerEvent): void => {
-      this.dragging = false;
+    // Only the full paper-doll is draggable; the head badge is a passive, non-interactive portrait.
+    if (rotatable) {
       this.canvas.style.cursor = 'grab';
-      try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    };
-    this.canvas.addEventListener('pointerup', endDrag);
-    this.canvas.addEventListener('pointercancel', endDrag);
+      this.canvas.addEventListener('pointerdown', (e) => {
+        this.dragging = true;
+        this.lastX = e.clientX;
+        this.canvas.style.cursor = 'grabbing';
+        try { this.canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      });
+      this.canvas.addEventListener('pointermove', (e) => {
+        if (!this.dragging) return;
+        this.yaw += (e.clientX - this.lastX) * ROT_SENSITIVITY; // dx only — vertical is ignored
+        this.lastX = e.clientX;
+      });
+      const endDrag = (e: PointerEvent): void => {
+        this.dragging = false;
+        this.canvas.style.cursor = 'grab';
+        try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      };
+      this.canvas.addEventListener('pointerup', endDrag);
+      this.canvas.addEventListener('pointercancel', endDrag);
+    } else {
+      this.canvas.style.pointerEvents = 'none'; // badge: passive, let clicks pass through
+    }
 
     // Long-lived context: keep it on loss so a backgrounded GPU doesn't permanently black the canvas.
     this.canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());

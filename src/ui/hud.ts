@@ -5,6 +5,7 @@ import { registerOverlay } from './overlays';
 import { SLOT_LABELS } from './inventory';
 import { PROTECT_DROP_CAP } from '../sim/content/enhance';
 import { CharacterViewer } from '../render/character_viewer';
+import interact from 'interactjs';
 
 // Paper-doll equipment layout: two columns of slot tiles flanking the 3D model, in the exact
 // vertical order requested (distinct from EQUIP_SLOTS' order — this is the VISUAL arrangement).
@@ -13,6 +14,11 @@ const EQUIP_LAYOUT: { col: 'left' | 'right'; slots: EquipSlot[] }[] = [
   { col: 'left', slots: ['helmet', 'chest', 'weapon', 'hands', 'legs'] },
   { col: 'right', slots: ['earring', 'necklace', 'shield', 'ring', 'feet'] },
 ];
+
+// What a drag is carrying, resolved from the latest inventory snapshot at drag start.
+type DragInfo =
+  | { kind: 'bag'; index: number; targetSlot: EquipSlot | null; key: string } // bag stack; key = item identity at drag start; targetSlot set only if it can equip
+  | { kind: 'equip'; slot: EquipSlot }; // an equipped item -> back to the bag
 import { CharacterSheet } from './character_sheet';
 import { StoragePanel } from './storage';
 
@@ -41,7 +47,13 @@ export class Hud {
   private bag: HTMLDivElement;
   private bagTitle: HTMLDivElement;
   private bagGrid: HTMLDivElement;
-  private bagSlots: HTMLDivElement[] = [];
+  private bagSlots: HTMLButtonElement[] = [];
+  private dndStatus: HTMLDivElement; // aria-live region for drag outcomes
+  private dragGhost: HTMLElement | null = null; // floating clone that follows the cursor
+  private dragFrom: HTMLElement | null = null; // the slot/tile the drag started on
+  private justDragged = false; // suppress the click that can trail a drag's pointerup
+  private hoverCell: HTMLElement | null = null; // bag cell currently under the drag (live placement cue)
+  private dragInfo: DragInfo | null = null; // the active drag's info (kind/target), for the hover cue
   private bagStats: HTMLDivElement;
   // attribute spending (inside the bag window)
   private attrPointsEl: HTMLSpanElement;
@@ -50,18 +62,18 @@ export class Hud {
   private equipColLeft: HTMLDivElement;
   private equipColRight: HTMLDivElement;
   private charViewport: HTMLDivElement;
-  private charDetail: HTMLDivElement;
-  private charViewer: CharacterViewer;
-  private lastMastery: MasteryId = 'sword'; // last-known local class, for the 3D viewer
+  private charViewer: CharacterViewer; // inventory paper-doll (full body)
+  private headViewer: CharacterViewer; // unit-frame badge (the SAME component, head-framed)
+  private lastMastery: MasteryId = 'sword'; // last-known local class, shared by both viewers
   private equipCells: HTMLButtonElement[] = []; // paper-doll equip tiles (one per slot, fixed order)
-  // alchemy ("+N") controls inside the bag window
+  // alchemy ("+N") controls — now a STANDALONE panel (tecla L), mirror of the inventory (right side)
   private refineRow: HTMLDivElement;
   private refineBtns: HTMLButtonElement[] = [];
-  private luckyToggle: HTMLButtonElement;
   private protectToggle: HTMLButtonElement;
   private matLine: HTMLDivElement;
-  private luckyOn = false; // UI state: whether to spend a Lucky Powder
   private protectOn = false; // UI state (K4): whether to spend a Pedra de Proteção
+  private alchemyEl: HTMLDivElement; // the standalone alchemy/refino panel
+  private alchemyOpen = false;
   private bagOpen = false;
   // vendor shop window (toggled with V)
   private shopEl: HTMLDivElement;
@@ -103,7 +115,7 @@ export class Hud {
     this.root.className = 'hud';
     this.root.innerHTML = `
       <div class="unit-frame">
-        <div class="portrait">&#9733;</div>
+        <div class="portrait"></div>
         <div class="bars">
           <span class="name player-name"></span><span class="level"></span>
           <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
@@ -124,27 +136,33 @@ export class Hud {
       <div class="bot-indicator" hidden>&#9679; AUTO-PLAY</div>
       <div class="action-bar"></div>
       <div class="bag" hidden>
-        <div class="bag-title">Personagem</div>
-        <div class="char-screen">
-          <div class="equip-col equip-col-left"></div>
-          <div class="char-viewport"></div>
-          <div class="equip-col equip-col-right"></div>
+        <div class="char-cols">
+          <div class="char-col col-inv">
+            <div class="char-col-title bag-title">Inventário</div>
+            <div class="bag-grid"></div>
+          </div>
+          <div class="char-col col-player">
+            <div class="char-col-title">Personagem</div>
+            <div class="char-screen">
+              <div class="equip-col equip-col-left"></div>
+              <div class="char-viewport"></div>
+              <div class="equip-col equip-col-right"></div>
+            </div>
+            <div class="bag-stats"></div>
+            <div class="attrs">
+              <span class="attr-points"></span>
+              <button class="attr-btn attr-str">+ Força</button>
+              <button class="attr-btn attr-int">+ Inteligência</button>
+            </div>
+          </div>
         </div>
-        <div class="char-detail"></div>
-        <div class="bag-stats"></div>
-        <div class="attrs">
-          <span class="attr-points"></span>
-          <button class="attr-btn attr-str">+ Força</button>
-          <button class="attr-btn attr-int">+ Inteligência</button>
-        </div>
-        <div class="alchemy">
-          <button class="lucky-toggle">Pó da Sorte: OFF</button>
-          <button class="protect-toggle">Proteção: OFF</button>
-          <div class="refine-row"></div>
-          <div class="mat-line"></div>
-        </div>
-        <div class="bag-section-title">Bolsa</div>
-        <div class="bag-grid"></div>
+        <div class="dnd-status" aria-live="polite"></div>
+      </div>
+      <div class="alchemy-panel" hidden>
+        <div class="char-col-title">Alquimia</div>
+        <button class="protect-toggle">Proteção: OFF</button>
+        <div class="refine-row"></div>
+        <div class="mat-line"></div>
       </div>
       <div class="shop" hidden>
         <div class="shop-title"></div>
@@ -183,6 +201,9 @@ export class Hud {
     this.bag = this.root.querySelector('.bag') as HTMLDivElement;
     this.bagTitle = this.root.querySelector('.bag-title') as HTMLDivElement;
     this.bagGrid = this.root.querySelector('.bag-grid') as HTMLDivElement;
+    this.dndStatus = this.root.querySelector('.dnd-status') as HTMLDivElement;
+    // Require ~6px of movement before a drag starts, so a plain click still equips/uses.
+    (interact as unknown as { pointerMoveTolerance(n: number): void }).pointerMoveTolerance(6);
     this.bagStats = this.root.querySelector('.bag-stats') as HTMLDivElement;
     this.attrPointsEl = this.root.querySelector('.attr-points') as HTMLSpanElement;
     this.attrStrBtn = this.root.querySelector('.attr-str') as HTMLButtonElement;
@@ -198,17 +219,18 @@ export class Hud {
     this.equipColLeft = this.root.querySelector('.equip-col-left') as HTMLDivElement;
     this.equipColRight = this.root.querySelector('.equip-col-right') as HTMLDivElement;
     this.charViewport = this.root.querySelector('.char-viewport') as HTMLDivElement;
-    this.charDetail = this.root.querySelector('.char-detail') as HTMLDivElement;
-    this.charViewer = new CharacterViewer(); // 3D paper-doll (reuses the world's PlayerAvatar)
+    this.charViewer = new CharacterViewer(); // 3D paper-doll (full body), reuses PlayerAvatar
     this.charViewport.appendChild(this.charViewer.canvas);
+    // Head badge in the top-left unit frame: the SAME viewer component, head-framed, replacing the
+    // ★ glyph. THREE.Cache (enabled at startup) means its model files are already downloaded by the
+    // world/inventory — only this context re-uploads them (an unavoidable per-canvas WebGL cost).
+    const portrait = this.root.querySelector('.portrait:not(.portrait-target)') as HTMLDivElement;
+    this.headViewer = new CharacterViewer({ framing: 'head', rotatable: false });
+    portrait.appendChild(this.headViewer.canvas);
+    this.headViewer.setActive(true); // always-on: the unit frame is always visible
+    this.alchemyEl = this.root.querySelector('.alchemy-panel') as HTMLDivElement;
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
-    this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
     this.matLine = this.root.querySelector('.mat-line') as HTMLDivElement;
-    this.luckyToggle.addEventListener('click', () => {
-      this.luckyOn = !this.luckyOn;
-      this.luckyToggle.textContent = `Pó da Sorte: ${this.luckyOn ? 'ON' : 'OFF'}`;
-      this.luckyToggle.classList.toggle('on', this.luckyOn);
-    });
     this.protectToggle = this.root.querySelector('.protect-toggle') as HTMLButtonElement;
     this.protectToggle.addEventListener('click', () => {
       this.protectOn = !this.protectOn;
@@ -227,6 +249,7 @@ export class Hud {
     // All bag/skills descendants were queried above, so they ride along with the move.
     document.body.appendChild(this.skillsEl);
     document.body.appendChild(this.bag);
+    document.body.appendChild(this.alchemyEl); // standalone alchemy panel (right side), like .bag
 
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
@@ -235,15 +258,17 @@ export class Hud {
       if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
       else if (e.key.toLowerCase() === 'v') this.setShop(!this.shopOpen);
       else if (e.key.toLowerCase() === 'k') this.setSkills(!this.skillsOpen);
+      else if (e.key.toLowerCase() === 'l') this.setAlchemy(!this.alchemyOpen);
       else if (e.key.toLowerCase() === 'b') this.toggleBot();
       else if (e.key === 'Escape') {
         this.setBag(false);
         this.setShop(false);
         this.setSkills(false);
+        this.setAlchemy(false);
       }
     });
-    // ESC priority (overlays registry): the settings menu only opens when no window is up.
-    registerOverlay(() => this.bagOpen || this.shopOpen || this.skillsOpen);
+    // ESC priority (overlays registry): the central Esc menu only opens when no window is up.
+    registerOverlay(() => this.bagOpen || this.shopOpen || this.skillsOpen || this.alchemyOpen);
   }
 
   // Flip auto-play on/off via the same command a click on the button sends.
@@ -255,11 +280,19 @@ export class Hud {
     this.bagOpen = open;
     this.bag.hidden = !open;
     this.charViewer.setActive(open); // gate the 3D viewer's rendering to when the panel is open
+    if (open) this.sheet.setOpen(false); // I and C share the left anchor -> keep them mutually exclusive
+    else this.abortDrag(); // closing mid-drag must not orphan the ghost / freeze the panel
   }
 
   private setShop(open: boolean): void {
     this.shopOpen = open;
     this.shopEl.hidden = !open;
+  }
+
+  // Alchemy / Refino — standalone panel (tecla L), positioned mirror of the inventory (right edge).
+  private setAlchemy(open: boolean): void {
+    this.alchemyOpen = open;
+    this.alchemyEl.hidden = !open;
   }
 
   private setSkills(open: boolean): void {
@@ -284,14 +317,17 @@ export class Hud {
     this.botToggleBtn.classList.toggle('on', bot);
     this.botIndicator.hidden = !bot;
 
-    // Paper-doll: drive the 3D viewer every frame the panel is open, BEFORE the early-returns below
-    // — a momentary missing player entity (death/respawn window) must not freeze it or stale its dt.
-    if (this.bagOpen) {
-      const lid = world.localPlayerId();
-      const me = lid != null ? world.entities().find((e) => e.id === lid) : undefined;
-      if (me) this.lastMastery = me.mastery;
-      this.charViewer.tick(this.lastMastery);
+    // 3D viewers, driven BEFORE the early-returns below (a momentary missing player entity during
+    // the death/respawn window must not freeze them or stale their dt). The head badge renders
+    // EVERY frame (the unit frame is always visible); the inventory paper-doll only while open.
+    // Both share the local player's class (mastery), kept current even while the bag is closed.
+    const lid = world.localPlayerId();
+    const me = lid != null ? world.entities().find((e) => e.id === lid) : undefined;
+    if (me) {
+      this.lastMastery = me.mastery;
+      this.headViewer.tick(this.lastMastery); // cheap 44px idle; skipped only before the player exists
     }
+    if (this.bagOpen) this.charViewer.tick(this.lastMastery);
 
     const id = world.localPlayerId();
     if (id == null) return;
@@ -330,6 +366,7 @@ export class Hud {
 
     this.updateActionBar(world.abilities());
     if (this.bagOpen) this.updateBag(world.inventory(), p);
+    if (this.alchemyOpen) this.updateAlchemy(world.inventory());
     if (this.shopOpen) this.updateShop(world, p);
     if (this.skillsOpen) this.updateSkills(world, p);
     if (this.sheet.isOpen()) this.sheet.update(p); // K6: ficha (só leitura)
@@ -497,21 +534,22 @@ export class Hud {
     this.attrStrBtn.disabled = p.attrPoints <= 0;
     this.attrIntBtn.disabled = p.attrPoints <= 0;
 
-    this.updateAlchemy(inv);
-
     // Bag grid (click an equippable stack to equip it). Slots built once.
     while (this.bagSlots.length < inv.capacity) {
       const i = this.bagSlots.length;
-      const slot = document.createElement('div');
+      const slot = document.createElement('button'); // <button>: focável + Enter/Space nativos (a11y)
+      slot.type = 'button';
       slot.className = 'bag-slot';
+      slot.dataset.index = String(i);
       slot.addEventListener('click', () => this.onBagClick(i));
       this.bagGrid.appendChild(slot);
       this.bagSlots.push(slot);
+      this.makeDraggable(slot); // arraste um item equipável daqui até a sua quadrícula de equip
     }
-    this.bagTitle.textContent = `Bolsa (${inv.stacks.length}/${inv.capacity})`;
+    this.bagTitle.textContent = `Inventário (${inv.stacks.length}/${inv.capacity})`;
     for (let i = 0; i < this.bagSlots.length; i++) {
       const slot = this.bagSlots[i];
-      const stack = inv.stacks[i];
+      const stack = inv.slots[i]; // positional: grid cell i shows the item AT bag slot i (or empty)
       if (stack) {
         slot.classList.add('filled');
         // K2 degrees: a below-level equippable is LOCKED — no equip affordance, and the click
@@ -523,19 +561,23 @@ export class Hud {
         slot.classList.toggle('usable', stack.consumable);
         slot.dataset.rarity = stack.rarity; // UI colors the border/text by this
         const plusTag = stack.plus > 0 ? ` +${stack.plus}` : '';
+        const qtyTag = stack.qty > 1 ? ` ×${stack.qty}` : '';
         const label = `${stack.name}${plusTag} (${stack.rarityName})`;
         slot.title = locked
           ? `${label} — requer nível ${stack.reqLevel}`
           : stack.equipSlot
-            ? `${label} — clique p/ equipar`
+            ? `${label} — arraste p/ equipar (ou clique)`
             : stack.consumable
               ? `${label} — clique p/ usar`
               : label;
-        slot.textContent = stack.qty > 1 ? `${label} ×${stack.qty}` : label;
+        slot.setAttribute('aria-label', slot.title);
+        // No quadrado mostramos só nome (+N, ×qtd); a raridade é a cor da borda, o texto completo no tooltip.
+        slot.textContent = `${stack.name}${plusTag}${qtyTag}`;
       } else {
         slot.classList.remove('filled', 'equippable', 'usable', 'locked');
         delete slot.dataset.rarity;
         slot.title = '';
+        slot.removeAttribute('aria-label');
         slot.textContent = '';
       }
     }
@@ -544,7 +586,8 @@ export class Hud {
   // Click a bag stack -> equip equippable gear, or use a consumable (potion).
   // No-op for anything else (materials, etc.).
   private onBagClick(i: number): void {
-    const stack = this.lastInv?.stacks[i];
+    if (this.justDragged) return; // ignore the click that can trail a drag
+    const stack = this.lastInv?.slots[i]; // positional: act on the item at grid slot i
     if (!stack || !this.world) return;
     if (stack.equipSlot) {
       if (stack.canEquip === false) return; // K2: below required level — dead click (the sim would refuse it)
@@ -586,11 +629,9 @@ export class Hud {
         plusEl.className = 'equip-tile-plus';
         tile.append(slotEl, nameEl, plusEl);
         tile.addEventListener('click', () => this.onEquipClick(slot));
-        const detail = (): void => this.showEquipDetail(slot);
-        tile.addEventListener('pointerenter', detail);
-        tile.addEventListener('focus', detail);
         parent.appendChild(tile);
         this.equipCells.push(tile);
+        this.makeDraggable(tile); // arraste um item equipado daqui até a bolsa p/ desequipar
       }
     }
   }
@@ -620,26 +661,194 @@ export class Hud {
     }
   }
 
-  // Show a slot's full item info in the detail line under the model (on hover/focus of its tile).
-  private showEquipDetail(slot: EquipSlot): void {
-    const eq = this.lastInv?.equipment.find((e) => e.slot === slot);
-    const label = SLOT_LABELS[slot];
-    if (eq?.itemId) {
-      const plusTag = eq.plus > 0 ? ` +${eq.plus}` : '';
-      this.charDetail.textContent =
-        `${label}: ${eq.name}${plusTag} (${eq.rarityName}) · Dur ${eq.durability}/${eq.maxDurability}`;
-    } else {
-      this.charDetail.textContent = `${label}: vazio`;
-    }
-  }
-
   // Click an equipped slot -> unequip it back to the bag.
   private onEquipClick(slot: EquipSlot): void {
+    if (this.justDragged) return; // ignore the click that can trail a drag
     const eq = this.lastInv?.equipment.find((e) => e.slot === slot);
     if (eq?.itemId && this.world) this.world.sendCommand({ t: 'unequip', slot });
   }
 
+  // ---- Drag-and-drop (interact.js) -------------------------------------------------------------
+  // interact.js is used purely as a pointer-gesture engine (unified mouse/touch + a move threshold).
+  // We draw a floating GHOST that follows the cursor and hit-test the drop ourselves
+  // (document.elementFromPoint), so the REAL slot is never moved/transformed -> the per-frame
+  // updateBag() re-render can never fight an in-flight drag. A drop only ever fires the EXISTING
+  // equip/unequip commands (zero sim/seam change).
+
+  private makeDraggable(el: HTMLElement): void {
+    interact(el).draggable({
+      inertia: false,
+      autoScroll: false,
+      listeners: {
+        start: (ev: any) => this.onDragStart(ev),
+        move: (ev: any) => this.onDragMove(ev),
+        end: (ev: any) => this.onDragEnd(ev),
+      },
+    });
+  }
+
+  // What (if anything) this element can drag right now, from the latest inventory snapshot.
+  private dragInfoFor(el: HTMLElement): DragInfo | null {
+    if (el.classList.contains('bag-slot')) {
+      const idx = Number(el.dataset.index);
+      if (!Number.isInteger(idx)) return null;
+      const st = this.lastInv?.slots[idx];
+      if (!st) return null; // empty slot -> nothing to drag
+      // ANY held item can be repositioned in the bag; targetSlot is set only if it can ALSO equip.
+      const targetSlot = st.equipSlot && st.canEquip !== false ? st.equipSlot : null;
+      return { kind: 'bag', index: idx, targetSlot, key: `${st.itemId}|${st.rarity}|${st.plus}` };
+    }
+    if (el.classList.contains('equip-tile')) {
+      const slot = el.dataset.slot as EquipSlot | undefined;
+      if (!slot) return null;
+      const eq = this.lastInv?.equipment.find((e) => e.slot === slot);
+      if (!eq || !eq.itemId) return null;
+      return { kind: 'equip', slot };
+    }
+    return null;
+  }
+
+  private onDragStart(ev: any): void {
+    const el = ev.target as HTMLElement;
+    const info = this.dragInfoFor(el);
+    if (!info) { ev.interaction.stop(); return; } // vazio / não arrastável -> cancela o gesto
+    this.dragFrom = el;
+    this.dragInfo = info;
+    const ghost = el.cloneNode(true) as HTMLElement;
+    ghost.className = `${el.className} dnd-ghost`;
+    ghost.classList.remove('dragging-src');
+    ghost.style.width = `${el.offsetWidth}px`;
+    ghost.style.height = `${el.offsetHeight}px`;
+    document.body.appendChild(ghost);
+    this.dragGhost = ghost;
+    this.positionGhost(ev.clientX, ev.clientY);
+    el.classList.add('dragging-src');
+    this.highlightTargets(info);
+  }
+
+  private onDragMove(ev: any): void {
+    this.positionGhost(ev.clientX, ev.clientY);
+    // Live placement cue: highlight the bag cell the item would land in (positional drop).
+    let cell = (document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.bag-slot') ?? null) as HTMLElement | null;
+    // Honest cue: dragging EQUIPPED gear into the bag lands EXACTLY only on an EMPTY cell (an
+    // occupied cell falls back to the first free hole), so don't green-highlight occupied cells.
+    if (cell && this.dragInfo?.kind === 'equip') {
+      const to = Number(cell.dataset.index);
+      if (!(Number.isInteger(to) && this.lastInv?.slots[to] == null)) cell = null;
+    }
+    if (cell !== this.hoverCell) {
+      this.hoverCell?.classList.remove('drop-hover');
+      this.hoverCell = cell;
+      cell?.classList.add('drop-hover');
+    }
+  }
+
+  private onDragEnd(ev: any): void {
+    const from = this.dragFrom;
+    if (this.dragGhost) { this.dragGhost.remove(); this.dragGhost = null; } // remove antes do hit-test
+    if (from) {
+      const target = document.elementFromPoint(ev.clientX, ev.clientY);
+      this.handleDrop(from, target);
+      from.classList.remove('dragging-src');
+      this.justDragged = true; // o clique que segue o pointerup do arrasto não deve re-disparar
+      setTimeout(() => { this.justDragged = false; }, 0);
+    }
+    this.highlightAllOff();
+    this.dragFrom = null;
+  }
+
+  // Resolve the element under the pointer and fire the matching command. Re-reads the LIVE inventory
+  // (not lastInv) and re-validates, so loot/sell/consume landing mid-drag can't misfire.
+  private handleDrop(from: HTMLElement, target: Element | null): void {
+    const info = this.dragInfoFor(from);
+    if (!info || !this.world) return;
+    const inv = this.world.inventory();
+    if (info.kind === 'bag') {
+      // Guard the (rare) case where the grabbed slot's contents changed mid-drag (e.g. the bot
+      // sold/used it while the panel was open): only act if the SAME item is still there.
+      // Positional loot fills holes (never shifts), so a normal drag is always safe.
+      const cur = inv.slots[info.index];
+      if (!cur || `${cur.itemId}|${cur.rarity}|${cur.plus}` !== info.key) return;
+      // (a) onto a COMPATIBLE equip square -> equip
+      const sq = target?.closest('.equip-tile') as HTMLElement | null;
+      if (sq) {
+        const slot = sq.dataset.slot as EquipSlot | undefined;
+        if (slot && slot === info.targetSlot && cur.equipSlot === slot && cur.canEquip !== false) {
+          this.world.sendCommand({ t: 'equip', itemId: cur.itemId, rarity: cur.rarity, plus: cur.plus });
+          this.announceDnd(`Equipado: ${cur.name}`);
+        } else {
+          this.announceDnd('Esse item não vai nesse espaço');
+        }
+        return;
+      }
+      // (b) onto ANOTHER bag cell -> reposition (swap/move) to EXACTLY that slot (no auto-organize)
+      const cell = target?.closest('.bag-slot') as HTMLElement | null;
+      if (cell) {
+        const to = Number(cell.dataset.index);
+        if (Number.isInteger(to) && to >= 0 && to < inv.capacity && to !== info.index) {
+          this.world.sendCommand({ t: 'move-item', from: info.index, to });
+        }
+      }
+      return;
+    }
+    // (c) equipped item -> dropped on a SPECIFIC bag cell: unequip exactly there (the sim places it
+    // at that slot if empty, else the first free hole); on the column generally -> first free hole.
+    const cell = target?.closest('.bag-slot') as HTMLElement | null;
+    if (cell) {
+      const to = Number(cell.dataset.index);
+      const toBagSlot = Number.isInteger(to) && to >= 0 && to < inv.capacity ? to : undefined;
+      this.world.sendCommand({ t: 'unequip', slot: info.slot, toBagSlot });
+      this.announceDnd('Desequipado');
+      return;
+    }
+    if (target?.closest('.col-inv')) {
+      this.world.sendCommand({ t: 'unequip', slot: info.slot });
+      this.announceDnd('Desequipado');
+    }
+  }
+
+  // Mark valid drop targets at drag start (non-color cue via .drop-ok/.drop-dim in CSS).
+  private highlightTargets(info: DragInfo): void {
+    if (info.kind === 'bag') {
+      for (const tile of this.equipCells) {
+        const ok = info.targetSlot != null && (tile.dataset.slot as EquipSlot) === info.targetSlot;
+        tile.classList.toggle('drop-ok', ok);
+        tile.classList.toggle('drop-dim', !ok); // equip squares that can't take this item dim out
+      }
+    } else {
+      this.bagGrid.classList.add('drop-ok'); // dragging equipped gear -> the whole bag accepts it
+    }
+  }
+
+  private highlightAllOff(): void {
+    for (const tile of this.equipCells) tile.classList.remove('drop-ok', 'drop-dim');
+    this.bagGrid.classList.remove('drop-ok');
+    this.hoverCell?.classList.remove('drop-hover'); // also clears the live placement cue
+    this.hoverCell = null;
+    this.dragInfo = null;
+  }
+
+  private positionGhost(x: number, y: number): void {
+    if (!this.dragGhost) return;
+    this.dragGhost.style.left = `${x}px`;
+    this.dragGhost.style.top = `${y}px`;
+  }
+
+  // Tear down an in-flight drag when the panel closes (Esc/I): a late pointerup then runs onDragEnd
+  // with dragFrom=null -> harmless.
+  private abortDrag(): void {
+    if (this.dragGhost) { this.dragGhost.remove(); this.dragGhost = null; }
+    this.highlightAllOff();
+    if (this.dragFrom) this.dragFrom.classList.remove('dragging-src');
+    this.dragFrom = null;
+  }
+
+  private announceDnd(msg: string): void {
+    this.dndStatus.textContent = msg;
+  }
+
   private updateAlchemy(inv: InventoryView): void {
+    this.lastInv = inv; // onRefineClick reads this; the alchemy panel can be open with the bag closed
     // One "Refinar" button per equip slot, built once.
     while (this.refineBtns.length < inv.equipment.length) {
       const j = this.refineBtns.length;
@@ -651,7 +860,6 @@ export class Hud {
     }
     const count = (id: string): number =>
       inv.stacks.filter((s) => s.itemId === id).reduce((n, s) => n + s.qty, 0);
-    const powder = count('lucky_powder');
     for (let j = 0; j < this.refineBtns.length; j++) {
       const eq = inv.equipment[j];
       const btn = this.refineBtns[j];
@@ -668,10 +876,10 @@ export class Hud {
         btn.textContent = `${slotName} +${eq.plus} (sem Elixir)`;
         btn.disabled = true;
       } else {
-        // Success chance (matching the toggle + held powder). In the risk band (+ >= RISK_FLOOR)
-        // also state the break danger as TEXT — never color alone: protected => capped -1, else
-        // the break % and the multi-drop. CSS reinforces the tier via [data-risk].
-        const ch = this.luckyOn && powder > 0 ? eq.enhanceChanceLucky : eq.enhanceChance;
+        // Success chance. In the risk band (+ >= RISK_FLOOR) also state the break danger as TEXT —
+        // never color alone: protected => capped -1, else the break % and the multi-drop. CSS
+        // reinforces the tier via [data-risk].
+        const ch = eq.enhanceChance;
         const warn = eq.breakChance > 0
           ? (this.protectOn
             // The cap only SHRINKS the drop when dropOnFail > cap (+5 and up); at +4 (dropOnFail
@@ -686,7 +894,7 @@ export class Hud {
       }
     }
     this.matLine.textContent =
-      `Elixir Arma ${count('elixir_weapon')} · Elixir Armadura ${count('elixir_armor')} · Pó ${powder}`;
+      `Elixir Arma ${count('elixir_weapon')} · Elixir Armadura ${count('elixir_armor')}`;
   }
 
   // Click "Refinar" -> attempt the "+N" upgrade on that slot (sim rolls it).
@@ -703,7 +911,7 @@ export class Hud {
       );
       if (!ok) return;
     }
-    this.world.sendCommand({ t: 'enhance', slot: eq.slot, useLuckyPowder: this.luckyOn, useProtection: this.protectOn });
+    this.world.sendCommand({ t: 'enhance', slot: eq.slot, useProtection: this.protectOn });
   }
 
   private updateActionBar(abilities: ReadonlyArray<AbilityView>): void {

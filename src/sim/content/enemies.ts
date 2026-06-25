@@ -76,7 +76,6 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
     { itemId: 'health_potion', chance: 0.25 },
     { itemId: 'old_sword', chance: 0.05 }, // rare-ish placeholder
     // alchemy materials (rare-ish, so upgrading is a real choice)
-    { itemId: 'lucky_powder', chance: 0.18 },
     { itemId: 'elixir_weapon', chance: 0.12 },
     { itemId: 'elixir_armor', chance: 0.12 },
   ],
@@ -103,7 +102,6 @@ export const ROGUE_TEMPLATE: EnemyTemplate = {
   drops: [
     { itemId: 'health_potion', chance: 0.3 },
     { itemId: 'old_sword', chance: 0.06 },
-    { itemId: 'lucky_powder', chance: 0.2 },
     { itemId: 'elixir_weapon', chance: 0.14 },
   ],
 };
@@ -128,7 +126,6 @@ export const WARRIOR_TEMPLATE: EnemyTemplate = {
     { itemId: 'wolf_leather', chance: 0.45 },
     { itemId: 'health_potion', chance: 0.3 },
     { itemId: 'iron_spear', chance: 0.06 }, // carries a spear (a way to farm into the Lança mastery)
-    { itemId: 'lucky_powder', chance: 0.2 },
     { itemId: 'elixir_armor', chance: 0.16 },
   ],
 };
@@ -153,7 +150,6 @@ export const MAGE_TEMPLATE: EnemyTemplate = {
   attackRange: 11, // casts from afar — holds distance rather than charging in
   drops: [
     { itemId: 'health_potion', chance: 0.25 },
-    { itemId: 'lucky_powder', chance: 0.22 },
     { itemId: 'elixir_weapon', chance: 0.14 },
     { itemId: 'elixir_armor', chance: 0.14 },
   ],

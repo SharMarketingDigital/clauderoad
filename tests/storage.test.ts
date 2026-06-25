@@ -13,7 +13,7 @@ describe('storage (armazém) — depósito/saque puro', () => {
     const bag = [mk('health_potion', 5)];
     const storage: ItemStack[] = [];
     expect(depositStack(bag, storage, 'health_potion', 'normal', 0)).toBe(true);
-    expect(bag.length).toBe(0);
+    expect(bag.filter((s) => s != null)).toEqual([]); // saiu da bolsa (modelo esparso: deixa um hole no slot)
     expect(storage).toEqual([mk('health_potion', 5)]);
   });
 
@@ -21,7 +21,7 @@ describe('storage (armazém) — depósito/saque puro', () => {
     const bag: ItemStack[] = [];
     const storage = [mk('steel_sword', 1)];
     expect(withdrawStack(storage, bag, 'steel_sword', 'normal', 0)).toBe(true);
-    expect(storage.length).toBe(0);
+    expect(storage.filter((s) => s != null)).toEqual([]); // saiu do armazém (hole no slot)
     expect(bag).toEqual([mk('steel_sword', 1)]);
   });
 
@@ -45,8 +45,8 @@ describe('storage (armazém) — depósito/saque puro', () => {
     storage.push(mk('health_potion', 10)); // armazém em STORAGE_SLOTS, mas com stack casável
     const bag = [mk('health_potion', 5)];
     expect(depositStack(bag, storage, 'health_potion', 'normal', 0)).toBe(true);
-    expect(storage[storage.length - 1].qty).toBe(15); // a qty cresceu
-    expect(bag.length).toBe(0);
+    expect(storage[storage.length - 1]!.qty).toBe(15); // a qty cresceu
+    expect(bag.filter((s) => s != null)).toEqual([]); // saiu da bolsa (hole no slot)
   });
 
   it('saque de um NOVO stack para a bolsa cheia (BAG_SLOTS) é recusado, armazém intacto', () => {
