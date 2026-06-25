@@ -10,7 +10,7 @@
 // The server is authoritative for everything; this only mirrors and renders.
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView,
-  PartyView, PartyInviteView,
+  PartyView, PartyInviteView, DuelView, DuelInviteView,
 } from '../world_api';
 import type {
   ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine, ChatChannel,
@@ -133,6 +133,14 @@ export class ClientWorld implements IWorld {
   }
   localInvite(): PartyInviteView | null {
     return this.self ? this.self.invite : null;
+  }
+  // Duel state is authoritative in the server's sim (A1), but not yet delivered over the wire —
+  // the SelfSnap field + UI land in A3. Until then the online client reports no duel.
+  localDuel(): DuelView | null {
+    return null;
+  }
+  localDuelInvite(): DuelInviteView | null {
+    return null;
   }
 
   // ---- party matching (lobby; concrete MP channel, like chat — not part of IWorld) ----

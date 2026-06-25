@@ -12,10 +12,11 @@
 import { Rng } from './rng';
 import { applyMove, slideThroughGates } from './movement';
 import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './party';
+import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, EquipSlot, Rarity,
-  StatusKind, DamageType, PartyView, PartyInviteView, PartyExpMode, PartyLootMode,
+  StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
 import {
@@ -146,8 +147,10 @@ export function xpForLevel(level: number): number {
 
 // Party (social) commands — applied even when a player's auto-play (bot) is ON, since
 // auto-play owns only combat + movement, not the player's group membership.
-const PARTY_COMMANDS: ReadonlySet<Command['t']> = new Set([
+// Social commands work even while auto-play (bot) is ON — the bot owns only combat + movement.
+const SOCIAL_COMMANDS: ReadonlySet<Command['t']> = new Set([
   'party-create', 'party-invite', 'party-accept', 'party-refuse', 'party-leave', 'party-kick', 'party-admit',
+  'duel-challenge', 'duel-accept', 'duel-decline',
 ]);
 
 export class Sim implements IWorld {
@@ -181,6 +184,13 @@ export class Sim implements IWorld {
   private parties = new Map<number, Party>(); // partyId -> party
   private partyOfPlayer = new Map<number, number>(); // playerId -> partyId (absent = solo)
   private pendingInvites = new Map<number, { fromId: number; partyId: number }>(); // inviteeId -> invite
+  // PvP duel (Tier 1 A1). Consensual 1v1, authoritative here (mutated only by commands) and folded
+  // into the hash. Offline single-player never duels, so these stay empty and the hash is unchanged.
+  // No PvP damage yet — A1 is only the challenge/accept handshake (the damage is A2).
+  private nextDuelId = 1;
+  private duels = new Map<number, Duel>(); // duelId -> duel
+  private duelOf = new Map<number, number>(); // playerId -> duelId (absent = not dueling)
+  private duelInvites = new Map<number, number>(); // inviteeId -> challengerId
   // Ticks at which a dead enemy should respawn (FIFO; processed each tick).
   private respawnQueue: { at: number; zone: number }[] = []; // {when, which ring} to refill
   // World bosses: one runtime slot per entry in BOSS_DEFS (same order). Each tracks
@@ -275,6 +285,7 @@ export class Sim implements IWorld {
     // Leave any party first (promotes a new leader / dissolves a now-too-small party, and
     // cancels the player's outbound invites), then drop this player's OWN pending invite.
     this.removeFromParty(id);
+    this.removeFromDuel(id); // a disconnecting duelist dissolves its duel + clears its challenges
     this.pendingInvites.delete(id);
     this.ents.delete(id);
     this.moveIntents.delete(id);
@@ -829,6 +840,61 @@ export class Sim implements IWorld {
     }
   }
 
+  // PvP duel (Tier 1 A1) — consensual 1v1, mirroring the party invite/accept handshake. Challenge an
+  // online player by name; they accept (forms the pair) or decline. NO damage yet (that's A2): A1
+  // only tracks who challenged whom and who is paired. All pure mutations, no Rng — determinism-safe.
+  private challengeDuel(p: Entity, name: string): void {
+    if (this.duelOf.has(p.id)) return; // already dueling
+    for (const tid of this.playerIds) {
+      if (tid === p.id) continue;
+      const t = this.ents.get(tid);
+      if (!t || t.kind !== 'player' || t.name !== name) continue;
+      if (this.duelOf.has(tid) || this.duelInvites.has(tid)) continue; // dueling / already challenged
+      this.duelInvites.set(tid, p.id);
+      return; // first match only (name is not unique; mirrors inviteToParty)
+    }
+  }
+
+  // The challenged player accepts: form the duel pair if both are still online and not already
+  // dueling. Always clears the pending challenge.
+  private acceptDuel(p: Entity): void {
+    const fromId = this.duelInvites.get(p.id);
+    if (fromId === undefined) return;
+    this.duelInvites.delete(p.id);
+    if (this.duelOf.has(p.id)) return; // paired meanwhile
+    const from = this.ents.get(fromId);
+    if (!from || from.kind !== 'player' || this.duelOf.has(fromId)) return; // challenger gone / now dueling
+    const id = this.nextDuelId++;
+    const a = Math.min(p.id, fromId);
+    const b = Math.max(p.id, fromId);
+    this.duels.set(id, { id, a, b });
+    this.duelOf.set(a, id);
+    this.duelOf.set(b, id);
+  }
+
+  // Decline (drop the pending challenge).
+  private declineDuel(p: Entity): void {
+    this.duelInvites.delete(p.id);
+  }
+
+  // Remove a player from any duel and clear challenges it's part of (shared by disconnect; A2 also
+  // calls this when a duel ends by a downing). Mirrors removeFromParty.
+  private removeFromDuel(playerId: number): void {
+    this.duelInvites.delete(playerId); // drop a challenge TO this player
+    for (const [inviteeId, fromId] of this.duelInvites) {
+      if (fromId === playerId) this.duelInvites.delete(inviteeId); // drop challenges FROM this player
+    }
+    const did = this.duelOf.get(playerId);
+    if (did === undefined) return;
+    const duel = this.duels.get(did);
+    this.duelOf.delete(playerId);
+    if (duel) {
+      const other = duel.a === playerId ? duel.b : duel.a;
+      this.duelOf.delete(other); // the duel dissolves for both
+      this.duels.delete(did);
+    }
+  }
+
   // The local player's party / pending invite (offline = null; the offline player can't
   // group, since there's no one to invite). The server reads partyViewFor/inviteViewFor
   // per player to fill each `self`; the online ClientWorld mirrors them.
@@ -837,6 +903,12 @@ export class Sim implements IWorld {
   }
   localInvite(): PartyInviteView | null {
     return this.inviteViewFor(this.localId);
+  }
+  localDuel(): DuelView | null {
+    return this.duelViewFor(this.localId);
+  }
+  localDuelInvite(): DuelInviteView | null {
+    return this.duelInviteViewFor(this.localId);
   }
 
   partyViewFor(id: number): PartyView | null {
@@ -873,6 +945,25 @@ export class Sim implements IWorld {
     const from = this.ents.get(inv.fromId);
     if (!party || !from) return null;
     return { fromId: inv.fromId, fromName: from.name, expMode: party.expMode, lootMode: party.lootMode };
+  }
+
+  duelViewFor(id: number): DuelView | null {
+    const did = this.duelOf.get(id);
+    if (did === undefined) return null;
+    const duel = this.duels.get(did);
+    if (!duel) return null;
+    const otherId = duel.a === id ? duel.b : duel.a;
+    const other = this.ents.get(otherId);
+    if (!other) return null;
+    return { opponentId: otherId, opponentName: other.name };
+  }
+
+  duelInviteViewFor(id: number): DuelInviteView | null {
+    const fromId = this.duelInvites.get(id);
+    if (fromId === undefined) return null;
+    const from = this.ents.get(fromId);
+    if (!from) return null;
+    return { fromId, fromName: from.name };
   }
 
   entities(): ReadonlyArray<EntityView> {
@@ -945,7 +1036,7 @@ export class Sim implements IWorld {
             this.moveIntents.set(id, { t: 'stop' }); // hand control back to the human
             p.targetId = null;
           }
-        } else if (!this.botPlayers.has(id) || PARTY_COMMANDS.has(cmd.t)) {
+        } else if (!this.botPlayers.has(id) || SOCIAL_COMMANDS.has(cmd.t)) {
           // Manual combat/economy input is ignored while auto-play is ON, but SOCIAL
           // party commands still apply (auto-play owns only the player's combat + movement,
           // so you can still accept an invite / manage your group while botting).
@@ -1304,6 +1395,9 @@ export class Sim implements IWorld {
       case 'party-leave': this.removeFromParty(p.id); return;
       case 'party-kick': this.kickFromParty(p, cmd.id); return;
       case 'party-admit': this.admitToParty(p, cmd.playerId); return;
+      case 'duel-challenge': this.challengeDuel(p, cmd.name); return;
+      case 'duel-accept': this.acceptDuel(p); return;
+      case 'duel-decline': this.declineDuel(p); return;
     }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {
@@ -2551,6 +2645,15 @@ export class Sim implements IWorld {
     for (const iid of [...this.pendingInvites.keys()].sort((a, b) => a - b)) {
       const inv = this.pendingInvites.get(iid)!;
       mix(iid); mix(inv.fromId); mix(inv.partyId);
+    }
+    // PvP duel state (deterministic order: duels by id with the canonical a<b pair, then pending
+    // challenges by invitee id). Empty offline, so this adds nothing to the hash there.
+    for (const did of [...this.duels.keys()].sort((a, b) => a - b)) {
+      const duel = this.duels.get(did)!;
+      mix(duel.id); mix(duel.a); mix(duel.b);
+    }
+    for (const iid of [...this.duelInvites.keys()].sort((a, b) => a - b)) {
+      mix(iid); mix(this.duelInvites.get(iid)!);
     }
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);

@@ -210,6 +210,18 @@ export interface PartyInviteView {
   readonly lootMode: PartyLootMode;
 }
 
+// The local player's active duel (its opponent), or null when not dueling. UI draws a duel banner.
+export interface DuelView {
+  readonly opponentId: number;
+  readonly opponentName: string;
+}
+
+// A pending duel challenge shown to the challenged player (accept / decline).
+export interface DuelInviteView {
+  readonly fromId: number;
+  readonly fromName: string;
+}
+
 // Player intent / commands. The client streams these into the world.
 // Offline they hit the local Sim; online they will be sent to the server.
 //
@@ -241,8 +253,12 @@ export type Command =
   | { t: 'party-refuse' } // decline your pending invite
   | { t: 'party-leave' } // leave your party (a leaving leader promotes the next member, or it dissolves)
   | { t: 'party-kick'; id: number } // leader: remove a member by player id
-  | { t: 'party-admit'; playerId: number }; // leader admits a matching join-request (server-issued only; the
+  | { t: 'party-admit'; playerId: number } // leader admits a matching join-request (server-issued only; the
   // request/approval handshake lives in the server's matching lobby — the sim just does the membership change)
+  // --- PvP duel (Tier 1; consensual 1v1) ---
+  | { t: 'duel-challenge'; name: string } // challenge an online player to a duel by name
+  | { t: 'duel-accept' } // accept your pending duel challenge (forms the pair)
+  | { t: 'duel-decline' }; // decline your pending duel challenge
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -323,5 +339,9 @@ export interface IWorld {
   localParty(): PartyView | null;
   // A pending party invite for the local player (to accept/refuse), or null.
   localInvite(): PartyInviteView | null;
+  // The local player's active duel opponent, or null when not dueling. UI draws the duel banner.
+  localDuel(): DuelView | null;
+  // A pending duel challenge for the local player (to accept/decline), or null.
+  localDuelInvite(): DuelInviteView | null;
   sendCommand(cmd: Command): void;
 }

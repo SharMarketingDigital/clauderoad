@@ -179,6 +179,18 @@ export class ServerWorld {
       case 'party-kick':
         if (Number.isInteger(cmd.id)) this.sim.sendCommandFor(id, { t: 'party-kick', id: cmd.id });
         return;
+      // --- PvP duel (Tier 1): consensual 1v1; the sim validates the pairing/eligibility ---
+      case 'duel-challenge':
+        if (typeof cmd.name === 'string' && cmd.name.length > 0 && cmd.name.length <= 24) {
+          this.sim.sendCommandFor(id, { t: 'duel-challenge', name: cmd.name });
+        }
+        return;
+      case 'duel-accept':
+        this.sim.sendCommandFor(id, { t: 'duel-accept' });
+        return;
+      case 'duel-decline':
+        this.sim.sendCommandFor(id, { t: 'duel-decline' });
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }
