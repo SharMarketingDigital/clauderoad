@@ -185,7 +185,10 @@ html, body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 320px;
+  width: 680px;
+  max-width: 94vw;
+  max-height: 90vh;
+  overflow-y: auto;
   padding: 12px;
   pointer-events: auto;
   background: var(--panel);
@@ -203,9 +206,12 @@ html, body {
 }
 .bag-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 6px;
+  max-height: 30vh;
+  overflow-y: auto;
 }
+.bag-section-title { font-size: 11px; font-weight: 600; color: var(--gold); margin: 4px 0 6px; }
 .bag-slot {
   aspect-ratio: 1;
   display: grid;
@@ -268,34 +274,80 @@ html, body {
 .storage .bag-slot.filled:not(.disabled):hover { border-color: #fff; }
 .storage .bag-slot.disabled { opacity: 0.5; cursor: default; }
 
-/* Equipped-slots row inside the bag window. */
-.equip-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-.equip-slot {
-  flex: 1;
-  min-height: 34px;
+/* Character screen ("I"): a 3D paper-doll flanked by two columns of equipment tiles.
+   minmax(0,...) on the side columns lets the tile labels ellipsize instead of stretching the panel. */
+.char-screen {
   display: grid;
-  place-items: center;
-  padding: 4px;
-  font-size: 10px;
+  grid-template-columns: minmax(0, 150px) 1fr minmax(0, 150px);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.equip-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.char-viewport {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  min-width: 0;
+  background: radial-gradient(circle at 50% 35%, #1b2230 0%, #0e1219 70%);
+  border: 1px solid #2c3645;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.char-canvas { width: 100%; height: 100%; display: block; }
+.char-detail {
+  font-size: 11px;
+  color: var(--ink);
+  opacity: 0.9;
   text-align: center;
+  min-height: 1.2em;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Equipment TILE: slot label + item name, fixed-size so text can never overflow (the row layout's
+   old bug). The shared `.equip-slot[data-rarity]` rules above color the border by rarity (the tile
+   keeps the `.equip-slot` class); `.equip-tile` is geometry only and does NOT set a border-color
+   on .filled, so the rarity color wins. */
+.equip-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  height: 50px;
+  padding: 4px 8px;
+  text-align: left;
   color: var(--ink);
   background: #161c25;
   border: 1px dashed #3a4757;
   border-radius: 4px;
+  font-family: inherit;
+  cursor: default;
 }
-.equip-slot.filled {
-  border-style: solid;
-  border-color: var(--gold);
-  background: #241c12;
-  cursor: pointer;
+.equip-tile-slot { font-size: 9px; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.equip-tile-name { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.equip-tile-plus { position: absolute; top: 3px; right: 6px; font-size: 10px; font-weight: 700; color: var(--gold); }
+.equip-tile.filled { border-style: solid; background: #241c12; cursor: pointer; }
+.equip-tile.filled:hover, .equip-tile:focus-visible { border-color: #fff; outline: none; }
+/* worn gear (durability < half): an amber corner dot — keeps the rarity border intact. */
+.equip-tile.worn::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffb35a;
 }
-.equip-slot.filled:hover { border-color: #fff; }
-/* worn gear (durability dropped below half) — an amber cue to repair at the vendor. */
-.equip-slot.filled.worn { border-color: #ffb35a; color: #ffd9a3; }
+/* Collapse to one column on narrow viewports; the panel scrolls (max-height) if it gets tall. */
+@media (max-width: 640px) {
+  .char-screen { grid-template-columns: 1fr; }
+  .char-viewport { width: min(240px, 70vw); margin: 0 auto; }
+}
 
 .bag-stats {
   font-size: 11px;
@@ -316,7 +368,9 @@ html, body {
   border: 1px solid #2c3645;
   border-radius: 6px;
 }
-.refine-row { display: flex; gap: 6px; }
+/* 2-col grid (not a 10-wide flex row) so the longest button labels can't overflow the panel. */
+.refine-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.refine-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lucky-toggle,
 .protect-toggle,
 .refine-btn {

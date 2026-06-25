@@ -1,9 +1,18 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
-import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
+import type { IWorld, AbilityView, InventoryView, EntityView, ShopView, EquipView, EquipSlot, MasteryId } from '../world_api';
 import { isTyping } from './typing';
 import { registerOverlay } from './overlays';
 import { SLOT_LABELS } from './inventory';
 import { PROTECT_DROP_CAP } from '../sim/content/enhance';
+import { CharacterViewer } from '../render/character_viewer';
+
+// Paper-doll equipment layout: two columns of slot tiles flanking the 3D model, in the exact
+// vertical order requested (distinct from EQUIP_SLOTS' order — this is the VISUAL arrangement).
+// LEFT+RIGHT must stay a permutation of all 10 slots (asserted at buildEquipTiles).
+const EQUIP_LAYOUT: { col: 'left' | 'right'; slots: EquipSlot[] }[] = [
+  { col: 'left', slots: ['helmet', 'chest', 'weapon', 'hands', 'legs'] },
+  { col: 'right', slots: ['earring', 'necklace', 'shield', 'ring', 'feet'] },
+];
 import { CharacterSheet } from './character_sheet';
 import { StoragePanel } from './storage';
 
@@ -38,8 +47,13 @@ export class Hud {
   private attrPointsEl: HTMLSpanElement;
   private attrStrBtn: HTMLButtonElement;
   private attrIntBtn: HTMLButtonElement;
-  private equipRow: HTMLDivElement;
-  private equipCells: HTMLDivElement[] = [];
+  private equipColLeft: HTMLDivElement;
+  private equipColRight: HTMLDivElement;
+  private charViewport: HTMLDivElement;
+  private charDetail: HTMLDivElement;
+  private charViewer: CharacterViewer;
+  private lastMastery: MasteryId = 'sword'; // last-known local class, for the 3D viewer
+  private equipCells: HTMLButtonElement[] = []; // paper-doll equip tiles (one per slot, fixed order)
   // alchemy ("+N") controls inside the bag window
   private refineRow: HTMLDivElement;
   private refineBtns: HTMLButtonElement[] = [];
@@ -110,8 +124,13 @@ export class Hud {
       <div class="bot-indicator" hidden>&#9679; AUTO-PLAY</div>
       <div class="action-bar"></div>
       <div class="bag" hidden>
-        <div class="bag-title">Bolsa</div>
-        <div class="equip-row"></div>
+        <div class="bag-title">Personagem</div>
+        <div class="char-screen">
+          <div class="equip-col equip-col-left"></div>
+          <div class="char-viewport"></div>
+          <div class="equip-col equip-col-right"></div>
+        </div>
+        <div class="char-detail"></div>
         <div class="bag-stats"></div>
         <div class="attrs">
           <span class="attr-points"></span>
@@ -124,6 +143,7 @@ export class Hud {
           <div class="refine-row"></div>
           <div class="mat-line"></div>
         </div>
+        <div class="bag-section-title">Bolsa</div>
         <div class="bag-grid"></div>
       </div>
       <div class="shop" hidden>
@@ -175,7 +195,12 @@ export class Hud {
     this.shopBuy = this.root.querySelector('.shop-buy') as HTMLDivElement;
     this.shopSell = this.root.querySelector('.shop-sell') as HTMLDivElement;
     this.shopRepair = this.root.querySelector('.shop-repair') as HTMLDivElement;
-    this.equipRow = this.root.querySelector('.equip-row') as HTMLDivElement;
+    this.equipColLeft = this.root.querySelector('.equip-col-left') as HTMLDivElement;
+    this.equipColRight = this.root.querySelector('.equip-col-right') as HTMLDivElement;
+    this.charViewport = this.root.querySelector('.char-viewport') as HTMLDivElement;
+    this.charDetail = this.root.querySelector('.char-detail') as HTMLDivElement;
+    this.charViewer = new CharacterViewer(); // 3D paper-doll (reuses the world's PlayerAvatar)
+    this.charViewport.appendChild(this.charViewer.canvas);
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
     this.luckyToggle = this.root.querySelector('.lucky-toggle') as HTMLButtonElement;
     this.matLine = this.root.querySelector('.mat-line') as HTMLDivElement;
@@ -229,6 +254,7 @@ export class Hud {
   private setBag(open: boolean): void {
     this.bagOpen = open;
     this.bag.hidden = !open;
+    this.charViewer.setActive(open); // gate the 3D viewer's rendering to when the panel is open
   }
 
   private setShop(open: boolean): void {
@@ -257,6 +283,16 @@ export class Hud {
     this.botToggleBtn.textContent = `Bot: ${bot ? 'ON' : 'OFF'} (B)`;
     this.botToggleBtn.classList.toggle('on', bot);
     this.botIndicator.hidden = !bot;
+
+    // Paper-doll: drive the 3D viewer every frame the panel is open, BEFORE the early-returns below
+    // — a momentary missing player entity (death/respawn window) must not freeze it or stale its dt.
+    if (this.bagOpen) {
+      const lid = world.localPlayerId();
+      const me = lid != null ? world.entities().find((e) => e.id === lid) : undefined;
+      if (me) this.lastMastery = me.mastery;
+      this.charViewer.tick(this.lastMastery);
+    }
+
     const id = world.localPlayerId();
     if (id == null) return;
     const ents = world.entities();
@@ -441,35 +477,15 @@ export class Hud {
   private updateBag(inv: InventoryView, p: EntityView): void {
     this.lastInv = inv; // click handlers read this to know what's where
 
-    // Equipment slots (click an occupied one to unequip). Built once.
-    while (this.equipCells.length < inv.equipment.length) {
-      const j = this.equipCells.length;
-      const cell = document.createElement('div');
-      cell.className = 'equip-slot';
-      cell.addEventListener('click', () => this.onEquipClick(j));
-      this.equipRow.appendChild(cell);
-      this.equipCells.push(cell);
-    }
-    for (let j = 0; j < this.equipCells.length; j++) {
-      const eq = inv.equipment[j];
-      const cell = this.equipCells[j];
-      const label = SLOT_LABELS[eq.slot];
-      cell.classList.toggle('filled', eq.itemId != null);
-      if (eq.itemId) {
-        cell.dataset.rarity = eq.rarity ?? '';
-        const plusTag = eq.plus > 0 ? ` +${eq.plus}` : '';
-        const durTag = ` · Dur ${eq.durability}/${eq.maxDurability}`;
-        // "worn" once the bonus starts dropping (below half) — a cue to repair.
-        cell.classList.toggle('worn', eq.durability < eq.maxDurability * 0.5);
-        const text = `${label}: ${eq.name}${plusTag} (${eq.rarityName})${durTag}`;
-        cell.title = text;
-        cell.textContent = text;
-      } else {
-        delete cell.dataset.rarity;
-        cell.classList.remove('worn');
-        cell.title = label;
-        cell.textContent = `${label}: —`;
-      }
+    // Equipment paper-doll: fixed-size tiles in two columns flanking the 3D model (built once).
+    // Fixed tiles + ellipsized labels => no overflow; the full item text lives in the tooltip +
+    // the detail line below the model.
+    if (this.equipCells.length === 0) this.buildEquipTiles();
+    const bySlot = new Map<EquipSlot, EquipView>();
+    for (const eq of inv.equipment) bySlot.set(eq.slot, eq);
+    for (const tile of this.equipCells) {
+      const slot = tile.dataset.slot as EquipSlot;
+      this.renderEquipTile(tile, slot, bySlot.get(slot));
     }
 
     // Tiny "ficha": the effective stats Strength/Intelligence + gear drive.
@@ -548,10 +564,79 @@ export class Hud {
     }
   }
 
+  // Build the 10 equip tiles once, in the two-column paper-doll order (LEFT then RIGHT).
+  private buildEquipTiles(): void {
+    const total = EQUIP_LAYOUT.reduce((n, c) => n + c.slots.length, 0);
+    if (total !== Object.keys(SLOT_LABELS).length) {
+      console.error('[Hud] EQUIP_LAYOUT must cover every equip slot exactly once', total);
+    }
+    for (const { col, slots } of EQUIP_LAYOUT) {
+      const parent = col === 'left' ? this.equipColLeft : this.equipColRight;
+      for (const slot of slots) {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'equip-slot equip-tile';
+        tile.dataset.slot = slot;
+        const slotEl = document.createElement('span');
+        slotEl.className = 'equip-tile-slot';
+        slotEl.textContent = SLOT_LABELS[slot];
+        const nameEl = document.createElement('span');
+        nameEl.className = 'equip-tile-name';
+        const plusEl = document.createElement('span');
+        plusEl.className = 'equip-tile-plus';
+        tile.append(slotEl, nameEl, plusEl);
+        tile.addEventListener('click', () => this.onEquipClick(slot));
+        const detail = (): void => this.showEquipDetail(slot);
+        tile.addEventListener('pointerenter', detail);
+        tile.addEventListener('focus', detail);
+        parent.appendChild(tile);
+        this.equipCells.push(tile);
+      }
+    }
+  }
+
+  // Render one equip tile from its slot's EquipView (or empty). Long text -> tooltip + detail line.
+  private renderEquipTile(tile: HTMLButtonElement, slot: EquipSlot, eq: EquipView | undefined): void {
+    const label = SLOT_LABELS[slot];
+    const nameEl = tile.querySelector('.equip-tile-name') as HTMLSpanElement;
+    const plusEl = tile.querySelector('.equip-tile-plus') as HTMLSpanElement;
+    const filled = !!(eq && eq.itemId);
+    tile.classList.toggle('filled', filled);
+    if (filled && eq) {
+      tile.dataset.rarity = eq.rarity ?? '';
+      tile.classList.toggle('worn', eq.durability < eq.maxDurability * 0.5);
+      nameEl.textContent = eq.name ?? '';
+      plusEl.textContent = eq.plus > 0 ? `+${eq.plus}` : '';
+      const full = `${label}: ${eq.name}${eq.plus > 0 ? ` +${eq.plus}` : ''} (${eq.rarityName}) · Dur ${eq.durability}/${eq.maxDurability}`;
+      tile.title = full;
+      tile.setAttribute('aria-label', `${full} — clique para desequipar`);
+    } else {
+      delete tile.dataset.rarity;
+      tile.classList.remove('worn');
+      nameEl.textContent = '—';
+      plusEl.textContent = '';
+      tile.title = label;
+      tile.setAttribute('aria-label', `${label}: vazio`);
+    }
+  }
+
+  // Show a slot's full item info in the detail line under the model (on hover/focus of its tile).
+  private showEquipDetail(slot: EquipSlot): void {
+    const eq = this.lastInv?.equipment.find((e) => e.slot === slot);
+    const label = SLOT_LABELS[slot];
+    if (eq?.itemId) {
+      const plusTag = eq.plus > 0 ? ` +${eq.plus}` : '';
+      this.charDetail.textContent =
+        `${label}: ${eq.name}${plusTag} (${eq.rarityName}) · Dur ${eq.durability}/${eq.maxDurability}`;
+    } else {
+      this.charDetail.textContent = `${label}: vazio`;
+    }
+  }
+
   // Click an equipped slot -> unequip it back to the bag.
-  private onEquipClick(j: number): void {
-    const eq = this.lastInv?.equipment[j];
-    if (eq?.itemId && this.world) this.world.sendCommand({ t: 'unequip', slot: eq.slot });
+  private onEquipClick(slot: EquipSlot): void {
+    const eq = this.lastInv?.equipment.find((e) => e.slot === slot);
+    if (eq?.itemId && this.world) this.world.sendCommand({ t: 'unequip', slot });
   }
 
   private updateAlchemy(inv: InventoryView): void {
