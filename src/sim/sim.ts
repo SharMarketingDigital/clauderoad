@@ -159,6 +159,11 @@ export class Sim implements IWorld {
   private spawnRng: Rng; // independent substream for zone spawn POSITIONS (see constructor)
   private partyRng: Rng; // independent substream for party loot auto-share recipient picks (see constructor)
   private ents = new Map<number, Entity>();
+  // O3 — entities() view cache. Built lazily on first read each tick and reused by every caller
+  // (render/ui hit it ~8x/frame) until step()/addPlayer/removePlayer/restorePlayer invalidate it.
+  // PURE presentation cache: hash() reads `this.ents` directly (never entities()), so memoizing
+  // the projection cannot change the determinism fingerprint.
+  private entityViewCache: ReadonlyArray<EntityView> | null = null;
   private nextId = 1;
   private localId: number;
   // MULTIPLAYER: the sim supports N players (the server runs ONE shared world). Each
@@ -260,6 +265,7 @@ export class Sim implements IWorld {
     p.homeX = p.x;
     p.homeZ = p.z;
     this.registerPlayer(id);
+    this.invalidateEntityViews(); // O3: added an entity outside step()
     return id;
   }
 
@@ -277,6 +283,7 @@ export class Sim implements IWorld {
     const i = this.playerIds.indexOf(id);
     if (i >= 0) this.playerIds.splice(i, 1);
     for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
+    this.invalidateEntityViews(); // O3: removed an entity outside step()
   }
 
   // Route a networked player's command into the world (same validation path as the
@@ -311,6 +318,7 @@ export class Sim implements IWorld {
     this.recomputeStats(p);
     p.hp = p.maxHp;
     p.mp = p.maxMp;
+    this.invalidateEntityViews(); // O3: restore mutated projected fields outside step()
   }
 
   // ---------- spawning ----------
@@ -872,6 +880,15 @@ export class Sim implements IWorld {
   }
 
   entities(): ReadonlyArray<EntityView> {
+    // O3: memoize the projection per tick. Callers hit this ~8x/frame; rebuilding it each time
+    // churned ~400 throwaway view objects/frame. The cache is invalidated by step() and the
+    // out-of-step mutators (add/remove/restorePlayer).
+    if (this.entityViewCache === null) this.entityViewCache = this.buildEntityViews();
+    return this.entityViewCache;
+  }
+
+  // The projection itself — byte-for-byte the same fields as before; entities() just caches it.
+  private buildEntityViews(): EntityView[] {
     const out: EntityView[] = [];
     for (const e of this.ents.values()) {
       out.push({
@@ -899,9 +916,18 @@ export class Sim implements IWorld {
     return out;
   }
 
+  // Drop the cached views so the next entities() re-projects. hash() reads this.ents directly
+  // (never entities()), so this NEVER affects determinism — it only refreshes the presentation
+  // view. Every within-tick mutation runs through step(); the only out-of-step mutators are
+  // addPlayer/removePlayer/restorePlayer, which call this too. Keep that invariant if you add one.
+  private invalidateEntityViews(): void {
+    this.entityViewCache = null;
+  }
+
   // ---------- simulation ----------
   step(): void {
     this.tick++;
+    this.invalidateEntityViews(); // O3: this tick's mutations invalidate the cached views
     // Tick status effects (DoT damage + expiry) for everyone first, so a just-
     // expired stun lets the entity act this tick. Snapshot: a DoT may remove an entity.
     for (const e of [...this.ents.values()]) this.stepStatuses(e);

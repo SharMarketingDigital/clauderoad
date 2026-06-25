@@ -49,13 +49,14 @@ const KINDS: Kind[] = [
 // A model reduced to instancing-ready parts: each sub-mesh's geometry baked into
 // the model's local frame (so an InstancedMesh just needs a per-instance matrix),
 // plus the bbox to auto-fit + seat it on the ground.
-interface Model {
+export interface Model {
   parts: { geo: THREE.BufferGeometry; mat: THREE.Material | THREE.Material[] }[];
   height: number;
   minY: number;
 }
 
-function toModel(scene: THREE.Object3D): Model {
+// Exported so village.ts can reuse the exact same baked-multi-submesh conversion (O4 instancing).
+export function toModel(scene: THREE.Object3D): Model {
   scene.updateMatrixWorld(true);
   const parts: Model['parts'] = [];
   const box = new THREE.Box3();

@@ -163,6 +163,12 @@ export class AbilityVfx {
   private particles: Particle[] = [];
   private projectiles: Projectile[] = [];
   private auras: Aura[] = [];
+  // O2 — sprite/material free-list. Every particle used to be a `new Sprite` + `new SpriteMaterial`
+  // built then disposed per effect (bursts of 9-82/cast); the pool recycles them so combat
+  // allocates ~0. Textures are already shared by-kind via `this.textures` (no per-particle texture).
+  private pool: THREE.Sprite[] = [];
+  private static readonly POOL_MAX = 256; // bound the pool; overflow on release is disposed
+  private _t = new THREE.Vector3(); // scratch for spawnVolley targets (spawnProjectile clones them)
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group);
@@ -250,7 +256,7 @@ export class AbilityVfx {
       }
       if (u >= 1) {
         this.spawnImpact(pr.to, pr.impact);
-        this.kill(pr.core);
+        this.release(pr.core);
         this.projectiles.splice(i, 1);
       }
     }
@@ -269,7 +275,7 @@ export class AbilityVfx {
       const p = this.particles[i];
       p.life -= dt;
       if (p.life <= 0) {
-        this.kill(p.sprite);
+        this.release(p.sprite);
         this.particles.splice(i, 1);
         continue;
       }
@@ -287,7 +293,7 @@ export class AbilityVfx {
   private spawnProjectile(from: THREE.Vector3, to: THREE.Vector3, style: ProjectileStyle): void {
     if (style.flash) this.spawnCastFlash(from, style.flash);
     const dur = clamp(from.distanceTo(to) / style.speed, 0.12, 0.7);
-    const core = this.makeSprite(style.coreTex, style.coreColor, THREE.AdditiveBlending);
+    const core = this.acquire(style.coreTex, style.coreColor, THREE.AdditiveBlending);
     core.scale.setScalar(style.coreScale);
     core.position.copy(from);
     this.projectiles.push({ core, from: from.clone(), to: to.clone(), t: 0, dur, emit: 0, scale: style.coreScale, trail: style.trail, impact: style.impact });
@@ -301,7 +307,8 @@ export class AbilityVfx {
     const dy = to.y - from.y;
     for (let i = 0; i < MULTI_COUNT; i++) {
       const a = base + ((i / (MULTI_COUNT - 1)) - 0.5) * MULTI_SPREAD;
-      const t = new THREE.Vector3(from.x + Math.cos(a) * dist, from.y + dy, from.z + Math.sin(a) * dist);
+      // reuse one scratch — spawnProjectile clones `to`, so it's safe to reuse across iterations
+      const t = this._t.set(from.x + Math.cos(a) * dist, from.y + dy, from.z + Math.sin(a) * dist);
       this.spawnProjectile(from, t, STYLES.arrow);
     }
   }
@@ -313,7 +320,7 @@ export class AbilityVfx {
       const a = base + (Math.random() - 0.5) * style.arc;
       const speed = rnd(style.reach * 0.6, style.reach);
       const start = rnd(0.4, 1.4); // begin a bit in front of the caster
-      const spr = this.makeSprite(style.tex, style.color, style.blending);
+      const spr = this.acquire(style.tex, style.color, style.blending);
       spr.position.set(from.x + Math.cos(a) * start, from.y + rnd(-0.2, 0.4), from.z + Math.sin(a) * start);
       spr.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: spr, vx: Math.cos(a) * speed, vy: rnd(0, 0.5), vz: Math.sin(a) * speed, life: style.life, maxLife: style.life, s0: style.s0, s1: style.s1, o0: style.o0, o1: style.o1 });
@@ -322,7 +329,7 @@ export class AbilityVfx {
       for (let k = 0; k < 6; k++) {
         const a = base + (Math.random() - 0.5) * style.arc;
         const speed = rnd(style.reach * 0.7, style.reach * 1.1);
-        const ember = this.makeSprite('spark', 0xffd28a, THREE.AdditiveBlending);
+        const ember = this.acquire('spark', 0xffd28a, THREE.AdditiveBlending);
         ember.position.set(from.x + Math.cos(a) * 0.6, from.y + rnd(0, 0.4), from.z + Math.sin(a) * 0.6);
         this.particles.push({ sprite: ember, vx: Math.cos(a) * speed, vy: rnd(0.3, 1.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: 0.3, s1: 0.05, o0: 0.9, o1: 0 });
       }
@@ -334,7 +341,7 @@ export class AbilityVfx {
     for (let k = 0; k < style.perBurst; k++) {
       const a = Math.random() * Math.PI * 2;
       const r = style.radius * rnd(0.85, 1.1);
-      const spr = this.makeSprite(style.tex, style.color, style.blending);
+      const spr = this.acquire(style.tex, style.color, style.blending);
       spr.position.set(at.x + Math.cos(a) * r, at.y + rnd(-0.3, 0.4), at.z + Math.sin(a) * r);
       spr.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: spr, vx: 0, vy: rnd(style.rise * 0.5, style.rise), vz: 0, life: style.life, maxLife: style.life, s0: style.scale, s1: style.scale * 0.4, o0: 0.85, o1: 0 });
@@ -342,7 +349,7 @@ export class AbilityVfx {
   }
 
   private spawnCastFlash(pos: THREE.Vector3, color: number): void {
-    const flash = this.makeSprite('magic', color, THREE.AdditiveBlending);
+    const flash = this.acquire('magic', color, THREE.AdditiveBlending);
     flash.position.copy(pos);
     this.particles.push({ sprite: flash, vx: 0, vy: 0, vz: 0, life: 0.22, maxLife: 0.22, s0: 0.3, s1: 1.1, o0: 0.9, o1: 0 });
   }
@@ -350,38 +357,38 @@ export class AbilityVfx {
   private spawnTrail(pos: THREE.Vector3, kind: TrailKind): void {
     if (kind === 'none') return;
     if (kind === 'ember') {
-      const ember = this.makeSprite('spark', 0xffb24d, THREE.AdditiveBlending);
+      const ember = this.acquire('spark', 0xffb24d, THREE.AdditiveBlending);
       ember.position.set(pos.x + rnd(-0.1, 0.1), pos.y + rnd(-0.1, 0.1), pos.z + rnd(-0.1, 0.1));
       this.particles.push({ sprite: ember, vx: rnd(-0.5, 0.5), vy: rnd(0.2, 0.9), vz: rnd(-0.5, 0.5), life: 0.35, maxLife: 0.35, s0: 0.35, s1: 0.05, o0: 0.9, o1: 0 });
-      const smoke = this.makeSprite('smoke', 0x4a3526, THREE.NormalBlending);
+      const smoke = this.acquire('smoke', 0x4a3526, THREE.NormalBlending);
       smoke.position.copy(pos);
       smoke.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: smoke, vx: rnd(-0.2, 0.2), vy: rnd(0.3, 0.7), vz: rnd(-0.2, 0.2), life: 0.5, maxLife: 0.5, s0: 0.45, s1: 1.0, o0: 0.3, o1: 0 });
       return;
     }
     // 'frost' — cold sparkles drifting down, no smoke
-    const shard = this.makeSprite('star', 0xbdefff, THREE.AdditiveBlending);
+    const shard = this.acquire('star', 0xbdefff, THREE.AdditiveBlending);
     shard.position.set(pos.x + rnd(-0.12, 0.12), pos.y + rnd(-0.12, 0.12), pos.z + rnd(-0.12, 0.12));
     this.particles.push({ sprite: shard, vx: rnd(-0.4, 0.4), vy: rnd(-0.6, 0.1), vz: rnd(-0.4, 0.4), life: 0.4, maxLife: 0.4, s0: 0.3, s1: 0.04, o0: 0.9, o1: 0 });
   }
 
   private spawnImpact(pos: THREE.Vector3, kind: ImpactKind): void {
     if (kind === 'fire') {
-      const burst = this.makeSprite('flame', 0xffffff, THREE.AdditiveBlending);
+      const burst = this.acquire('flame', 0xffffff, THREE.AdditiveBlending);
       burst.position.copy(pos);
       this.particles.push({ sprite: burst, vx: 0, vy: 0.4, vz: 0, life: 0.3, maxLife: 0.3, s0: 0.6, s1: 2.1, o0: 1, o1: 0 });
       this.radialSparks(pos, 10, 0xffcc66, 2, 4);
       return;
     }
     if (kind === 'frost') {
-      const flash = this.makeSprite('light', 0xaef0ff, THREE.AdditiveBlending);
+      const flash = this.acquire('light', 0xaef0ff, THREE.AdditiveBlending);
       flash.position.copy(pos);
       this.particles.push({ sprite: flash, vx: 0, vy: 0.2, vz: 0, life: 0.28, maxLife: 0.28, s0: 0.5, s1: 1.8, o0: 1, o1: 0 });
       // icy shards fly outward (star sprites)
       for (let k = 0; k < 8; k++) {
         const a = (k / 8) * Math.PI * 2 + rnd(-0.3, 0.3);
         const speed = rnd(2, 3.5);
-        const shard = this.makeSprite('star', 0xbdefff, THREE.AdditiveBlending);
+        const shard = this.acquire('star', 0xbdefff, THREE.AdditiveBlending);
         shard.position.copy(pos);
         this.particles.push({ sprite: shard, vx: Math.cos(a) * speed, vy: rnd(0.4, 1.8), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: 0.4, s1: 0.05, o0: 1, o1: 0 });
       }
@@ -399,7 +406,7 @@ export class AbilityVfx {
     for (let k = 0; k < count; k++) {
       const a = (k / count) * Math.PI * 2 + rnd(-0.3, 0.3);
       const speed = rnd(minSpeed, maxSpeed);
-      const spark = this.makeSprite('spark', color, THREE.AdditiveBlending);
+      const spark = this.acquire('spark', color, THREE.AdditiveBlending);
       spark.position.copy(pos);
       this.particles.push({ sprite: spark, vx: Math.cos(a) * speed, vy: rnd(0.5, 2.2), vz: Math.sin(a) * speed, life: 0.4, maxLife: 0.4, s0: scale, s1: 0.05, o0: 1, o1: 0 });
     }
@@ -409,18 +416,18 @@ export class AbilityVfx {
   // for a pierce, or a light contact spark (the stun stars carry the stun read).
   private spawnMeleeImpact(pos: THREE.Vector3, kind: 'heavy' | 'pierce' | 'light'): void {
     if (kind === 'heavy') {
-      const arc = this.makeSprite('slash', 0xfff0c0, THREE.AdditiveBlending);
+      const arc = this.acquire('slash', 0xfff0c0, THREE.AdditiveBlending);
       arc.position.copy(pos);
       arc.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: arc, vx: 0, vy: 0, vz: 0, life: 0.22, maxLife: 0.22, s0: 0.8, s1: 1.9, o0: 1, o1: 0 });
       this.radialSparks(pos, 12, 0xfff0c0, 2, 4.5);
-      const dust = this.makeSprite('smoke', 0x6b5a44, THREE.NormalBlending);
+      const dust = this.acquire('smoke', 0x6b5a44, THREE.NormalBlending);
       dust.position.copy(pos);
       this.particles.push({ sprite: dust, vx: 0, vy: 0.3, vz: 0, life: 0.4, maxLife: 0.4, s0: 0.5, s1: 1.3, o0: 0.4, o1: 0 });
       return;
     }
     if (kind === 'pierce') {
-      const streak = this.makeSprite('trace', 0xfff0c0, THREE.AdditiveBlending);
+      const streak = this.acquire('trace', 0xfff0c0, THREE.AdditiveBlending);
       streak.position.copy(pos);
       streak.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: streak, vx: 0, vy: 0, vz: 0, life: 0.2, maxLife: 0.2, s0: 0.6, s1: 1.5, o0: 1, o1: 0 });
@@ -436,7 +443,7 @@ export class AbilityVfx {
     for (let k = 0; k < 5; k++) {
       const a = (k / 5) * Math.PI * 2 + rnd(-0.2, 0.2);
       const r = rnd(0.3, 0.5);
-      const star = this.makeSprite('star', 0xffe066, THREE.AdditiveBlending);
+      const star = this.acquire('star', 0xffe066, THREE.AdditiveBlending);
       star.position.set(cx + Math.cos(a) * r, cy + rnd(-0.1, 0.1), cz + Math.sin(a) * r);
       star.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: star, vx: -Math.sin(a) * 0.8, vy: rnd(0, 0.2), vz: Math.cos(a) * 0.8, life: 0.9, maxLife: 0.9, s0: 0.35, s1: 0.22, o0: 1, o1: 0 });
@@ -448,7 +455,7 @@ export class AbilityVfx {
     const n = 8;
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      const streak = this.makeSprite('trace', 0xdfe6ff, THREE.AdditiveBlending);
+      const streak = this.acquire('trace', 0xdfe6ff, THREE.AdditiveBlending);
       streak.position.set(lerp(from.x, to.x, t), lerp(from.y, to.y, t), lerp(from.z, to.z, t));
       streak.material.rotation = rnd(0, Math.PI * 2);
       this.particles.push({ sprite: streak, vx: 0, vy: rnd(0, 0.3), vz: 0, life: 0.3, maxLife: 0.3, s0: 0.5, s1: 0.1, o0: 0.8, o1: 0 });
@@ -457,16 +464,45 @@ export class AbilityVfx {
 
   // ---- helpers ----
 
-  private makeSprite(tex: TexKey, color: number, blending: THREE.Blending): THREE.Sprite {
-    const mat = new THREE.SpriteMaterial({ map: this.textures.get(tex), color, transparent: true, depthWrite: false, blending });
-    const s = new THREE.Sprite(mat);
+  // Pooled acquire: reuse a sprite+material from the free-list (or build one if empty), configured
+  // for this particle. Removes the per-particle `new Sprite` + `new SpriteMaterial` churn (and the
+  // matching dispose) that fed GC during combat bursts (O2).
+  private acquire(tex: TexKey, color: number, blending: THREE.Blending): THREE.Sprite {
+    let s = this.pool.pop();
+    if (!s) {
+      const mat = new THREE.SpriteMaterial({ map: this.textures.get(tex), color, transparent: true, depthWrite: false, blending });
+      s = new THREE.Sprite(mat);
+    } else {
+      this.resetSprite(s, tex, color, blending);
+    }
     this.group.add(s);
     return s;
   }
 
-  // Remove a sprite from the scene and free its per-instance material (the shared texture stays).
-  private kill(sprite: THREE.Sprite): void {
+  // Reset every mutable prop a recipe or update() may have changed, so a recycled sprite shows no
+  // stale state. opacity (driven to 0 by update) and rotation (set by only some recipes) are the
+  // two that WOULD bite if missed; needsUpdate makes Three rebind the swapped texture/blend mode.
+  private resetSprite(s: THREE.Sprite, tex: TexKey, color: number, blending: THREE.Blending): void {
+    const mat = s.material;
+    mat.map = this.textures.get(tex) ?? null;
+    mat.color.set(color);
+    mat.blending = blending;
+    mat.opacity = 1;
+    mat.rotation = 0;
+    mat.transparent = true;
+    mat.depthWrite = false;
+    mat.needsUpdate = true;
+    s.scale.set(1, 1, 1);
+    s.position.set(0, 0, 0);
+    s.visible = true;
+  }
+
+  // Return a finished sprite to the pool instead of disposing — eliminates the per-particle GPU
+  // material free + GC. Overflow beyond POOL_MAX is disposed so the pool stays bounded.
+  private release(sprite: THREE.Sprite): void {
     this.group.remove(sprite);
-    (sprite.material as THREE.SpriteMaterial).dispose();
+    sprite.visible = false;
+    if (this.pool.length < AbilityVfx.POOL_MAX) this.pool.push(sprite);
+    else sprite.material.dispose();
   }
 }

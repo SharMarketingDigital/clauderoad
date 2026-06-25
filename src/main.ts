@@ -87,7 +87,7 @@ function startOffline(name: string): void {
       acc -= DT;
     }
 
-    renderer.render(sim);
+    renderer.render(sim, null, acc / DT); // O1: pass the interpolation fraction (residual acc) to smooth 20Hz motion
     drawCombatFeedback(sim); // after render: project with this frame's updated camera
     hud.update(sim);
     map.update(sim);

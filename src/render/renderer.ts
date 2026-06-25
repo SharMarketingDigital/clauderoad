@@ -13,6 +13,25 @@ import { AbilityVfx, abilityEffect, abilityClip, abilitySelfEffect } from './vfx
 
 const FLASH_DURATION = 0.12; // seconds — a quick "I got hit" white flash
 
+// O1 interpolation: a one-tick positional jump larger than this (units^2) is treated as a
+// teleport (e.g. the boss charge Investida) and snapped, not slid across the gap over ~50ms.
+const INTERP_SNAP_DIST2 = 16; // (4 units)^2
+
+// Shortest-path angular lerp (handles the -pi/pi wrap), mirroring the MP path in client_world.
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+
+// O4 frustum cull: an actor whose generous bounding sphere is fully outside the camera frustum is
+// hidden — skipping its draw AND its shadow-map contribution. Sized large so a partly-off-screen
+// actor (a swing/weapon reaching in) is never wrongly hidden: oversize costs only a few edge draws,
+// undersize would pop a visible actor.
+const CULL_RADIUS = 6; // units — comfortably covers the tallest boss + reach + tier/boss scale
+const CULL_CENTER_Y = 1.5; // sphere centre above the mesh base (bodies sit on the ground, ~2-4 tall)
+
 // "Clipe do Commit" framing. IMPORTANT: a clip changes ONLY pitch + distance,
 // NEVER the camera yaw. `yaw` is the reference input.ts uses to map WASD to world
 // space, and it's what decides how world-space motion reads on screen — so rotating
@@ -49,6 +68,21 @@ export class Renderer {
   private playerPrevX = 0;
   private playerPrevZ = 0;
   private playerLastMoveMs = 0; // host time of the player's last position change (for idle vs walk)
+
+  // O1 — single-player position interpolation. The sim moves at 20Hz but we render at the
+  // monitor's refresh, so without this the body snaps every ~8 frames at 165Hz (a 20Hz
+  // stair-step). We keep each entity's previous + current sim position/facing and lerp between
+  // them by `alpha` (the host's acc/DT, passed into render()). MP is a no-op: ClientWorld
+  // already interpolates and uses the default alpha=1. Render-only — never touches the sim.
+  private interp = new Map<number, { px: number; pz: number; pf: number; cx: number; cz: number; cf: number }>();
+  private lastInterpTick = -1;
+  private alpha = 1; // interpolation fraction toward the current tick, refreshed each render()
+  private _ip = { x: 0, z: 0, facing: 0 }; // scratch returned by interpPos() — use immediately, never store
+
+  // O4 — off-screen actor culling. Reused each frame; the sphere's centre is moved onto each mesh.
+  private cullFrustum = new THREE.Frustum();
+  private cullProj = new THREE.Matrix4();
+  private cullSphere = new THREE.Sphere(new THREE.Vector3(), CULL_RADIUS);
 
   // OTHER (remote) players' animated Knights — one loaded model, cloned per player.
   // Capsule is the fallback until the model loads. Read-only consumer of IWorld.
@@ -181,10 +215,13 @@ export class Renderer {
 
   // `serverWeather` (multiplayer) drives the day/night + rain from the server so all
   // clients share the same sky; omit it offline to run the local cycle + R/T keys.
-  render(world: IWorld, serverWeather: WeatherState | null = null): void {
+  render(world: IWorld, serverWeather: WeatherState | null = null, alpha = 1): void {
     const nowMs = performance.now(); // host clock — fine here, never in src/sim
     const dt = this.lastRenderMs ? Math.min(0.1, (nowMs - this.lastRenderMs) / 1000) : 0;
     this.lastRenderMs = nowMs;
+
+    this.alpha = clamp(alpha, 0, 1);
+    this.advanceInterp(world); // O1: roll prev/cur position buffers when the sim has ticked
 
     this.syncLocalAvatarModel(world);
     this.sync(world);
@@ -195,14 +232,16 @@ export class Renderer {
     // Keep the sky centred on the player and the sun's shadow frustum on them.
     const pid = world.localPlayerId();
     const pp = pid != null ? world.entities().find((e) => e.id === pid) : undefined;
-    const px = pp ? pp.x : 0;
-    const pz = pp ? pp.z : 0;
+    const pAnchor = pp ? this.interpPos(pp.id, pp) : null; // smoothed player anchor (O1)
+    const px = pAnchor ? pAnchor.x : 0;
+    const pz = pAnchor ? pAnchor.z : 0;
     // Ability VFX last: buff auras follow the local player, so feed its live position.
     const casterPos = pp ? new THREE.Vector3(px, terrainHeight(px, pz) + 1.0, pz) : undefined;
     this.abilityVfx.update(dt, casterPos);
     this.env.update(dt, px, pz, terrainHeight(px, pz), serverWeather);
     for (const av of this.npcAvatars.values()) if (av.ready) av.update(dt); // keep each NPC's idle playing
     this.updateCamera(world);
+    this.cullOffscreen(); // O4: hide actors fully off-screen (skips their colour + shadow pass)
     this.gl.render(this.scene, this.camera);
   }
 
@@ -413,6 +452,49 @@ export class Renderer {
     return null;
   }
 
+  // O1 — advance the per-entity prev/cur position buffers when the sim has ticked. Called once
+  // at the top of render(); sync()/updateCamera then lerp prev->cur by `this.alpha`. The sim's
+  // `tick` (read via IWorld) is the advance detector — never written here. Render-only.
+  private advanceInterp(world: IWorld): void {
+    if (world.tick === this.lastInterpTick) return;
+    this.lastInterpTick = world.tick;
+    const live = new Set<number>();
+    for (const e of world.entities()) {
+      live.add(e.id);
+      const r = this.interp.get(e.id);
+      if (!r) {
+        // First sight: prev == cur so it snaps to its spawn position (no streak from the origin).
+        this.interp.set(e.id, { px: e.x, pz: e.z, pf: e.facing, cx: e.x, cz: e.z, cf: e.facing });
+        continue;
+      }
+      r.px = r.cx; r.pz = r.cz; r.pf = r.cf; // roll current -> previous
+      r.cx = e.x; r.cz = e.z; r.cf = e.facing; // record the new sim state as current
+      // A one-tick jump too large to be real movement (the boss charge teleport) snaps instead
+      // of sliding the model across the gap.
+      if ((r.cx - r.px) ** 2 + (r.cz - r.pz) ** 2 > INTERP_SNAP_DIST2) {
+        r.px = r.cx; r.pz = r.cz; r.pf = r.cf;
+      }
+    }
+    for (const id of this.interp.keys()) if (!live.has(id)) this.interp.delete(id); // prune gone ids
+  }
+
+  // Interpolated x/z/facing for an entity at the current alpha. Returns a SHARED scratch object
+  // (use immediately, never store). Falls back to the raw view when there is no record or
+  // alpha>=1 (the MP path, where ClientWorld already interpolates).
+  private interpPos(id: number, e: EntityView): { x: number; z: number; facing: number } {
+    const ip = this._ip;
+    const r = this.interp.get(id);
+    const a = this.alpha;
+    if (!r || a >= 1) {
+      ip.x = e.x; ip.z = e.z; ip.facing = e.facing;
+      return ip;
+    }
+    ip.x = r.px + (r.cx - r.px) * a;
+    ip.z = r.pz + (r.cz - r.pz) * a;
+    ip.facing = lerpAngle(r.pf, r.cf, a);
+    return ip;
+  }
+
   private sync(world: IWorld): void {
     const seen = new Set<number>();
     const targetId = world.localTargetId();
@@ -441,8 +523,9 @@ export class Renderer {
         this.scene.add(m);
         this.meshes.set(e.id, m);
       }
-      m.position.set(e.x, terrainHeight(e.x, e.z), e.z); // sit on the (visual) terrain
-      m.rotation.y = e.facing;
+      const ip = this.interpPos(e.id, e); // O1: smooth the 20Hz sim position at render rate
+      m.position.set(ip.x, terrainHeight(ip.x, ip.z), ip.z); // sit on the (visual) terrain
+      m.rotation.y = ip.facing;
       updateGlow(m, e.weaponPlus);
       updateHostileTint(m, e);
       updateDeadFade(m, e);
@@ -459,7 +542,8 @@ export class Renderer {
     }
     // Park the selection ring under the current target (if any).
     if (targetView) {
-      this.selectionRing.position.set(targetView.x, terrainHeight(targetView.x, targetView.z) + 0.06, targetView.z);
+      const tp = this.interpPos(targetView.id, targetView); // ring follows the smoothed target (O1)
+      this.selectionRing.position.set(tp.x, terrainHeight(tp.x, tp.z) + 0.06, tp.z);
       this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : (TIER_SCALE[targetView.tier] ?? 1)); // match boss/tier size
       this.selectionRing.visible = true;
     } else {
@@ -474,8 +558,9 @@ export class Renderer {
     if (id != null) {
       const p = world.entities().find((e) => e.id === id);
       if (p) {
-        px = p.x;
-        pz = p.z;
+        const ip = this.interpPos(p.id, p); // follow the smoothed player, not the 20Hz steps (O1)
+        px = ip.x;
+        pz = ip.z;
       }
     }
     const py = terrainHeight(px, pz); // follow the player up/down the hills
@@ -487,6 +572,22 @@ export class Renderer {
       pz + Math.cos(this.camYaw) * this.camDist * cy,
     );
     this.camera.lookAt(px, py + 1.2, pz);
+  }
+
+  // Hide entity meshes whose sphere is fully outside the view frustum, so off-screen actors cost
+  // nothing in the colour OR shadow pass. Runs after updateCamera() (so the frustum is THIS frame's)
+  // and before gl.render, using each mesh's already-interpolated position. The inner skinned meshes
+  // keep frustumCulled=false, so a VISIBLE actor is never self-culled mid-animation; we cull the
+  // whole group here instead, with a generous radius so a partly-on-screen actor stays drawn.
+  private cullOffscreen(): void {
+    this.camera.updateMatrixWorld();
+    this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+    this.cullProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.cullFrustum.setFromProjectionMatrix(this.cullProj);
+    for (const m of this.meshes.values()) {
+      this.cullSphere.center.set(m.position.x, m.position.y + CULL_CENTER_Y, m.position.z);
+      m.visible = this.cullFrustum.intersectsSphere(this.cullSphere);
+    }
   }
 
   private resize(): void {
