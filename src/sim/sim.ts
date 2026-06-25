@@ -31,7 +31,7 @@ import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
 import {
   MAX_PLUS, RISK_FLOOR, BREAK_CHANCE, DROP_ON_FAIL, PROTECT_STONE_ID,
 } from './content/enhance';
-import { enhanceChance, enhanceStat, resolveEnhance } from './enhance';
+import { enhanceChance, enhanceStat, resolveEnhance, needsBreakRoll } from './enhance';
 import {
   SKILL_MAX_RANK, skillUpgradeCost, rankEffectMult,
 } from './content/skill_ranks';
@@ -1313,11 +1313,11 @@ export class Sim implements IWorld {
     // consumed below ONLY when it actually prevents a break/multi-drop.
     const protectedAttempt = !!useProtection && this.botCount(p, PROTECT_STONE_ID) > 0;
 
-    // Fixed draw order: roll1 (success) always; roll2 (break vs degrade) only on an
-    // unprotected failure at/above RISK_FLOOR (resolveEnhance ignores roll2 otherwise).
+    // Fixed draw order: roll1 (success) always; roll2 (break vs degrade) ONLY when needsBreakRoll
+    // says so (unprotected failure at/above RISK_FLOOR) — the SAME predicate resolveEnhance uses to
+    // consume roll2, so the draw count here and the consumption there can never drift apart.
     const roll1 = this.rng.next();
-    const failedAtRisk = roll1 >= enhanceChance(eq.plus, lucky) && eq.plus >= RISK_FLOOR && !protectedAttempt;
-    const roll2 = failedAtRisk ? this.rng.next() : 0;
+    const roll2 = needsBreakRoll(eq.plus, lucky, protectedAttempt, roll1) ? this.rng.next() : 0;
     const outcome = resolveEnhance(eq.plus, lucky, protectedAttempt, roll1, roll2);
 
     if (outcome.kind === 'break') {

@@ -3,7 +3,8 @@
 // "a sub-RISK_FLOOR failure degrades by exactly 1, never breaks" guarantee that the seeded
 // alchemy loop in sim.test.ts used to assert (relocated here so green-ness can't hinge on a seed).
 import { describe, it, expect } from 'vitest';
-import { enhanceChance, enhanceStat, resolveEnhance } from '../src/sim/enhance';
+import { enhanceChance, enhanceStat, resolveEnhance, needsBreakRoll } from '../src/sim/enhance';
+import { Rng } from '../src/sim/rng';
 import {
   MAX_PLUS, RISK_FLOOR, BREAK_CHANCE, DROP_ON_FAIL, PROTECT_DROP_CAP,
 } from '../src/sim/content/enhance';
@@ -62,5 +63,53 @@ describe('K4 resolveEnhance (pure)', () => {
     expect(enhanceStat(10, 5)).toBeGreaterThan(enhanceStat(10, 0));
     expect(enhanceChance(0, false)).toBeGreaterThan(enhanceChance(5, false));
     expect(enhanceChance(5, true)).toBeGreaterThan(enhanceChance(5, false));
+  });
+});
+
+// T1.2 — needsBreakRoll is the SINGLE source for "does the 2nd draw happen". sim.enhance() uses
+// it to gate `this.rng.next()` and resolveEnhance() uses it to consume roll2; testing it here pins
+// the contract both sides share, so the draw COUNT and the consumption can't drift apart.
+describe('K4 needsBreakRoll — single gate for the break-vs-degrade draw', () => {
+  it('is true ONLY for an unprotected FAILURE at/above RISK_FLOOR', () => {
+    for (let plus = 0; plus < MAX_PLUS; plus++) {
+      expect(needsBreakRoll(plus, false, false, SUCCEED)).toBe(false); // a success never needs roll2
+    }
+    for (let plus = 0; plus < RISK_FLOOR; plus++) {
+      expect(needsBreakRoll(plus, false, false, FAIL)).toBe(false); // gentle band: no break roll
+    }
+    for (let plus = RISK_FLOOR; plus < MAX_PLUS; plus++) {
+      expect(needsBreakRoll(plus, false, false, FAIL)).toBe(true);  // risk band, unprotected
+      expect(needsBreakRoll(plus, false, true, FAIL)).toBe(false);  // protected => never
+    }
+  });
+});
+
+// T1.2 — explicit Rng draw-COUNT check: replicate sim.enhance()'s EXACT draw protocol with the
+// production Rng + the production predicate (roll1 always; roll2 ONLY when needsBreakRoll). This
+// catches a refactor that adds/drops the conditional 2nd draw and desyncs the deterministic stream.
+describe('K4 alchemy draw count — roll2 is pulled iff needsBreakRoll', () => {
+  const drawsConsumed = (plus: number, lucky: boolean, prot: boolean, seed: number): number => {
+    const rng = new Rng(seed);
+    const roll1 = rng.next(); // always
+    let n = 1;
+    if (needsBreakRoll(plus, lucky, prot, roll1)) { rng.next(); n++; } // conditional roll2
+    return n;
+  };
+  const seedWhere = (pred: (r: number) => boolean): number => {
+    for (let s = 1; s < 500; s++) if (pred(new Rng(s).next())) return s;
+    return -1;
+  };
+
+  it('draws 2 on an unprotected risk-band failure; 1 when protected, below the floor, or on success', () => {
+    const chance = enhanceChance(RISK_FLOOR, false);
+    const failSeed = seedWhere((r) => r >= chance); // roll1 fails -> reaches the risk band
+    const okSeed = seedWhere((r) => r < chance);    // roll1 succeeds
+    expect(failSeed).toBeGreaterThan(0);
+    expect(okSeed).toBeGreaterThan(0);
+
+    expect(drawsConsumed(RISK_FLOOR, false, false, failSeed)).toBe(2);     // unprotected risk-band failure
+    expect(drawsConsumed(RISK_FLOOR, false, true, failSeed)).toBe(1);      // protected -> roll2 never pulled
+    expect(drawsConsumed(RISK_FLOOR - 1, false, false, failSeed)).toBe(1); // below the floor -> 1
+    expect(drawsConsumed(RISK_FLOOR, false, false, okSeed)).toBe(1);       // success -> 1
   });
 });

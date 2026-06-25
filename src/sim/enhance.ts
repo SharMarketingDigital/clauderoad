@@ -40,10 +40,19 @@ export type EnhanceOutcome =
   | { kind: 'degrade'; nextPlus: number; drop: number }
   | { kind: 'break' };
 
+// Whether the SECOND draw (roll2 — break vs degrade) is consulted at all: a FAILED attempt
+// (roll1 missed the success chance) at/above RISK_FLOOR that is NOT protected. This is the
+// SINGLE SOURCE of "do we need roll2" — both sim.enhance() (to decide whether to pull a 2nd
+// this.rng.next()) and resolveEnhance() (to decide whether to consume roll2) call it, so the
+// draw COUNT and the draw CONSUMPTION can never drift apart. Pure & deterministic.
+export function needsBreakRoll(plus: number, lucky: boolean, protectedAttempt: boolean, roll1: number): boolean {
+  return roll1 >= enhanceChance(plus, lucky) && plus >= RISK_FLOOR && !protectedAttempt;
+}
+
 // Resolve ONE attempt. PURE — the caller passes the two unit draws in [0,1):
 //   roll1: the success draw (always consulted).
-//   roll2: the break-vs-degrade draw, consulted ONLY on a failure at/above RISK_FLOOR that
-//          is NOT protected; pass any value (e.g. 0) otherwise — it is ignored.
+//   roll2: the break-vs-degrade draw, consulted ONLY when needsBreakRoll(...) is true (an
+//          unprotected failure at/above RISK_FLOOR); pass any value (e.g. 0) otherwise.
 // `protectedAttempt` = the player asked for protection AND a Pedra de Proteção is held.
 export function resolveEnhance(
   plus: number,
@@ -56,16 +65,18 @@ export function resolveEnhance(
     return { kind: 'success', nextPlus: Math.min(MAX_PLUS, plus + 1) };
   }
   // --- failure ---
-  if (plus < RISK_FLOOR) {
-    return { kind: 'degrade', nextPlus: Math.max(0, plus - 1), drop: 1 }; // gentle (pre-K4)
-  }
-  if (protectedAttempt) {
-    const drop = Math.min(DROP_ON_FAIL[plus] ?? 1, PROTECT_DROP_CAP); // the "piso": no break
+  // roll2 matters ONLY when needsBreakRoll is true — the SAME gate sim.enhance() uses to decide
+  // whether it pulled roll2 from the Rng, so the consumption matches the draw count exactly.
+  if (needsBreakRoll(plus, lucky, protectedAttempt, roll1)) {
+    if (roll2 < (BREAK_CHANCE[plus] ?? 0)) return { kind: 'break' };
+    const drop = DROP_ON_FAIL[plus] ?? 1;
     return { kind: 'degrade', nextPlus: Math.max(0, plus - drop), drop };
   }
-  if (roll2 < (BREAK_CHANCE[plus] ?? 0)) {
-    return { kind: 'break' };
+  // No break roll: a Pedra de Proteção caps the drop (the "piso", no break) at/above the floor;
+  // otherwise the gentle pre-K4 -1.
+  if (protectedAttempt && plus >= RISK_FLOOR) {
+    const drop = Math.min(DROP_ON_FAIL[plus] ?? 1, PROTECT_DROP_CAP);
+    return { kind: 'degrade', nextPlus: Math.max(0, plus - drop), drop };
   }
-  const drop = DROP_ON_FAIL[plus] ?? 1;
-  return { kind: 'degrade', nextPlus: Math.max(0, plus - drop), drop };
+  return { kind: 'degrade', nextPlus: Math.max(0, plus - 1), drop: 1 }; // gentle (pre-K4)
 }
