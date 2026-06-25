@@ -56,7 +56,11 @@ const RAIN_FOG_FAR = 88; // fog pulls in this close at full rain
 // -- sun shadow --
 const SUN_DISTANCE = 70;
 const SHADOWS = true;
-const SHADOW_MAP_SIZE = 2048;
+// O4: 1024 (was 2048). The sun follows the player so the shadow map re-renders EVERY frame over
+// the whole 80-unit area; 1024 quarters that fill + PCF-soft cost for a near-invisible quality
+// change at this pulled-back top-down camera (~12.8 px/unit). Tightening SHADOW_AREA (40->~32) to
+// claw back sharpness is a possible follow-up, but it shrinks shadow coverage, so left as-is.
+const SHADOW_MAP_SIZE = 1024;
 const SHADOW_AREA = 40;
 // -- fog (clear-weather far) --
 const FOG_NEAR = 58;
