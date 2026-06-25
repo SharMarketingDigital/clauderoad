@@ -350,13 +350,16 @@ export class ServerWorld {
     const matching = this.matchingList();
     const partyRequests = this.requestsFor(id);
     const myRequestPartyId = this.matching.requestOf(id);
+    // PvP duel state (Tier 1) — authoritative in the sim; delivered to the owner like party/invite.
+    const duel = this.sim.duelViewFor(id);
+    const duelInvite = this.sim.duelInviteViewFor(id);
     if (!e) {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
         botActive: false, abilities, inventory, shop, storage, party, invite,
-        matching, partyRequests, myRequestPartyId,
+        matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
     return {
@@ -368,7 +371,7 @@ export class ServerWorld {
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
       abilities, inventory, shop, storage, party, invite,
-      matching, partyRequests, myRequestPartyId,
+      matching, partyRequests, myRequestPartyId, duel, duelInvite,
     };
   }
 

@@ -18,6 +18,7 @@ import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
 import { PartyHud } from './ui/party_hud';
+import { DuelHud } from './ui/duel_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 import { MusicPlayer } from './ui/audio';
@@ -114,6 +115,7 @@ function startOnline(url: string, name: string): void {
   });
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
+  const duelHud = new DuelHud(world); // PvP: active-duel banner + incoming-challenge popup (A3)
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
   const chat = new ChatBox((text, channel) => world.sendChat(text, channel)); // text chat (/p for party)
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
@@ -138,6 +140,7 @@ function startOnline(url: string, name: string): void {
     map.update(world); // world map (M) — player position on the zones
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
+    duelHud.update(world); // PvP duel banner + challenge popup (from localDuel/localDuelInvite)
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     music.update(world, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);

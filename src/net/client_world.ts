@@ -134,13 +134,12 @@ export class ClientWorld implements IWorld {
   localInvite(): PartyInviteView | null {
     return this.self ? this.self.invite : null;
   }
-  // Duel state is authoritative in the server's sim (A1), but not yet delivered over the wire —
-  // the SelfSnap field + UI land in A3. Until then the online client reports no duel.
+  // Duel state — mirrored from the server's authoritative `self` snapshot (A3 delivery).
   localDuel(): DuelView | null {
-    return null;
+    return this.self ? this.self.duel : null;
   }
   localDuelInvite(): DuelInviteView | null {
-    return null;
+    return this.self ? this.self.duelInvite : null;
   }
 
   // ---- party matching (lobby; concrete MP channel, like chat — not part of IWorld) ----

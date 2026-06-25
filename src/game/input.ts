@@ -18,6 +18,9 @@ export class Input {
   // one-shot commands (Tab, click-to-target) queued by event handlers and
   // flushed to the world once per frame in apply().
   private pending: Command[] = [];
+  // A right-clicked entity id awaiting a duel challenge — resolved to a player NAME in apply()
+  // (which has the world to look the name up). Null when there's nothing pending.
+  private pendingChallengeId: number | null = null;
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
@@ -49,13 +52,16 @@ export class Input {
       // mouseup is on window so a drag that releases off-canvas still ends; but
       // a SELECT only counts when the release is over the canvas itself (so a
       // future interactive HUD element can't be click-through-selected).
-      const click =
-        this.dragging && !this.moved && this.downButton === 0 && e.target === canvas;
+      const clicked = this.dragging && !this.moved && e.target === canvas;
+      const button = this.downButton;
       this.dragging = false;
-      if (!click) return;
-      // A left click that didn't drag: select whatever enemy is under it.
+      if (!clicked) return;
       const id = this.renderer.pick(e.clientX, e.clientY);
-      if (id != null) this.pending.push({ t: 'set-target', id });
+      if (id == null) return;
+      // Left click selects whatever is under it (the sim only keeps an enemy). Right click
+      // challenges a player to a duel — resolved to its name in apply().
+      if (button === 0) this.pending.push({ t: 'set-target', id });
+      else if (button === 2) this.pendingChallengeId = id;
     });
     window.addEventListener('mousemove', (e) => {
       if (!this.dragging) return;
@@ -72,6 +78,8 @@ export class Input {
       },
       { passive: false },
     );
+    // Suppress the browser context menu so right-click is free for the duel challenge.
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   // Push queued actions + the current movement intent into the world. Called
@@ -80,18 +88,30 @@ export class Input {
     // Auto-play drives the player from the sim; ignore (and drop) manual input.
     if (world.botActive()) {
       this.pending.length = 0;
+      this.pendingChallengeId = null;
       return;
     }
     // While typing in the chat, the player must NOT move/act: drop queued actions,
     // forget held keys (so a key pressed before opening chat doesn't stick), and stop.
     if (isTyping()) {
       this.pending.length = 0;
+      this.pendingChallengeId = null;
       this.keys.clear();
       world.sendCommand({ t: 'stop' });
       return;
     }
     for (const cmd of this.pending) world.sendCommand(cmd);
     this.pending.length = 0;
+
+    // Resolve a pending right-click duel challenge: look the picked entity up and, if it's another
+    // player, send a duel-challenge by name (the sim/server validate it; a non-player is ignored).
+    if (this.pendingChallengeId != null) {
+      const tid = this.pendingChallengeId;
+      this.pendingChallengeId = null;
+      const me = world.localPlayerId();
+      const t = world.entities().find((en) => en.id === tid);
+      if (t && t.kind === 'player' && t.id !== me) world.sendCommand({ t: 'duel-challenge', name: t.name });
+    }
 
     let fwd = 0;
     let right = 0;

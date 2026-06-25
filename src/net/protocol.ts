@@ -9,7 +9,7 @@
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
   EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView, StorageView,
-  PartyView, PartyInviteView, PartyExpMode, MasteryId,
+  PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, MasteryId,
 } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
@@ -116,6 +116,9 @@ export interface SelfSnap {
   storage: StorageView; // K5: the player's warehouse (armazém) contents + whether in range
   party: PartyView | null; // the player's party (members + modes), or null when solo
   invite: PartyInviteView | null; // a pending party invite to accept/refuse, or null
+  // --- PvP duel (Tier 1; authoritative in the sim, delivered to the owner like party/invite) ---
+  duel: DuelView | null; // the player's active duel opponent, or null
+  duelInvite: DuelInviteView | null; // a pending duel challenge to accept/decline, or null
   // --- party matching (lobby) ---
   matching: MatchingEntryView[]; // the public LFM list (same for everyone; for the E window)
   partyRequests: MatchingRequestView[]; // pending join requests to MY party (leader only; else empty)
