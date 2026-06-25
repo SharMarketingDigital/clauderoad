@@ -8,6 +8,7 @@
 // (nunca innerHTML com dados de entidade — regra anti-injeção do HUD) e não toca o sim.
 import type { EntityView } from '../world_api';
 import { isTyping } from './typing';
+import { registerOverlay } from './overlays';
 
 export class CharacterSheet {
   private root: HTMLDivElement;
@@ -42,6 +43,9 @@ export class CharacterSheet {
       if (e.key.toLowerCase() === 'c') this.setOpen(!this.open);
       else if (e.key === 'Escape') this.setOpen(false);
     });
+
+    // Take part in Esc priority so the central Esc menu (and other windows) respect an open ficha.
+    registerOverlay(() => this.open);
   }
 
   isOpen(): boolean {

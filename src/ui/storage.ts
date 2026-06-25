@@ -6,6 +6,7 @@
 // (storage().inRange) — senão mostra a dica e desabilita os cliques.
 import type { IWorld, InventoryView, StorageView, ItemStackView } from '../world_api';
 import { isTyping } from './typing';
+import { registerOverlay } from './overlays';
 
 export class StoragePanel {
   private root: HTMLDivElement;
@@ -57,6 +58,9 @@ export class StoragePanel {
       if (e.key.toLowerCase() === 'h') this.setOpen(!this.open);
       else if (e.key === 'Escape') this.setOpen(false);
     });
+
+    // Take part in Esc priority so the central Esc menu (and other windows) respect an open armazém.
+    registerOverlay(() => this.open);
   }
 
   isOpen(): boolean {

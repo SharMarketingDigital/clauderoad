@@ -70,13 +70,13 @@ describe('positional bag (sparse) — sim commands & persistence', () => {
   it('move-item rearranges the bag to the EXACT target slot (no auto-organize)', () => {
     const sim = new Sim(1337, false);
     const a = sim.addPlayer('A');
-    sim.restorePlayer(a, { bag: [mk('health_potion', 5), mk('lucky_powder', 2)] });
+    sim.restorePlayer(a, { bag: [mk('health_potion', 5), mk('protect_stone', 2)] });
     sim.sendCommandFor(a, { t: 'move-item', from: 0, to: 8 });
     sim.step();
     const slots = sim.inventoryFor(a).slots;
     expect(slots[0]).toBeNull();
     expect(slots[8]?.itemId).toBe('health_potion');
-    expect(slots[1]?.itemId).toBe('lucky_powder'); // untouched neighbour
+    expect(slots[1]?.itemId).toBe('protect_stone'); // untouched neighbour
   });
 
   it('unequip places the item at the EXACT bag slot requested (drag placement)', () => {
@@ -108,7 +108,7 @@ describe('positional bag (sparse) — sim commands & persistence', () => {
     const layout = (): (string | null)[] => {
       const sim = new Sim(1337, false);
       const a = sim.addPlayer('A');
-      sim.restorePlayer(a, { bag: [mk('health_potion'), mk('lucky_powder')] });
+      sim.restorePlayer(a, { bag: [mk('health_potion'), mk('protect_stone')] });
       sim.sendCommandFor(a, { t: 'move-item', from: 0, to: 10 });
       sim.sendCommandFor(a, { t: 'move-item', from: 1, to: 0 });
       sim.step();

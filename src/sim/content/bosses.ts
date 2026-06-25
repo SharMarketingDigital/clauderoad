@@ -74,7 +74,6 @@ export const BOSS_TEMPLATE: BossTemplate = {
   drops: [
     { itemId: 'old_sword', chance: 0.8 },
     { itemId: 'wolf_leather', chance: 0.9 },
-    { itemId: 'lucky_powder', chance: 0.9 },
     { itemId: 'elixir_weapon', chance: 0.6 },
     { itemId: 'elixir_armor', chance: 0.6 },
   ],
@@ -109,7 +108,6 @@ export const WARLORD_TEMPLATE: BossTemplate = {
     { itemId: 'iron_spear', chance: 0.7 }, // the warlord's reach weapon
     { itemId: 'old_sword', chance: 0.6 },
     { itemId: 'wolf_leather', chance: 0.9 },
-    { itemId: 'lucky_powder', chance: 0.9 },
     { itemId: 'elixir_weapon', chance: 0.7 },
     { itemId: 'elixir_armor', chance: 0.7 },
   ],

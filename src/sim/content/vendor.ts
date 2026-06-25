@@ -22,7 +22,6 @@ export const VENDOR_STOCK: VendorStockEntry[] = [
   { itemId: 'apprentice_staff', price: 130 }, // switch to the Mago mastery (ranged magical kit)
   { itemId: 'elixir_weapon', price: 40 },
   { itemId: 'elixir_armor', price: 40 },
-  { itemId: 'lucky_powder', price: 60 },
   { itemId: 'protect_stone', price: 75 }, // K4: alchemy safety net (prevents break / caps the drop)
   // K1: the full Silkroad equipment set, so a player can buy a complete set in town.
   { itemId: 'leather_cap', price: 40 },

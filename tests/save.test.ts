@@ -50,7 +50,7 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
         earring: null,
         ring: null,
       },
-      storage: [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }],
+      storage: [{ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 3 }],
     };
     sim.restorePlayer(a, JSON.parse(JSON.stringify(save))); // through JSON, like the DB
     expect(sim.serializePlayer(a)).toEqual(save);
@@ -66,7 +66,7 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
     sim.restorePlayer(a, { storage: 'garbage' });
     expect(sim.serializePlayer(a)!.storage).toEqual([]);
     // excesso de stacks é capado em STORAGE_SLOTS
-    const oversized = Array.from({ length: STORAGE_SLOTS + 10 }, () => ({ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 1 }));
+    const oversized = Array.from({ length: STORAGE_SLOTS + 10 }, () => ({ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 1 }));
     sim.restorePlayer(a, { storage: oversized });
     expect(sim.serializePlayer(a)!.storage.length).toBe(STORAGE_SLOTS);
   });

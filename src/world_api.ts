@@ -122,8 +122,7 @@ export interface EquipView {
   readonly rarity: Rarity | null;
   readonly rarityName: string | null;
   readonly plus: number;
-  readonly enhanceChance: number; // 0..1, no powder (0 when empty or at the cap)
-  readonly enhanceChanceLucky: number; // 0..1, with a Lucky Powder
+  readonly enhanceChance: number; // 0..1 (0 when empty or at the cap)
   // Durability (GDD B8 death penalty): current / max (0 for an empty slot), and the
   // gold to fully repair it at the vendor (0 when full or empty). Worn gear gives less
   // of its stat bonus until repaired.
@@ -229,7 +228,7 @@ export type Command =
   | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
   | { t: 'unequip'; slot: EquipSlot; toBagSlot?: number } // move an equipped item back to the bag (optionally to a SPECIFIC bag slot index — drag placement)
   | { t: 'move-item'; from: number; to: number } // rearrange the bag: swap/move the stacks at two slot indices (positional inventory)
-  | { t: 'enhance'; slot: EquipSlot; useLuckyPowder: boolean; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
+  | { t: 'enhance'; slot: EquipSlot; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
   | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence

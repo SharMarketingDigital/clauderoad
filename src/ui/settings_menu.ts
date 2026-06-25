@@ -28,16 +28,22 @@ export class SettingsMenu {
     window.addEventListener(
       'keydown',
       (e) => {
-        if (e.key !== 'Escape' || e.repeat) return;
-        if (this.open) {
-          this.setOpen(false); // close works even if a control inside (the volume slider) has focus
-          e.stopPropagation();
+        if (e.repeat) return;
+        // Close on Esc OR Backspace while open (works even if a control inside has focus).
+        if (this.open && (e.key === 'Escape' || e.key === 'Backspace')) {
+          this.setOpen(false);
+          e.stopImmediatePropagation(); // also stops the Esc menu's capture handler -> it won't re-open on this Esc
+          e.preventDefault();
           return;
         }
-        if (isTyping()) return; // typing in chat: let the input's own Esc handle it
-        if (anyOverlayOpen()) return; // another window is up — let ITS Esc close it
+        // Settings now OPENS on Backspace — the central Esc menu (tecla Esc) lists it under
+        // "Configurações" and owns Esc. Open only when no other window is up.
+        if (e.key !== 'Backspace') return;
+        if (isTyping()) return; // typing in chat: let the input's own Backspace edit text
+        if (anyOverlayOpen()) return; // another window is up — open it from the Esc menu instead
         this.setOpen(true);
         e.stopPropagation();
+        e.preventDefault();
       },
       { capture: true },
     );
@@ -66,7 +72,7 @@ export class SettingsMenu {
 
     panel.append(
       span('set-title', 'Configurações'),
-      span('set-hint', 'ESC ou clique fora para fechar'),
+      span('set-hint', 'Backspace/ESC ou clique fora para fechar'),
     );
 
     // --- Áudio section ---

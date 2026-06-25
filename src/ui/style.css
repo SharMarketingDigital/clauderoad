@@ -299,17 +299,6 @@ html, body {
   overflow: hidden;
 }
 .char-canvas { width: 100%; height: 100%; display: block; }
-.char-detail {
-  font-size: 11px;
-  color: var(--ink);
-  opacity: 0.9;
-  text-align: center;
-  min-height: 1.2em;
-  margin-bottom: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* Equipment TILE: slot label + item name, fixed-size so text can never overflow (the row layout's
    old bug). The shared `.equip-slot[data-rarity]` rules above color the border by rarity (the tile
@@ -413,36 +402,31 @@ html, body {
   text-align: center;
 }
 
-/* Alchemy ("+N"): seção colapsável de largura total ABAIXO das 2 colunas (divulgação progressiva,
-   fechada por padrão — não desbalanceia a coluna Personagem). <details>/<summary> = acessível nativo. */
-.alchemy-wrap { margin-top: 12px; }
-.alchemy-summary {
-  cursor: pointer;
-  list-style: none;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--gold);
-  padding: 6px 4px;
-  border-top: 1px solid rgba(200, 168, 90, 0.3);
-}
-.alchemy-summary::-webkit-details-marker { display: none; }
-.alchemy-summary::before { content: '▸ '; }
-.alchemy-wrap[open] .alchemy-summary::before { content: '▾ '; }
-.alchemy-summary:focus-visible { outline: none; color: #fff; }
-.alchemy {
+/* Alchemy ("+N") — STANDALONE panel (tecla L), mirror of the inventory: vertically centered and
+   anchored to the RIGHT edge (the inventory sits on the left). No collapse; always its full content. */
+.alchemy-panel {
+  position: absolute;
+  top: 50%;
+  right: 24px;
+  transform: translateY(-50%);
+  width: 300px;
+  max-width: 94vw;
+  max-height: 90vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 8px;
-  background: #12161e;
-  border: 1px solid #2c3645;
-  border-radius: 6px;
+  gap: 8px;
+  padding: 12px;
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
 }
+.alchemy-panel[hidden] { display: none; }
 /* 2-col grid (not a 10-wide flex row) so the longest button labels can't overflow the panel. */
 .refine-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .refine-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lucky-toggle,
 .protect-toggle,
 .refine-btn {
   flex: 1;
@@ -456,7 +440,6 @@ html, body {
   cursor: pointer;
   font-family: inherit;
 }
-.lucky-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
 .refine-btn:hover:not(:disabled) { background: #26344a; }
 .refine-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
 .protect-toggle.on { background: #1c2f3a; border-color: #4a9fd1; color: #b0e6f5; }
@@ -770,4 +753,5 @@ html, body {
 .bag,
 .skills,
 .storage,
-.sheet { z-index: 50; }
+.sheet,
+.alchemy-panel { z-index: 50; }

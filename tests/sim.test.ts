@@ -2140,32 +2140,28 @@ describe('alchemy ("+N")', () => {
     return count(sim, id) >= n;
   };
 
-  it('enhanceChance falls as "+" rises, a Lucky Powder helps, and the cap has 0 chance', () => {
-    expect(enhanceChance(0, false)).toBeGreaterThan(enhanceChance(5, false));
-    expect(enhanceChance(5, false)).toBeGreaterThan(enhanceChance(9, false));
-    expect(enhanceChance(5, true)).toBeGreaterThan(enhanceChance(5, false)); // lucky helps
-    expect(enhanceChance(MAX_PLUS, true)).toBe(0); // no attempts past the cap
+  it('enhanceChance falls as "+" rises and the cap has 0 chance', () => {
+    expect(enhanceChance(0)).toBeGreaterThan(enhanceChance(5));
+    expect(enhanceChance(5)).toBeGreaterThan(enhanceChance(9));
+    expect(enhanceChance(MAX_PLUS)).toBe(0); // no attempts past the cap
     // a "+N" item's bonus grows with the level (and +0 = base)
     expect(enhanceStat(10, 5)).toBeGreaterThan(enhanceStat(10, 0));
     expect(enhanceStat(10, 0)).toBe(10);
   });
 
-  it('refining consumes an Elixir (and a Lucky Powder when used)', () => {
+  it('refining consumes an Elixir', () => {
     const sim = new Sim(7);
     equipSwordAndRest(sim);
     expect(farm(sim, 'elixir_weapon', 1, 600)).toBe(true);
-    expect(farm(sim, 'lucky_powder', 1, 600)).toBe(true);
     sim.sendCommand({ t: 'set-target', id: null });
     sim.sendCommand({ t: 'stop' });
     sim.step();
     const elixir0 = count(sim, 'elixir_weapon');
-    const powder0 = count(sim, 'lucky_powder');
 
-    sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: true });
+    sim.sendCommand({ t: 'enhance', slot: 'weapon' });
     sim.step();
 
     expect(count(sim, 'elixir_weapon')).toBe(elixir0 - 1); // elixir spent on the attempt
-    expect(count(sim, 'lucky_powder')).toBe(powder0 - 1); // powder spent (it was used)
   });
 
   it('refining succeeds (+1, stat rises) or fails (-1), staying within [0, MAX_PLUS]', () => {
@@ -2190,7 +2186,7 @@ describe('alchemy ("+N")', () => {
     // loop never enters break territory and the assertions below stay valid.
     for (let i = 0; i < ELIXIRS && weaponPlus(sim) < RISK_FLOOR; i++) {
       const before = weaponPlus(sim);
-      sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
+      sim.sendCommand({ t: 'enhance', slot: 'weapon' });
       sim.step();
       const after = weaponPlus(sim);
       expect(after).toBeGreaterThanOrEqual(0); // never breaks below +0
@@ -2226,7 +2222,7 @@ describe('alchemy ("+N")', () => {
     // refine until the weapon reaches at least +1
     let guard = 0;
     while (weaponPlus(sim) < 1 && count(sim, 'elixir_weapon') > 0 && guard++ < 12) {
-      sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
+      sim.sendCommand({ t: 'enhance', slot: 'weapon' });
       sim.step();
     }
     const enhanced = weaponPlus(sim);
@@ -2254,7 +2250,7 @@ describe('alchemy ("+N")', () => {
       sim.sendCommand({ t: 'set-target', id: null });
       sim.sendCommand({ t: 'stop' });
       for (let i = 0; i < 10; i++) {
-        sim.sendCommand({ t: 'enhance', slot: 'weapon', useLuckyPowder: false });
+        sim.sendCommand({ t: 'enhance', slot: 'weapon' });
         sim.step();
       }
       return sim.hash();
@@ -3506,9 +3502,9 @@ describe('armazém (storage) — depósito/saque (comandos)', () => {
   it('um run com depósito é determinístico (mesma seed => mundo idêntico)', () => {
     const runDep = (s: number): string => {
       const sim = new Sim(s);
-      seed(sim, [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }], []);
+      seed(sim, [{ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 3 }], []);
       walkToWarehouse(sim);
-      sim.sendCommand({ t: 'deposit', itemId: 'lucky_powder', rarity: 'normal', plus: 0 });
+      sim.sendCommand({ t: 'deposit', itemId: 'protect_stone', rarity: 'normal', plus: 0 });
       for (let i = 0; i < 60; i++) { sim.sendCommand({ t: 'move', dx: -1, dz: 0 }); sim.step(); }
       return sim.hash();
     };
@@ -3539,7 +3535,7 @@ describe('armazém (storage) — depósito/saque (comandos)', () => {
 
   it('o conteúdo do armazém entra no hash() (storage dobrado no fingerprint)', () => {
     const withStore = new Sim(7);
-    seed(withStore, [], [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }]);
+    seed(withStore, [], [{ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 3 }]);
     const empty = new Sim(7);
     seed(empty, [], []);
     // mesma seed e mesma bolsa (vazia); só o armazém difere. Se e.storage NÃO entrasse no hash(),
@@ -3549,7 +3545,7 @@ describe('armazém (storage) — depósito/saque (comandos)', () => {
     expect(withStore.hash()).not.toBe(empty.hash());
     const h = (): string => {
       const s = new Sim(7);
-      seed(s, [], [{ itemId: 'lucky_powder', rarity: 'normal', plus: 0, qty: 3 }]);
+      seed(s, [], [{ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 3 }]);
       return s.hash();
     };
     expect(h()).toBe(h()); // e segue determinístico run-vs-run

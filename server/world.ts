@@ -116,12 +116,12 @@ export class ServerWorld {
         }
         return;
       case 'enhance':
-        if (VALID_SLOTS.has(cmd.slot) && typeof cmd.useLuckyPowder === 'boolean'
+        if (VALID_SLOTS.has(cmd.slot)
           && (cmd.useProtection === undefined || typeof cmd.useProtection === 'boolean')) {
-          // K4: forward useProtection too — dropping it would silently disable protection
+          // K4: forward useProtection — dropping it would silently disable protection
           // online (the K1 whitelist bug). The sim re-validates that a stone is held.
           this.sim.sendCommandFor(id, {
-            t: 'enhance', slot: cmd.slot, useLuckyPowder: cmd.useLuckyPowder, useProtection: cmd.useProtection,
+            t: 'enhance', slot: cmd.slot, useProtection: cmd.useProtection,
           });
         }
         return;

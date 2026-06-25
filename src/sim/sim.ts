@@ -108,9 +108,8 @@ const BOT_BAG_HEADROOM = 3; // make a vendor run to sell once free bag slots dro
 const BOT_POTION_STOCK = 5; // restock Health Potions up to this many
 const BOT_GOLD_RESERVE = 80; // keep at least this much gold for non-essential (material) buys
 // Alchemy (enhance): refine equipped gear with spare materials, always keep a reserve
-export const BOT_MATERIAL_RESERVE = 2; // never spend an Elixir / Lucky Powder below this count
+export const BOT_MATERIAL_RESERVE = 2; // never spend a material (Elixir/Pedra) below this count
 const BOT_ENHANCE_SAFE_RADIUS = 11; // only enhance during a lull (nearest enemy beyond this)
-const BOT_LUCKY_BELOW_CHANCE = 0.7; // spend a Lucky Powder only when base success dips under this
 // Target selection: braver as it levels up
 const BOT_CHAMPION_MIN_LEVEL = 3;
 const BOT_ELITE_MIN_LEVEL = 5;
@@ -642,9 +641,7 @@ export class Sim implements IWorld {
         rarity: eq?.rarity ?? null,
         rarityName: eq ? rarityDef(eq.rarity).name : null,
         plus: eq?.plus ?? 0,
-        // both chances, so the UI shows the one matching the Lucky Powder toggle.
-        enhanceChance: eq ? enhanceChance(eq.plus, false) : 0,
-        enhanceChanceLucky: eq ? enhanceChance(eq.plus, true) : 0,
+        enhanceChance: eq ? enhanceChance(eq.plus) : 0,
         // K4 alchemy risk readout (0 / gentle below RISK_FLOOR).
         breakChance: eq && eq.plus >= RISK_FLOOR ? (BREAK_CHANCE[eq.plus] ?? 0) : 0,
         dropOnFail: eq && eq.plus >= RISK_FLOOR ? (DROP_ON_FAIL[eq.plus] ?? 1) : 1,
@@ -1312,7 +1309,7 @@ export class Sim implements IWorld {
         this.moveItem(p, cmd.from, cmd.to);
         break;
       case 'enhance':
-        this.enhance(p, cmd.slot, cmd.useLuckyPowder, cmd.useProtection);
+        this.enhance(p, cmd.slot, cmd.useProtection);
         break;
       case 'repair':
         this.repair(p, cmd.slot);
@@ -1417,13 +1414,11 @@ export class Sim implements IWorld {
   // ONLY when it actually prevents a bad outcome. Below RISK_FLOOR a failure stays a gentle
   // -1. Determinism: a FIXED Rng draw order — roll1 (success) always; roll2 (break vs
   // degrade) ONLY on an unprotected failure at/above RISK_FLOOR. Refuses (no cost) at the cap.
-  private enhance(p: Entity, slot: EquipSlot, useLuckyPowder: boolean, useProtection?: boolean): void {
+  private enhance(p: Entity, slot: EquipSlot, useProtection?: boolean): void {
     const eq = p.equipment[slot];
     if (!eq || eq.plus >= MAX_PLUS) return; // nothing equipped, or already maxed
     const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
     if (!removeFromBag(p.bag, elixirId, 'normal', 0, 1)) return; // need the right Elixir
-    let lucky = false;
-    if (useLuckyPowder && removeFromBag(p.bag, 'lucky_powder', 'normal', 0, 1)) lucky = true;
     // Protection: a NON-MUTATING held-check (botCount only sums the bag); the stone is
     // consumed below ONLY when it actually prevents a break/multi-drop.
     const protectedAttempt = !!useProtection && this.botCount(p, PROTECT_STONE_ID) > 0;
@@ -1432,8 +1427,8 @@ export class Sim implements IWorld {
     // says so (unprotected failure at/above RISK_FLOOR) — the SAME predicate resolveEnhance uses to
     // consume roll2, so the draw count here and the consumption there can never drift apart.
     const roll1 = this.rng.next();
-    const roll2 = needsBreakRoll(eq.plus, lucky, protectedAttempt, roll1) ? this.rng.next() : 0;
-    const outcome = resolveEnhance(eq.plus, lucky, protectedAttempt, roll1, roll2);
+    const roll2 = needsBreakRoll(eq.plus, protectedAttempt, roll1) ? this.rng.next() : 0;
+    const outcome = resolveEnhance(eq.plus, protectedAttempt, roll1, roll2);
 
     if (outcome.kind === 'break') {
       const brokenName = ITEMS[eq.itemId]?.name ?? eq.itemId;
@@ -1654,7 +1649,7 @@ export class Sim implements IWorld {
         this.applyAction(p, { t: 'repair', slot });
       }
     }
-    for (const mat of ['elixir_weapon', 'elixir_armor', 'lucky_powder'] as const) {
+    for (const mat of ['elixir_weapon', 'elixir_armor'] as const) {
       const price = botPrice(mat);
       while (price > 0 && this.botCount(p, mat) < BOT_MATERIAL_RESERVE + 2
         && p.gold - price >= BOT_GOLD_RESERVE && this.botCanStock(p, mat)) {
@@ -1681,9 +1676,7 @@ export class Sim implements IWorld {
       if (!eq || eq.plus >= RISK_FLOOR) continue; // K4: bot never gambles into the break band
       const elixirId = slot === 'weapon' ? 'elixir_weapon' : 'elixir_armor';
       if (this.botCount(p, elixirId) <= BOT_MATERIAL_RESERVE) continue; // keep a reserve
-      const useLucky = enhanceChance(eq.plus, false) < BOT_LUCKY_BELOW_CHANCE
-        && this.botCount(p, 'lucky_powder') > BOT_MATERIAL_RESERVE;
-      this.applyAction(p, { t: 'enhance', slot, useLuckyPowder: useLucky });
+      this.applyAction(p, { t: 'enhance', slot });
       return; // at most one enhance attempt per tick
     }
   }
