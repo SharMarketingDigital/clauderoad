@@ -223,4 +223,32 @@ describe('duel PvP damage (A2)', () => {
     };
     expect(play()).toBe(play());
   });
+
+  it('a SINGLE set-target keeps landing auto-attacks on the opponent over many ticks (the client clicks once)', () => {
+    // Regression guard. The real client sends set-target only on a CLICK — never re-sending it each
+    // tick. So the duel target must PERSIST in the sim (validateTarget must not treat the live
+    // opponent as an invalid, mob-only target) and keep auto-attacking. Here A sets the target ONCE,
+    // then only walks onto B, and must land several swings — not the single one the bug report saw.
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    sim.restorePlayer(a, { baseStr: 50 }); // moderate -> several swings to down B
+    run(sim, a, { t: 'duel-challenge', name: 'B' });
+    run(sim, b, { t: 'duel-accept' });
+    walkOut(sim, b); // B out of town
+    sim.sendCommandFor(a, { t: 'set-target', id: b }); // set the target ONCE — never again
+    let hits = 0; let lastHp = ent(sim, b).hp;
+    let targetHeldEveryTick = true;
+    for (let i = 0; i < 800 && !ent(sim, b).dead; i++) {
+      const ea = ent(sim, a); const eb = ent(sim, b);
+      sim.sendCommandFor(a, { t: 'move', dx: eb.x - ea.x, dz: eb.z - ea.z }); // walk onto B (no re-target)
+      sim.step();
+      if (!ent(sim, b).dead && sim.targetOf(a) !== b) targetHeldEveryTick = false; // never silently dropped
+      const hp = ent(sim, b).hp;
+      if (hp < lastHp) { hits++; lastHp = hp; }
+    }
+    expect(targetHeldEveryTick).toBe(true); // the opponent stays selected the whole fight
+    expect(hits).toBeGreaterThan(1); // MULTIPLE auto-attacks from one click — not just the one the user saw
+    expect(ent(sim, b).dead).toBe(true); // and the fight actually concludes
+  });
 });

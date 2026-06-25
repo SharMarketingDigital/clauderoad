@@ -45,6 +45,7 @@ export class Renderer {
   private camera: THREE.PerspectiveCamera;
   private gl: THREE.WebGLRenderer;
   private meshes = new Map<number, THREE.Object3D>();
+  private localId: number | null = null; // the local player's id (refreshed each render) — pick() skips its avatar
   private raycaster = new THREE.Raycaster();
   // One reusable selection marker, moved onto the targeted enemy each frame.
   private selectionRing: THREE.Mesh;
@@ -151,7 +152,14 @@ export class Renderer {
       let o: THREE.Object3D | null = h.object;
       while (o) {
         const id = o.userData.entityId;
-        if (typeof id === 'number') return id;
+        if (typeof id === 'number') {
+          // In third person OUR OWN avatar sits between the camera and everything in front of us, so
+          // the CLOSEST hit under the cursor is frequently ourselves — and set-target(self) is rejected
+          // (canAttack excludes self), which is exactly why clicking a face-to-face duel opponent kept
+          // failing. Skip our own avatar so the ray passes THROUGH it to whoever is behind.
+          if (id !== this.localId) return id;
+          break; // our avatar occluded this hit — fall through to the next (farther) one
+        }
         o = o.parent;
       }
     }
@@ -222,6 +230,7 @@ export class Renderer {
 
     this.alpha = clamp(alpha, 0, 1);
     this.advanceInterp(world); // O1: roll prev/cur position buffers when the sim has ticked
+    this.localId = world.localPlayerId(); // remembered for pick(): never let our own avatar occlude a click
 
     this.syncLocalAvatarModel(world);
     this.sync(world);
