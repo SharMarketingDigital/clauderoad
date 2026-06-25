@@ -1332,8 +1332,10 @@ export class Sim implements IWorld {
     }
     const wasAtRisk = eq.plus >= RISK_FLOOR; // captured before applying the new "+"
     eq.plus = outcome.nextPlus;
-    // Consume the protection stone ONLY when it actually prevented a break/multi-drop: a
-    // protected FAILURE (degrade) at/above RISK_FLOOR. Success / low-"+" never burns it.
+    // Consume the protection stone on ANY protected FAILURE (degrade) at/above RISK_FLOOR. It
+    // does NOT guarantee a break/level was actually averted: at +4 the protected drop (−1) equals
+    // the unprotected non-break drop, so there the stone only buys break-immunity (its drop-cap
+    // matters from +5 up). Success / low-"+" never burns it.
     if (protectedAttempt && outcome.kind === 'degrade' && wasAtRisk) {
       removeFromBag(p.bag, PROTECT_STONE_ID, 'normal', 0, 1);
     }

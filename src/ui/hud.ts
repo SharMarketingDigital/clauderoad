@@ -2,6 +2,7 @@
 import type { IWorld, AbilityView, InventoryView, EntityView, ShopView } from '../world_api';
 import { isTyping } from './typing';
 import { SLOT_LABELS } from './inventory';
+import { PROTECT_DROP_CAP } from '../sim/content/enhance';
 import { CharacterSheet } from './character_sheet';
 import { StoragePanel } from './storage';
 
@@ -582,7 +583,10 @@ export class Hud {
         const ch = this.luckyOn && powder > 0 ? eq.enhanceChanceLucky : eq.enhanceChance;
         const warn = eq.breakChance > 0
           ? (this.protectOn
-            ? ' · protegido (−1)'
+            // The cap only SHRINKS the drop when dropOnFail > cap (+5 and up); at +4 (dropOnFail
+            // == cap) a protected failure drops the same -1 as an unprotected non-break, so the
+            // only real benefit there is break-immunity — say so instead of faking a -N gain.
+            ? (eq.dropOnFail > PROTECT_DROP_CAP ? ` · protegido (−${PROTECT_DROP_CAP})` : ' · protegido (sem quebra)')
             : ` · PODE QUEBRAR −${eq.dropOnFail} (quebra ${Math.round(eq.breakChance * 100)}%)`)
           : '';
         btn.textContent = `Refinar ${slotName} +${eq.plus} (${Math.round(ch * 100)}%)${warn}`;
