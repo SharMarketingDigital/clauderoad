@@ -11,6 +11,7 @@
 // challenge popup (challenged side) and the active-duel banner are unchanged from A3.
 import type { IWorld } from '../world_api';
 import type { Renderer } from '../render/renderer';
+import { decoratePanel } from './theme';
 
 const DUEL_BTN_Y = 3.1; // world height above the selected player's feet (above the MP name tag at 2.4)
 const TOAST_MS = 2500; // how long the "Desafio enviado" feedback stays up
@@ -38,6 +39,7 @@ export class DuelHud {
     const btns = el('duel-popup-btns');
     btns.append(accept, decline);
     this.popup.append(this.popupText, btns);
+    decoratePanel(this.popup); // stone frame on the duel challenge popup (keeps its red accents)
 
     // The floating challenge button reads the CURRENT selected name at click time (set each frame in
     // update), so it can never send a stale target even as the selection changes under it.
@@ -59,7 +61,7 @@ export class DuelHud {
 
     // Active-duel banner.
     if (duel) {
-      this.banner.textContent = `⚔ Duelo — vs ${duel.opponentName}`;
+      this.banner.textContent = `⚔ Duelo - vs ${duel.opponentName}`;
       this.banner.style.display = 'block';
     } else {
       this.banner.style.display = 'none';

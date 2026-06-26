@@ -40,7 +40,7 @@ export class MpHud implements Announcer {
   }
 
   update(world: IWorld, renderer: Renderer, status: string, playerCount: number): void {
-    this.statusEl.textContent = `Multiplayer — ${status} · ${playerCount} jogador(es)`;
+    this.statusEl.textContent = `Multiplayer | ${status} · ${playerCount} jogador(es)`;
 
     const localId = world.localPlayerId();
     const targetId = world.localTargetId();

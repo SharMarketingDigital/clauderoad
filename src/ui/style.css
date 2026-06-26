@@ -11,7 +11,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   background: #000;
-  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif; /* medieval skin: serif like the prototype */
 }
 
 #game { display: block; width: 100vw; height: 100vh; }
@@ -755,3 +755,346 @@ html, body {
 .storage,
 .sheet,
 .alchemy-panel { z-index: 50; }
+
+/* =====================================================================================
+   MEDIEVAL "STONE" SKIN  (mockups/ui-kit.html)  —  tokens + theme.
+   Everything VISUAL is gated under [data-ui="stone"], set by src/ui/theme.ts at boot.
+   The classic skin is the default; `?ui=legacy` (or not calling installTheme) keeps it.
+   Tokens use a --tk-/--g*/--bg-*/--edge-/--glow namespace so they NEVER collide with the
+   legacy --ink/--gold/--panel/--hp tokens above.
+   ===================================================================================== */
+:root {
+  --tex-stone: none; --tex-cracks: none; --tex-grain: none;
+  --m-corner-a: none; --m-corner-c: none; --m-edge: none; --m-edge-v: none;
+  --font-display: "Trajan Pro", "Cinzel", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  /* default palette = basic (also the <html> palette once themed) */
+  --g1: #686c73; --g2: #a7abb0; --g3: #393c41;
+  --edge-grad: linear-gradient(135deg, #393c41 0%, #a7abb0 28%, #686c73 50%, #a7abb0 72%, #393c41 100%);
+  --bg-1: #1a1b1e; --bg-2: #111214; --bg-3: #0a0b0c;
+  --line-inner: rgba(0, 0, 0, 0.55); --glow: rgba(150, 162, 178, 0.28);
+  --tk-ink: #e7e8ea; --tk-ink-soft: #a2a6ad; --accent: #c3c9d2;
+  --m-corner: var(--m-corner-a); --btn-edge: var(--edge-grad);
+}
+[data-style="basic"] {
+  --g1: #686c73; --g2: #a7abb0; --g3: #393c41;
+  --edge-grad: linear-gradient(135deg, #393c41 0%, #a7abb0 28%, #686c73 50%, #a7abb0 72%, #393c41 100%);
+  --bg-1: #1a1b1e; --bg-2: #111214; --bg-3: #0a0b0c;
+  --line-inner: rgba(0, 0, 0, 0.55); --glow: rgba(150, 162, 178, 0.28);
+  --tk-ink: #e7e8ea; --tk-ink-soft: #a2a6ad; --accent: #c3c9d2;
+  --m-corner: var(--m-corner-a); --btn-edge: var(--edge-grad);
+}
+[data-style="gold"] {
+  --g1: #7a571d; --g2: #f1d893; --g3: #a87f33;
+  --edge-grad: linear-gradient(135deg, #5e421a 0%, #caa14e 20%, #f6e6ad 46%, #b98a3a 70%, #5e421a 100%);
+  --bg-1: #1c1c1c; --bg-2: #121212; --bg-3: #0a0a0a;
+  --line-inner: rgba(20, 12, 4, 0.6); --glow: rgba(214, 170, 80, 0.34);
+  --tk-ink: #e7e8ea; --tk-ink-soft: #a2a6ad; --accent: #e6c477;
+  --m-corner: var(--m-corner-a);
+  --btn-edge: linear-gradient(135deg, #393c41 0%, #a7abb0 28%, #686c73 50%, #a7abb0 72%, #393c41 100%);
+}
+[data-style="premium"] {
+  --g1: #8a651f; --g2: #ffeaa6; --g3: #c79a44;
+  --edge-grad: linear-gradient(135deg, #6e4f17 0%, #d8ad53 18%, #ffeaa6 46%, #c99a44 72%, #6e4f17 100%);
+  --bg-1: #241308; --bg-2: #170b03; --bg-3: #0d0602;
+  --line-inner: rgba(40, 26, 2, 0.65); --glow: rgba(255, 206, 98, 0.42);
+  --tk-ink: #f3e7c6; --tk-ink-soft: #c2ad7f; --accent: #ffd877;
+  --m-corner: var(--m-corner-c); --btn-edge: var(--edge-grad);
+}
+
+/* Re-map the LEGACY tokens (--gold/--ink) + a title token PER STYLE, so every shared-CSS text that
+   still used the old gold (#c8a85a) or warm ink now follows the ACTIVE palette — no leftover yellow
+   on basic. These extra [data-style] rules come later, so they win for these three vars only. */
+:root { --tk-title: #eef1f5; }
+[data-style="basic"]   { --gold: #cdd2da; --ink: #e7e8ea; --tk-title: #eef1f5; }
+[data-style="gold"]    { --gold: #e6c477; --ink: #e7e8ea; --tk-title: #f4e8c8; }
+[data-style="premium"] { --gold: #ffd877; --ink: #f3e7c6; --tk-title: #ffe9bf; }
+
+/* ---- Phase 1: always-on HUD. Lightweight — stone rides on the element's OWN background (paints
+   behind content; no wrapper, no per-frame cost). Ornate modals come in later phases. ---- */
+[data-ui="stone"] .unit-frame {
+  border: 2px solid transparent; border-radius: 11px; backdrop-filter: none;
+  background-image: var(--tex-grain), var(--tex-stone), radial-gradient(120% 150% at 50% 20%, var(--bg-1), var(--bg-2) 55%, var(--bg-3)), var(--edge-grad);
+  background-size: 112px, 150px, cover, cover;
+  background-position: center, center, center, center;
+  background-repeat: repeat, repeat, no-repeat, no-repeat;
+  background-clip: padding-box, padding-box, padding-box, border-box;
+  background-blend-mode: overlay, soft-light, normal, normal;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 10px 26px -14px #000, 0 0 24px -12px var(--glow), inset 0 0 0 1px var(--line-inner), inset 0 -14px 28px -20px rgba(0, 0, 0, 0.6);
+  color: var(--tk-ink);
+}
+[data-ui="stone"] .portrait {
+  border: 1px solid transparent; border-radius: 7px;
+  background: radial-gradient(circle at 50% 35%, #1b2230, #0e1219) padding-box, var(--edge-grad) border-box;
+}
+[data-ui="stone"] .name { color: var(--tk-ink); }
+[data-ui="stone"] .level { color: var(--g2); }
+
+/* ---- Top-left HUD: player frame + counters + auto-play toggle stack cleanly in a column; the
+   player & target frames are FULL stone panels (decoratePanel), so the old hardcoded positions of
+   .gold/.sp-line/.bot-toggle are neutralized inside the flex column. ---- */
+[data-ui="stone"] .hud-tl { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+[data-ui="stone"] .hud-tl .unit-frame { position: relative; top: auto; left: auto; transform: none; margin: 0; min-width: 248px; }
+[data-ui="stone"] .hud-tl-counters { display: flex; gap: 8px; }
+[data-ui="stone"] .hud-tl .gold, [data-ui="stone"] .hud-tl .sp-line, [data-ui="stone"] .hud-tl .bot-toggle { position: static; top: auto; left: auto; transform: none; margin: 0; }
+[data-ui="stone"] .target-frame { top: 16px; left: 300px; }
+/* The character/target frames don't need the doubled panel padding top/bottom — keep them short —
+   but the SIDES keep the full panel padding (24px) so the bars get horizontal breathing room and
+   the corner filigree reads. */
+[data-ui="stone"] .hud-tl .unit-frame, [data-ui="stone"] .target-frame { padding: 16px 24px; }
+/* Scrolling panels: never spawn a horizontal bar (chrome now sits inside, so only real content scrolls). */
+[data-ui="stone"] .bag, [data-ui="stone"] .alchemy-panel, [data-ui="stone"] .pm { overflow-x: hidden; }
+
+/* Bars: SOLID fill + a soft glow — exactly like the prototype (no smoke). */
+[data-ui="stone"] .hp-fill { background: #c2502f; box-shadow: 0 0 10px -1px rgba(194, 80, 47, 0.6); }
+[data-ui="stone"] .mp-fill { background: #3f6bd6; box-shadow: 0 0 10px -1px rgba(63, 107, 214, 0.6); }
+[data-ui="stone"] .xp-fill { background: #caa14e; box-shadow: 0 0 10px -1px rgba(202, 161, 78, 0.5); }
+[data-ui="stone"] .hp, [data-ui="stone"] .mp, [data-ui="stone"] .xp {
+  border-radius: 5px; box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+/* Action-bar slots → ability tiles (the emoji icon is data-driven content; only the chrome changes) */
+[data-ui="stone"] .slot {
+  border: 1.5px solid transparent; border-radius: 7px;
+  background: radial-gradient(circle at 50% 36%, color-mix(in srgb, var(--bg-1) 92%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55), 0 0 16px -8px var(--glow);
+}
+[data-ui="stone"] .slot-key { color: var(--g2); }
+[data-ui="stone"] svg.slot-icon { width: 24px; height: 24px; color: color-mix(in srgb, var(--g2) 75%, #fff); }
+
+/* Counters (kit pills): coin/orb + amount, themed border, serif, semantic currency colors. */
+[data-ui="stone"] .gold, [data-ui="stone"] .sp-line {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 13px; border-radius: 999px;
+  border: 1.5px solid transparent; backdrop-filter: none;
+  font-family: var(--font-display); font-size: 13px; letter-spacing: 0.02em;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 75%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+[data-ui="stone"] .gold { color: #e8c879; }      /* gold currency: warm gold (semantic) */
+[data-ui="stone"] .sp-line { color: #c9b6ff; }   /* skill points: purple (semantic) */
+[data-ui="stone"] .gold-amt, [data-ui="stone"] .sp-amt { color: inherit; font-weight: 600; }
+[data-ui="stone"] .tk-coin {
+  width: 16px; height: 16px; border-radius: 50%; flex: none;
+  background: radial-gradient(circle at 36% 30%, #ffe8ab, #d8a23e 55%, #7a5418);
+  box-shadow: 0 0 7px -1px rgba(230, 185, 74, 0.8), inset 0 0 0 1px rgba(0, 0, 0, 0.35), inset -1px -1px 2px rgba(0, 0, 0, 0.4);
+}
+[data-ui="stone"] .tk-coin.sp {
+  background: radial-gradient(circle at 36% 30%, #e8d8ff, #9a6cff 55%, #4a2a8a);
+  box-shadow: 0 0 7px -1px rgba(160, 125, 255, 0.8), inset 0 0 0 1px rgba(0, 0, 0, 0.35), inset -1px -1px 2px rgba(0, 0, 0, 0.4);
+}
+[data-ui="stone"] .hint {
+  border: 1px solid transparent; backdrop-filter: none;
+  background: rgba(8, 8, 12, 0.6) padding-box, var(--edge-grad) border-box;
+}
+[data-ui="stone"] .bot-toggle {
+  border: 1.5px solid transparent; border-radius: 6px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 80%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
+  color: #f3e8cc;
+}
+[data-ui="stone"] .bot-toggle.on { background: linear-gradient(180deg, #2e5a1e, #1c3712) padding-box, #4f7a2e border-box; color: #bfe89a; }
+[data-ui="stone"] .bot-toggle:focus-visible { outline: 2px solid var(--g2); outline-offset: 3px; }
+
+/* Boss/event announce stays a centered ALERT (no panel) — just a faint arcane backdrop. */
+[data-ui="stone"] .announce { padding: 6px 20px; border-radius: 10px; background: radial-gradient(120% 160% at 50% 0%, rgba(40, 18, 55, 0.5), transparent 70%); }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui="stone"] .unit-frame:not(.target-frame) .hp-fill::after,
+  [data-ui="stone"] .unit-frame:not(.target-frame) .mp-fill::after,
+  [data-ui="stone"] .unit-frame:not(.target-frame) .xp-fill::after { animation: none; }
+}
+
+/* ---- Ornate panels: decoratePanel() injects the kit's chrome (.rpg-panel__bg + __vignette +
+   .rpg-frame) at the FRONT, so it sits at NEGATIVE z-index — behind the panel's existing content
+   (no wrapper needed) but above the panel's border background. Faithful to mockups/ui-kit.html. ---- */
+[data-ui="stone"] .rpg-panel {
+  isolation: isolate; padding: 24px; border: 2px solid transparent; border-radius: 14px; backdrop-filter: none;
+  background: linear-gradient(#000, #000) padding-box, var(--edge-grad) border-box;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 16px 44px -14px rgba(0, 0, 0, 0.85), 0 0 34px -10px var(--glow);
+  color: var(--tk-ink);
+}
+/* CRITICAL: the absolute/fixed game panels already establish a positioning context for the chrome —
+   NEVER override their position (doing so dropped them into document flow, below the 100vh canvas →
+   clipped → invisible, which looked like the hotkeys were broken). Only the STATIC modal panels
+   (children of a fixed scrim) need a positioning context added so the chrome anchors to THEM. */
+[data-ui="stone"] .esc-panel, [data-ui="stone"] .set-panel, [data-ui="stone"] .ns-panel, [data-ui="stone"] .cs-panel { position: relative; }
+[data-ui="stone"] .rpg-panel__bg {
+  position: absolute; inset: 0; z-index: -3; border-radius: inherit; overflow: hidden;
+  background-image: var(--tex-grain), radial-gradient(ellipse at center, var(--bg-1) 0%, var(--bg-2) 58%, var(--bg-3) 100%);
+  background-size: 112px, cover; background-position: center, center; background-blend-mode: overlay, normal;
+}
+[data-ui="stone"] .rpg-panel__bg::before { content: ""; position: absolute; inset: 0; background: var(--tex-stone) center; background-size: 195px; mix-blend-mode: soft-light; opacity: 0.3; }
+[data-ui="stone"] .rpg-panel__bg::after { content: ""; position: absolute; inset: 0; background: var(--tex-cracks) center; background-size: 255px; mix-blend-mode: multiply; opacity: 0.24; }
+[data-ui="stone"] .rpg-panel__vignette {
+  position: absolute; inset: 0; z-index: -2; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--line-inner), inset 0 2px 10px rgba(0, 0, 0, 0.55), inset 0 -30px 60px -30px rgba(0, 0, 0, 0.7);
+}
+[data-ui="stone"] .rpg-frame { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+[data-ui="stone"] .rpg-corner {
+  position: absolute; width: 44px; height: 44px; background: var(--edge-grad);
+  -webkit-mask: var(--m-corner) center/contain no-repeat; mask: var(--m-corner) center/contain no-repeat;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.65));
+}
+[data-ui="stone"] .rpg-corner.tl { top: 0; left: 0; }
+[data-ui="stone"] .rpg-corner.tr { top: 0; right: 0; transform: scaleX(-1); }
+[data-ui="stone"] .rpg-corner.bl { bottom: 0; left: 0; transform: scaleY(-1); }
+[data-ui="stone"] .rpg-corner.br { bottom: 0; right: 0; transform: scale(-1, -1); }
+[data-ui="stone"] .rpg-edge { position: absolute; background: var(--edge-grad); opacity: 0.92; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)); }
+[data-ui="stone"] .rpg-edge.top, [data-ui="stone"] .rpg-edge.bottom {
+  left: 34px; right: 34px; height: 7px;
+  -webkit-mask: var(--m-edge) repeat-x; mask: var(--m-edge) repeat-x; -webkit-mask-size: auto 100%; mask-size: auto 100%;
+}
+[data-ui="stone"] .rpg-edge.top { top: 0; }
+[data-ui="stone"] .rpg-edge.bottom { bottom: 0; transform: scaleY(-1); }
+[data-ui="stone"] .rpg-edge.left, [data-ui="stone"] .rpg-edge.right { top: 34px; bottom: 34px; width: 7px; }
+[data-ui="stone"] .rpg-edge.left { left: 0; -webkit-mask: var(--m-edge-v) repeat-y; mask: var(--m-edge-v) repeat-y; -webkit-mask-size: 100% auto; mask-size: 100% auto; }
+[data-ui="stone"] .rpg-edge.right { right: 0; -webkit-mask: var(--m-edge-v) repeat-y; mask: var(--m-edge-v) repeat-y; -webkit-mask-size: 100% auto; mask-size: 100% auto; transform: scaleX(-1); }
+
+/* Panel headers: medieval display font + glow (the color stays the legacy gold) */
+[data-ui="stone"] .char-col-title, [data-ui="stone"] .bag-title, [data-ui="stone"] .skills-title,
+[data-ui="stone"] .storage-titlebar, [data-ui="stone"] .storage-col-title, [data-ui="stone"] .shop-title,
+[data-ui="stone"] .sheet-name {
+  font-family: var(--font-display); letter-spacing: 0.03em; color: var(--tk-title); text-shadow: 0 1px 0 #000, 0 0 12px var(--glow);
+}
+
+/* Item / equip slots: themed surface. Rarity borders ([data-rarity], legacy, higher specificity) win. */
+[data-ui="stone"] .bag-slot { border-radius: 6px; background: linear-gradient(160deg, #1b222e, #0d121a); box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5); }
+[data-ui="stone"] .bag-slot.filled { background: linear-gradient(160deg, #232c3a, #10151d); }
+[data-ui="stone"] .equip-tile { border-radius: 6px; background: linear-gradient(160deg, #161c25, #0d121a); }
+[data-ui="stone"] .equip-tile.filled { background: linear-gradient(160deg, #20283a, #11151d); }
+
+/* Secondary text lines */
+[data-ui="stone"] .bag-stats, [data-ui="stone"] .mat-line, [data-ui="stone"] .shop-hint,
+[data-ui="stone"] .storage-hint, [data-ui="stone"] .attr-points { color: var(--tk-ink-soft); }
+
+/* Buttons → themed base. UNPREFIXED on purpose: keeps specificity (0,1,0) BELOW the legacy semantic
+   rules (.shop-btn.sell, .shop-btn.repair, .refine-btn[data-risk], .protect-toggle.on, ...) so those
+   colors keep winning; only the neutral base buttons get the gradient border. */
+.attr-btn, .refine-btn, .shop-btn, .skill-up-btn, .protect-toggle {
+  border: 1.5px solid transparent; border-radius: 5px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 82%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
+  color: #f3e8cc; font-family: var(--font-display); letter-spacing: 0.03em;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 18px -8px var(--glow);
+}
+.attr-btn:hover:not(:disabled), .refine-btn:hover:not(:disabled), .shop-btn:hover:not(:disabled), .skill-up-btn:hover:not(:disabled) { filter: brightness(1.12); }
+.attr-btn:focus-visible, .refine-btn:focus-visible, .shop-btn:focus-visible, .skill-up-btn:focus-visible, .protect-toggle:focus-visible { outline: 2px solid var(--g2); outline-offset: 2px; }
+
+/* The self-injected modules (esc/settings/name/class/party/matching/map/chat/duel) hardcode
+   `system-ui` in their `font:` shorthands — force the medieval serif on their whole subtree so the
+   typography matches the prototype. Only overrides font-family; their size/weight stay. */
+[data-ui="stone"] .esc *, [data-ui="stone"] .set *, [data-ui="stone"] .ns *, [data-ui="stone"] .cs *,
+[data-ui="stone"] .pm *, [data-ui="stone"] .party *, [data-ui="stone"] .wm *, [data-ui="stone"] .chat *,
+[data-ui="stone"] [class^="duel-"], [data-ui="stone"] [class^="mp-"], [data-ui="stone"] [class^="party-popup"] {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+}
+/* Module headings/labels lean on the display face for the medieval title feel. */
+[data-ui="stone"] .esc-title, [data-ui="stone"] .set-title, [data-ui="stone"] .ns-title, [data-ui="stone"] .cs-title,
+[data-ui="stone"] .cs-card-name, [data-ui="stone"] .pm-title, [data-ui="stone"] .wm-title, [data-ui="stone"] .set-section-title {
+  font-family: var(--font-display); letter-spacing: 0.03em;
+}
+
+/* ============================================================================
+   Migrate the self-injected modules' INNER controls to the kit look. These
+   [data-ui="stone"] rules (specificity 0,2,0) beat each module's own base rules
+   (0,1,0) regardless of injection order; semantic modifiers (.danger/.primary/
+   .on/.me, injected later at 0,2,0) still win, preserving readability colors.
+   ============================================================================ */
+
+/* Titles/section labels → cream + glow / gold */
+[data-ui="stone"] .esc-title, [data-ui="stone"] .set-title, [data-ui="stone"] .ns-title,
+[data-ui="stone"] .cs-title, [data-ui="stone"] .pm-title, [data-ui="stone"] .wm-title { color: var(--tk-title); text-shadow: 0 1px 0 #000, 0 0 12px var(--glow); }
+[data-ui="stone"] .set-section-title, [data-ui="stone"] .pm-section, [data-ui="stone"] .party-header,
+[data-ui="stone"] .pm-row-title { color: var(--g2); }
+[data-ui="stone"] .ns-sub, [data-ui="stone"] .cs-sub, [data-ui="stone"] .set-hint, [data-ui="stone"] .pm-hint,
+[data-ui="stone"] .pm-row-meta, [data-ui="stone"] .party-lvl, [data-ui="stone"] .wm-coords,
+[data-ui="stone"] .wm-close, [data-ui="stone"] .pm-close { color: var(--tk-ink-soft); }
+
+/* Generic kit button: party / matching / duel / name / settings / floating duel */
+[data-ui="stone"] .party-btn, [data-ui="stone"] .pm-btn, [data-ui="stone"] .duel-btn,
+[data-ui="stone"] .ns-btn, [data-ui="stone"] .set-btn, [data-ui="stone"] .duel-challenge-btn {
+  border: 1.5px solid transparent; border-radius: 5px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 82%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
+  color: #f3e8cc; font-family: var(--font-display); letter-spacing: 0.02em;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 16px -8px var(--glow);
+}
+[data-ui="stone"] .party-btn:hover:not(:disabled), [data-ui="stone"] .pm-btn:hover:not(:disabled),
+[data-ui="stone"] .duel-btn:hover, [data-ui="stone"] .ns-btn:hover:not(:disabled), [data-ui="stone"] .set-btn:hover,
+[data-ui="stone"] .duel-challenge-btn:hover { filter: brightness(1.12); }
+[data-ui="stone"] .party-btn:focus-visible, [data-ui="stone"] .pm-btn:focus-visible, [data-ui="stone"] .duel-btn:focus-visible,
+[data-ui="stone"] .ns-btn:focus-visible, [data-ui="stone"] .set-btn:focus-visible { outline: 2px solid var(--g2); outline-offset: 2px; }
+
+/* Esc menu rows + shortcut key chips (kit menu-row + key) */
+[data-ui="stone"] .esc-row:hover, [data-ui="stone"] .esc-row:focus-visible { background: color-mix(in srgb, var(--g2) 12%, transparent); }
+[data-ui="stone"] .esc-key {
+  color: var(--tk-ink-soft); background: rgba(0, 0, 0, 0.4);
+  border: 1px solid color-mix(in srgb, var(--g3) 55%, transparent); border-radius: 5px;
+}
+
+/* Inputs (kit rpg-input) */
+[data-ui="stone"] .ns-input, [data-ui="stone"] .party-input, [data-ui="stone"] .pm-input,
+[data-ui="stone"] .pm-num, [data-ui="stone"] .chat-input, [data-ui="stone"] .party-form select {
+  color: var(--tk-ink); border: 1.5px solid transparent; border-radius: 6px;
+  background: linear-gradient(180deg, #0d0f13, #0a0c0f) padding-box, var(--edge-grad) border-box;
+}
+[data-ui="stone"] .ns-input:focus, [data-ui="stone"] .party-input:focus, [data-ui="stone"] .pm-input:focus,
+[data-ui="stone"] .pm-num:focus, [data-ui="stone"] .chat-input:focus {
+  outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--g2) 38%, transparent), 0 0 18px -6px var(--glow);
+}
+
+/* Volume slider (kit rpg-range) */
+[data-ui="stone"] .set-slider {
+  -webkit-appearance: none; appearance: none; height: 8px; border-radius: 999px; accent-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent) 0 60%, #0d0f13 60%);
+  box-shadow: inset 0 1px 3px #000, inset 0 0 0 1px color-mix(in srgb, var(--g3) 50%, transparent);
+}
+[data-ui="stone"] .set-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--g2) 92%, #fff), var(--g1)); box-shadow: 0 1px 3px #000, 0 0 10px -2px var(--glow);
+}
+[data-ui="stone"] .set-slider::-moz-range-thumb { width: 18px; height: 18px; border: 0; border-radius: 50%; cursor: pointer; background: radial-gradient(circle at 35% 30%, var(--g2), var(--g1)); }
+
+/* Settings section box + party form + register box → inset themed panel */
+[data-ui="stone"] .set-section, [data-ui="stone"] .party-form, [data-ui="stone"] .pm-register, [data-ui="stone"] .pm-row {
+  background: rgba(0, 0, 0, 0.22); border: 1px solid color-mix(in srgb, var(--g3) 45%, transparent); border-radius: 8px;
+}
+
+/* Class-select cards (kit class-card) */
+[data-ui="stone"] .cs-card {
+  border: 1.5px solid transparent; border-radius: 10px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--bg-1) 90%, #000), var(--bg-3)) padding-box, color-mix(in srgb, var(--g3) 55%, transparent) border-box;
+}
+[data-ui="stone"] .cs-card:hover {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--bg-1) 90%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
+  box-shadow: 0 0 22px -10px var(--glow);
+}
+[data-ui="stone"] .cs-card-name { color: var(--tk-title); } [data-ui="stone"] .cs-card-desc { color: var(--tk-ink-soft); }
+
+/* Party frames: themed rows + solid bars; keep "me"=gold and member name readable */
+[data-ui="stone"] .party-row { border-radius: 8px; background: rgba(0, 0, 0, 0.2); padding: 5px 7px; }
+[data-ui="stone"] .party-name { color: var(--tk-ink); }
+[data-ui="stone"] .party-row.me .party-name { color: #f0d488; }
+[data-ui="stone"] .party-hp-fill { background: #c2502f; }
+[data-ui="stone"] .party-mp-fill { background: #3f6bd6; }
+
+/* Nameplates: stay LIGHTWEIGHT (no texture/animation), just theme the name box + keep semantic HP colors */
+[data-ui="stone"] .mp-tag-name {
+  border-radius: 6px; background: rgba(8, 8, 12, 0.72); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--g3) 55%, transparent);
+}
+
+/* Duel banner/toast → themed surface (the buttons + red accents come from the module) */
+[data-ui="stone"] .duel-banner, [data-ui="stone"] .duel-toast {
+  border-radius: 8px; background: rgba(10, 8, 8, 0.82); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--g3) 55%, transparent);
+}
+
+/* Inventory + player slots: a touch more faithful (thicker border, kit radius, sun glow) */
+[data-ui="stone"] .bag-slot, [data-ui="stone"] .equip-tile { border-width: 1.5px; border-radius: 7px; }
+[data-ui="stone"] .bag-slot[data-rarity="sun"], [data-ui="stone"] .equip-slot[data-rarity="sun"] {
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 10px -1px rgba(242, 196, 74, 0.7);
+}
+
+/* Kill the last legacy-yellow accents (these module modifiers hardcode #ffd24a): active settings
+   toggle, party leader star, and the primary CTAs (filled with the active palette). */
+[data-ui="stone"] .set-btn.on { color: var(--g2); border-color: color-mix(in srgb, var(--g2) 70%, transparent); }
+[data-ui="stone"] .party-lead { color: var(--g2); }
+[data-ui="stone"] .party-btn.primary, [data-ui="stone"] .pm-btn.primary, [data-ui="stone"] .duel-btn.primary {
+  color: #1a140a; font-weight: 700;
+  background: linear-gradient(180deg, var(--g2), var(--g1)) padding-box, var(--edge-grad) border-box;
+}

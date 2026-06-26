@@ -12,6 +12,7 @@
 import type { PartyView } from '../world_api';
 import { registerOverlay } from './overlays';
 import type { MatchingEntryView, MatchingRequestView } from '../net/protocol';
+import { decoratePanel } from './theme';
 import { isTyping } from './typing';
 
 // The narrow surface this window needs — ClientWorld satisfies it structurally (so the UI
@@ -52,7 +53,7 @@ export class PartyMatching {
     this.root.style.display = 'none';
 
     const header = el('pm-header');
-    header.append(span('pm-title', 'Party Matching — Procurar Grupo'), span('pm-close', 'E / Esc fecha'));
+    header.append(span('pm-title', 'Party Matching | Procurar Grupo'), span('pm-close', 'E / Esc fecha'));
 
     this.listEl = el('pm-list');
     this.requestsEl = el('pm-requests');
@@ -76,6 +77,7 @@ export class PartyMatching {
 
     this.root.append(header, span('pm-section', 'Grupos procurando membros'), this.listEl, this.requestsEl, this.registerBox);
     document.body.appendChild(this.root);
+    decoratePanel(this.root); // stone frame
 
     // E toggles the window; Esc closes it. Guarded by isTyping() so neither fires while
     // typing in chat or in this window's own title field (you can type "e" in a title).

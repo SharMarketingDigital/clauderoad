@@ -7,6 +7,7 @@
 //
 // Mirrors the ClassSelect pattern: self-injected scoped CSS, a fixed full-screen modal,
 // and `textContent` (never innerHTML) so a typed name can never inject markup.
+import { decoratePanel } from './theme';
 
 const MIN_LEN = 2;
 const MAX_LEN = 24; // matches the server's name cap (trim().slice(0, 24))
@@ -79,6 +80,7 @@ export class NameSelect {
     btn.addEventListener('click', submit);
 
     panel.append(input, hint, btn);
+    decoratePanel(panel); // stone frame (basic palette) — the first screen the player sees
     this.root.appendChild(panel);
     document.body.appendChild(this.root);
 

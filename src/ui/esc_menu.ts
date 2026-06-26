@@ -9,6 +9,7 @@
 // to the start screen. The old ESC-opened settings menu now lives behind "Configurações".
 import { registerOverlay, anyOverlayOpen } from './overlays';
 import { isTyping } from './typing';
+import { decoratePanel } from './theme';
 
 interface MenuEntry {
   label: string;
@@ -97,6 +98,7 @@ export class EscMenu {
       b.addEventListener('click', () => entry.run());
       panel.append(b);
     }
+    decoratePanel(panel); // medieval stone frame around the central menu
     root.append(panel);
     root.style.display = 'none';
     return root;

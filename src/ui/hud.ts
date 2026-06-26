@@ -21,6 +21,8 @@ type DragInfo =
   | { kind: 'equip'; slot: EquipSlot }; // an equipped item -> back to the bag
 import { CharacterSheet } from './character_sheet';
 import { StoragePanel } from './storage';
+import { decoratePanel } from './theme';
+import { injectAbilityIcons, abilityIconId } from './icons';
 
 export class Hud {
   private root: HTMLDivElement;
@@ -114,14 +116,21 @@ export class Hud {
     this.root = document.createElement('div');
     this.root.className = 'hud';
     this.root.innerHTML = `
-      <div class="unit-frame">
-        <div class="portrait"></div>
-        <div class="bars">
-          <span class="name player-name"></span><span class="level"></span>
-          <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
-          <div class="mp"><div class="mp-fill"></div><span class="mp-text"></span></div>
-          <div class="xp"><div class="xp-fill"></div><span class="xp-text"></span></div>
+      <div class="hud-tl">
+        <div class="unit-frame">
+          <div class="portrait"></div>
+          <div class="bars">
+            <span class="name player-name"></span><span class="level"></span>
+            <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
+            <div class="mp"><div class="mp-fill"></div><span class="mp-text"></span></div>
+            <div class="xp"><div class="xp-fill"></div><span class="xp-text"></span></div>
+          </div>
         </div>
+        <div class="hud-tl-counters">
+          <div class="gold"><i class="tk-coin"></i><span class="gold-amt">0</span></div>
+          <div class="sp-line"><i class="tk-coin sp"></i>SP <span class="sp-amt">0</span></div>
+        </div>
+        <button class="bot-toggle">Bot: OFF (B)</button>
       </div>
       <div class="unit-frame target-frame" hidden>
         <div class="portrait portrait-target">&#9876;</div>
@@ -130,9 +139,6 @@ export class Hud {
           <div class="hp"><div class="hp-fill target-hp-fill"></div><span class="hp-text target-hp-text"></span></div>
         </div>
       </div>
-      <div class="gold">&#9679; <span class="gold-amt">0</span></div>
-      <div class="sp-line">SP <span class="sp-amt">0</span></div>
-      <button class="bot-toggle">Bot: OFF (B)</button>
       <div class="bot-indicator" hidden>&#9679; AUTO-PLAY</div>
       <div class="action-bar"></div>
       <div class="bag" hidden>
@@ -172,7 +178,7 @@ export class Hud {
         <div class="shop-sell"></div>
       </div>
       <div class="skills" hidden>
-        <div class="skills-title">Habilidades — SP: <span class="skills-sp">0</span></div>
+        <div class="skills-title">Habilidades | SP: <span class="skills-sp">0</span></div>
         <div class="skills-list"></div>
       </div>
       <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; K habilidades &middot; V loja &middot; arrastar gira</div>
@@ -250,6 +256,19 @@ export class Hud {
     document.body.appendChild(this.skillsEl);
     document.body.appendChild(this.bag);
     document.body.appendChild(this.alchemyEl); // standalone alchemy panel (right side), like .bag
+
+    // Medieval skin: opt each panel into the stone frame. Global palette is BASIC (gold/premium will
+    // be assigned to specific panels later). bag/alchemy scroll, so they take the texture+border only
+    // (ornate:false) — an injected corner overlay would scroll with their content. Skills/shop don't
+    // scroll → full ornate frame (corners + edges).
+    decoratePanel(this.bag);
+    decoratePanel(this.alchemyEl);
+    decoratePanel(this.shopEl);
+    decoratePanel(this.skillsEl);
+    // The always-on unit frames are panels too (player HP/MP/XP + target) → full stone frame.
+    decoratePanel(this.root.querySelector('.hud-tl .unit-frame') as HTMLDivElement);
+    decoratePanel(this.targetFrame);
+    injectAbilityIcons(); // register the SVG ability glyphs used by the action bar
 
     // The inventory window is pure UI state — open/close with I (Esc closes).
     window.addEventListener('keydown', (e) => {
@@ -387,7 +406,7 @@ export class Hud {
     for (const a of abilities) {
       const row = document.createElement('div');
       row.className = 'skill-row';
-      const info = makeSpan('skill-info', `${a.name} — Rank ${a.rank}/${a.maxRank}`);
+      const info = makeSpan('skill-info', `${a.name} | Rank ${a.rank}/${a.maxRank}`);
       const btn = document.createElement('button');
       btn.className = 'skill-up-btn';
       if (a.rank >= a.maxRank) {
@@ -440,7 +459,7 @@ export class Hud {
       const btn = this.shopBuyCells[i];
       if (e) {
         btn.style.display = '';
-        btn.textContent = `Comprar ${e.name} — ${e.price}`;
+        btn.textContent = `Comprar ${e.name} - ${e.price}`;
         btn.disabled = p.gold < e.price;
       } else {
         btn.style.display = 'none';
@@ -462,7 +481,7 @@ export class Hud {
       if (eq && eq.itemId != null && eq.durability < eq.maxDurability) {
         btn.style.display = '';
         const slotName = SLOT_LABELS[eq.slot];
-        btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] — ${eq.repairCost}`;
+        btn.textContent = `Reparar ${slotName} [${eq.durability}/${eq.maxDurability}] - ${eq.repairCost}`;
         btn.disabled = p.gold < eq.repairCost;
       } else {
         btn.style.display = 'none';
@@ -484,7 +503,7 @@ export class Hud {
       if (st && st.sellValue > 0) {
         btn.style.display = '';
         const tag = st.plus > 0 ? ` +${st.plus}` : '';
-        btn.textContent = `Vender ${st.name}${tag} — ${st.sellValue}`;
+        btn.textContent = `Vender ${st.name}${tag} - ${st.sellValue}`;
       } else {
         btn.style.display = 'none';
       }
@@ -564,11 +583,11 @@ export class Hud {
         const qtyTag = stack.qty > 1 ? ` ×${stack.qty}` : '';
         const label = `${stack.name}${plusTag} (${stack.rarityName})`;
         slot.title = locked
-          ? `${label} — requer nível ${stack.reqLevel}`
+          ? `${label} - requer nível ${stack.reqLevel}`
           : stack.equipSlot
-            ? `${label} — arraste p/ equipar (ou clique)`
+            ? `${label} - arraste p/ equipar (ou clique)`
             : stack.consumable
-              ? `${label} — clique p/ usar`
+              ? `${label} - clique p/ usar`
               : label;
         slot.setAttribute('aria-label', slot.title);
         // No quadrado mostramos só nome (+N, ×qtd); a raridade é a cor da borda, o texto completo no tooltip.
@@ -650,11 +669,11 @@ export class Hud {
       plusEl.textContent = eq.plus > 0 ? `+${eq.plus}` : '';
       const full = `${label}: ${eq.name}${eq.plus > 0 ? ` +${eq.plus}` : ''} (${eq.rarityName}) · Dur ${eq.durability}/${eq.maxDurability}`;
       tile.title = full;
-      tile.setAttribute('aria-label', `${full} — clique para desequipar`);
+      tile.setAttribute('aria-label', `${full} - clique para desequipar`);
     } else {
       delete tile.dataset.rarity;
       tile.classList.remove('worn');
-      nameEl.textContent = '—';
+      nameEl.textContent = '-';
       plusEl.textContent = '';
       tile.title = label;
       tile.setAttribute('aria-label', `${label}: vazio`);
@@ -945,7 +964,7 @@ export class Hud {
     // Build via textContent (not innerHTML) so ability data — which may later
     // come from server snapshots — can never inject markup.
     const key = makeSpan('slot-key', String(a.slot));
-    const icon = makeSpan('slot-icon', a.icon);
+    const icon = makeSlotIcon(a.icon);
     const cost = makeSpan('slot-cost', String(a.mpCost));
     const cd = document.createElement('div');
     cd.className = 'slot-cd';
@@ -962,4 +981,17 @@ function makeSpan(className: string, text: string): HTMLSpanElement {
   s.className = className;
   s.textContent = text;
   return s;
+}
+
+// The action-bar glyph: a crisp SVG icon when the ability's emoji is mapped (icons.ts), otherwise
+// the emoji itself (graceful fallback). Keeps ability data in src/sim emoji-based, no sim change.
+function makeSlotIcon(emoji: string): HTMLElement | SVGSVGElement {
+  const id = abilityIconId(emoji);
+  if (!id) return makeSpan('slot-icon', emoji);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'slot-icon');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#${id}`);
+  svg.appendChild(use);
+  return svg;
 }
