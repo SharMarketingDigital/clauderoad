@@ -138,6 +138,8 @@ export class Input {
       this.uiSelectedPlayerId = e && e.kind === 'player' && e.id !== me ? e.id : null;
       // TP3: clicking a teleporter NPC opens its menu (the teleporter HUD consumes this one-shot).
       if (e && e.kind === 'npc' && e.species === 'teleporter') this.teleporterClick = e.id;
+      // GDD v0.5 (loot físico): clicking a ground item picks it up — the sim validates range + it's loot (FFA).
+      if (e && e.kind === 'loot') world.sendCommand({ t: 'pickup', lootId: e.id });
     }
     // Keep the selection truthful so the "Duelar" button never lingers: drop it once a duel is
     // active or the selected player is no longer present.

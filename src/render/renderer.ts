@@ -618,9 +618,25 @@ export class Renderer {
   }
 }
 
+// A pickup-able ground item (GDD v0.5 loot físico): a small gold chest resting on the ground. Distinct
+// from the humanoid actors so loot reads at a glance; sync() tags it with the entity id so pick() (and
+// thus a click -> pickup) resolves to it.
+function makeLootMarker(): THREE.Object3D {
+  const g = new THREE.Group();
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.34, 0.5),
+    new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0x3a2600, roughness: 0.5, metalness: 0.3 }),
+  );
+  box.position.y = 0.17; // resting on the ground
+  box.castShadow = true;
+  g.add(box);
+  return g;
+}
+
 // A simple capsule-ish humanoid with a "nose" so facing is visible. A boss is
 // drawn bigger and in a distinct menacing color so it reads as a boss.
 function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
+  if (kind === 'loot') return makeLootMarker(); // GDD v0.5 loot físico: a chest on the ground, not a humanoid
   const bodyColor =
     boss ? 0xa030d0 : kind === 'player' ? 0x3b82f6 : kind === 'npc' ? 0xe0b030 : 0xb23b3b;
   const g = new THREE.Group();
