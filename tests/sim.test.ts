@@ -2854,6 +2854,58 @@ describe('bot (auto-play): self-sufficiency', () => {
     // dentro de 1500 ticks (<< 6000 do despawn), o bot recolheu ao menos um dos loots originais (não sumiu sozinho)
     expect([...before].some((id) => !after.has(id))).toBe(true);
   });
+
+  it('progressão: o bot de nível alto migra pra rings externos, saindo pelo portão (BR-S2 + BR-S3)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    // nível 10 (alvo = ring10, cheb ~135) + bolsa de poções e MUITO HP pra aguentar a travessia sob ataque;
+    // nasce na vila central (0,0), então só chega aos rings externos se DECIDIR viajar pra fora (BR-S3) e
+    // cruzar o muro pelo portão (BR-S2) em vez de raspar a muralha.
+    const save0 = sim.serializePlayer(pid)!;
+    save0.level = 10;
+    save0.baseMaxHp = 4000;
+    save0.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 40 }];
+    sim.restorePlayer(pid, save0);
+    const cheb = (e: { x: number; z: number }) => Math.max(Math.abs(e.x), Math.abs(e.z));
+    expect(cheb(player(sim))).toBeLessThan(30); // começa DENTRO da vila
+
+    sim.sendCommand({ t: 'set-bot', on: true });
+    let maxCheb = 0;
+    for (let i = 0; i < 4000; i++) {
+      sim.step();
+      maxCheb = Math.max(maxCheb, cheb(player(sim)));
+    }
+    // aventurou-se bem além da vila e do ring1 (cheb 60 = borda ring1/ring2) rumo ao ring10 — só possível
+    // saindo pelo portão (se ficasse preso no muro, maxCheb travaria perto de 26)
+    expect(maxCheb).toBeGreaterThan(60);
+  });
+
+  it('progressão por nível: no mesmo tempo, um bot nível 10 se aventura MUITO mais longe que um nível 1 (BR-S3)', () => {
+    const cheb = (e: { x: number; z: number }) => Math.max(Math.abs(e.x), Math.abs(e.z));
+    // Roda um bot do nível dado, robusto (não morre na travessia), e devolve o cheb máximo alcançado.
+    const runMaxCheb = (level: number): number => {
+      const sim = new Sim(7);
+      const pid = sim.localPlayerId()!;
+      const save0 = sim.serializePlayer(pid)!;
+      save0.level = level;
+      save0.baseMaxHp = 4000;
+      save0.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 40 }];
+      sim.restorePlayer(pid, save0);
+      sim.sendCommand({ t: 'set-bot', on: true });
+      let m = 0;
+      for (let i = 0; i < 900; i++) {
+        sim.step();
+        m = Math.max(m, cheb(player(sim)));
+      }
+      return m;
+    };
+    const low = runMaxCheb(1);
+    const high = runMaxCheb(10);
+    // o nível 1 sai da vila pra caçar (ring1 começa em cheb 30) mas fica perto; o nível 10 beelina pra fora
+    // rumo ao ring10 (cheb ~135) — a distância é GATED pelo nível, que é todo o ponto do BR-S3
+    expect(low).toBeGreaterThan(30);
+    expect(high).toBeGreaterThan(low + 40);
+  });
 });
 
 // Approach the nearest wolf WITHOUT a target (so no auto-attack pre-damages it),

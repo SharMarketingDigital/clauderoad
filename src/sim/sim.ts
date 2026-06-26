@@ -23,7 +23,7 @@ import {
   ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, speciesForLevel, SPECIES_BY_ID,
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
-import { SPAWN_ZONES, WORLD_HALF, zoneAt, CITIES, type SpawnSpot } from './zones';
+import { SPAWN_ZONES, WORLD_HALF, RING_WIDTH, zoneAt, CITIES, type SpawnSpot } from './zones';
 import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
 import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE } from './loot';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
@@ -1805,7 +1805,7 @@ export class Sim implements IWorld {
         this.applyAction(p, { t: 'pickup-nearby' }); // in reach -> grab the whole pile at once
         this.moveIntents.set(p.id, { t: 'stop' });
       } else {
-        this.moveIntents.set(p.id, { t: 'move', dx: ldx, dz: ldz }); // walk to the pile
+        this.moveIntents.set(p.id, this.botMoveToward(p, loot.x, loot.z)); // walk to the pile (gate-aware)
       }
       return; // looting takes this tick (survival already had priority); hunt/vendor resume once clear
     }
@@ -1817,8 +1817,8 @@ export class Sim implements IWorld {
       } else {
         const v = this.ents.get(this.vendorId);
         if (v) {
-          this.moveIntents.set(p.id, { t: 'move', dx: v.x - p.x, dz: v.z - p.z });
-          return; // walk to the shop
+          this.moveIntents.set(p.id, this.botMoveToward(p, v.x, v.z));
+          return; // walk to the shop (gate-aware)
         }
       }
     }
@@ -1829,6 +1829,18 @@ export class Sim implements IWorld {
     }
 
     // === PRIORITY 4 — HUNT ================================================
+    // BR-S3: climb to the ring matching the bot's level. If it's well INSIDE its level's ring (it has
+    // out-levelled where it stands), venture OUTWARD toward that ring's radius (through the gate, via
+    // botMoveToward) for tougher mobs + better loot. Survival/scavenge already had priority this tick.
+    const targetCheb = this.botTargetCheb(p);
+    const cheb = Math.max(Math.abs(p.x), Math.abs(p.z));
+    if (cheb < targetCheb - RING_WIDTH / 2) {
+      const k = cheb > 0 ? targetCheb / cheb : 0;
+      const tx = cheb > 0 ? p.x * k : targetCheb; // a point at the target ring's radius, same bearing (+x at the origin)
+      const tz = cheb > 0 ? p.z * k : 0;
+      this.moveIntents.set(p.id, this.botMoveToward(p, tx, tz));
+      return;
+    }
     const target = this.botChooseTarget(p);
     if (!target) {
       this.moveIntents.set(p.id, { t: 'stop' });
@@ -1838,7 +1850,7 @@ export class Sim implements IWorld {
     const dx = target.x - p.x;
     const dz = target.z - p.z;
     const reach = this.attackRange(p) - 0.4;
-    this.moveIntents.set(p.id, dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' });
+    this.moveIntents.set(p.id, dx * dx + dz * dz > reach * reach ? this.botMoveToward(p, target.x, target.z) : { t: 'stop' });
     this.botUseAbilities(p, target);
   }
 
@@ -1858,6 +1870,37 @@ export class Sim implements IWorld {
       if (best === undefined || d < bestD || (d === bestD && e.id < best.id)) { best = e; bestD = d; }
     }
     return best;
+  }
+
+  // BR-S2: a move-intent toward (tx,tz) that AIMS AT THE NEAREST GATE when the straight path would
+  // cross the town wall (bot and goal on opposite sides) — so the bot heads for the opening instead of
+  // scraping the rampart (slideThroughGates still does the final collision). Pure/deterministic.
+  private botMoveToward(p: Entity, tx: number, tz: number): { t: 'move'; dx: number; dz: number } {
+    const inP = Math.max(Math.abs(p.x), Math.abs(p.z)) < CITY_WALL_HALF;
+    const inT = Math.max(Math.abs(tx), Math.abs(tz)) < CITY_WALL_HALF;
+    if (inP !== inT) { // the segment crosses the wall ring -> steer to the nearest cardinal gate first
+      const gates: ReadonlyArray<readonly [number, number]> = [
+        [CITY_WALL_HALF, 0], [-CITY_WALL_HALF, 0], [0, CITY_WALL_HALF], [0, -CITY_WALL_HALF],
+      ];
+      let gx = CITY_WALL_HALF, gz = 0, bestD = Infinity;
+      for (const [gcx, gcz] of gates) {
+        const d = (gcx - p.x) ** 2 + (gcz - p.z) ** 2;
+        if (d < bestD) { bestD = d; gx = gcx; gz = gcz; }
+      }
+      if ((gx - p.x) ** 2 + (gz - p.z) ** 2 > 4) return { t: 'move', dx: gx - p.x, dz: gz - p.z }; // until ~on the gate
+    }
+    return { t: 'move', dx: tx - p.x, dz: tz - p.z };
+  }
+
+  // BR-S3: the Chebyshev radius (a ring's mid-band) the bot should hunt at for its level — it climbs
+  // outward as it levels. Mirrors the ZONES bands (ring1 @30-60, ring2 @60-90, ring4 @90-120, ring10
+  // @120-150). Pure function of level -> deterministic.
+  private botTargetCheb(p: Entity): number {
+    const lvl = p.level;
+    if (lvl >= 10) return 135;
+    if (lvl >= 5) return 105;
+    if (lvl >= 3) return 75;
+    return 45;
   }
 
   // Força-first build: invest a little Intelligence until the MP pool can sustain a
@@ -1990,10 +2033,15 @@ export class Sim implements IWorld {
     const cautious = p.hp < p.maxHp * BOT_CAUTION_FRAC;
     const canBoss = !cautious && p.level >= BOT_BOSS_MIN_LEVEL
       && this.botCount(p, 'health_potion') >= BOT_BOSS_MIN_POTIONS;
+    // BR-S3: hunt within the bot's level band — never CHASE a (roaming) mob past the outer edge of the
+    // ring its level targets, so a low-level bot won't drift out into a deadlier ring following a wanderer.
+    // (The outward-TRAVEL step pulls it up to its ring; this cap stops it from overshooting beyond it.)
+    const ringCap = this.botTargetCheb(p) + RING_WIDTH / 2;
     let best: Entity | undefined;
     let bestScore = Infinity;
     for (const e of this.ents.values()) {
       if (e.kind !== 'enemy' || e.hp <= 0) continue;
+      if (Math.max(Math.abs(e.x), Math.abs(e.z)) > ringCap) continue; // beyond my band -> leave it
       if (e.boss) {
         if (!canBoss) continue;
       } else if (cautious && e.tier !== 'normal') {
