@@ -2,8 +2,9 @@
 // applying each command on its own tick like party/pvp. The teleport moves the player to another
 // city's centre for a fixed gold cost, only when standing at a city teleport point.
 import { describe, it, expect } from 'vitest';
-import { Sim } from '../src/sim/sim';
+import { Sim, RETURN_COOLDOWN_TICKS } from '../src/sim/sim';
 import { TELEPORT_COST, TELEPORT_RANGE } from '../src/sim/teleport';
+import { chebyshev } from '../src/sim/zones';
 import type { Command } from '../src/world_api';
 
 function serverSim(seed = 1): Sim {
@@ -159,6 +160,122 @@ describe('cadastrar cidade de retorno (TP2a)', () => {
       sim.restorePlayer(a, { gold: 1000 });
       run(sim, a, { t: 'teleport', cityId: 'leste' });
       run(sim, a, { t: 'register-city' });
+      for (let i = 0; i < 10; i++) sim.step();
+      return sim.hash();
+    };
+    expect(play()).toBe(play());
+  });
+});
+
+// Return / recall (TP2b) — a FREE warp to the player's REGISTERED city from anywhere, gated by a
+// cooldown and BLOCKED while in combat (a duel, or a mob aggroed on the player). Server-mode Sim like
+// TP1/TP2a; returnCity is the default 'town' unless register-city was used.
+describe('return / recall (TP2b)', () => {
+  it('recall gratis pra cidade cadastrada (default = central) de qualquer lugar', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' }); // longe da central (250,0)
+    expect(ent(sim, a).x).toBe(250);
+    const goldBefore = ent(sim, a).gold;
+    run(sim, a, { t: 'return' }); // recall -> cidade cadastrada (default 'town')
+    expect(ent(sim, a).x).toBe(0); // de volta ao centro da vila central
+    expect(ent(sim, a).z).toBe(0);
+    expect(ent(sim, a).gold).toBe(goldBefore); // o return e GRATIS (so o teleporte custou)
+  });
+
+  it('o recall vai pra cidade CADASTRADA, nao sempre a central', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'register-city' }); // cadastra leste como retorno
+    run(sim, a, { t: 'teleport', cityId: 'town' }); // viaja pra central
+    expect(ent(sim, a).x).toBe(0);
+    run(sim, a, { t: 'return' }); // recall -> leste (a cadastrada)
+    expect(ent(sim, a).x).toBe(250);
+    expect(ent(sim, a).z).toBe(0);
+  });
+
+  it('o return tem cooldown (nao da pra spammar)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'return' }); // recall -> town; inicia o cooldown
+    expect(ent(sim, a).x).toBe(0);
+    run(sim, a, { t: 'teleport', cityId: 'leste' }); // teleporte ignora o cd do return
+    expect(ent(sim, a).x).toBe(250);
+    run(sim, a, { t: 'return' }); // dentro do cooldown -> BLOQUEADO
+    expect(ent(sim, a).x).toBe(250); // nao fez recall
+    for (let i = 0; i < RETURN_COOLDOWN_TICKS + 5; i++) sim.step(); // espera o cooldown
+    run(sim, a, { t: 'return' }); // agora libera
+    expect(ent(sim, a).x).toBe(0);
+  });
+
+  it('o return e BLOQUEADO durante um duelo', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'register-city' }); // returnCity = leste
+    run(sim, a, { t: 'teleport', cityId: 'town' }); // A na central (0,0), cadastrado em leste
+    expect(ent(sim, a).x).toBe(0);
+    run(sim, a, { t: 'duel-challenge', name: 'B' });
+    run(sim, b, { t: 'duel-accept' }); // duelo ativo (o handshake funciona na cidade)
+    expect(sim.duelViewFor(a)).not.toBeNull();
+    run(sim, a, { t: 'return' }); // em duelo -> BLOQUEADO
+    expect(ent(sim, a).x).toBe(0); // continua na central; NAO recall pra leste (250)
+    expect(ent(sim, a).z).toBe(0);
+  });
+
+  it('o return e BLOQUEADO enquanto um mob esta com aggro (combate PvE)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    // farma ate algum mob travar aggro no jogador (hostile na view). So ha 1 jogador no mundo,
+    // entao qualquer enemy hostile esta necessariamente com aggro NELE.
+    let hostile = false;
+    for (let i = 0; i < 1500 && !hostile; i++) {
+      const ents = sim.entities();
+      const me = ents.find((e) => e.id === a)!;
+      let mob: { id: number; x: number; z: number } | null = null;
+      let best = Infinity;
+      for (const e of ents) {
+        if (e.kind !== 'enemy') continue;
+        const d = (e.x - me.x) ** 2 + (e.z - me.z) ** 2;
+        if (d < best) { best = d; mob = e; }
+      }
+      if (mob) {
+        sim.sendCommandFor(a, { t: 'move', dx: mob.x - me.x, dz: mob.z - me.z });
+        sim.sendCommandFor(a, { t: 'set-target', id: mob.id });
+      }
+      sim.step();
+      hostile = sim.entities().some((e) => e.kind === 'enemy' && e.hostile);
+    }
+    expect(hostile).toBe(true); // precondicao: um mob travou aggro no jogador
+    sim.sendCommandFor(a, { t: 'stop' }); // para de perseguir, pra isolar o efeito do return (sem drift do movimento)
+    sim.step();
+    const before = ent(sim, a);
+    expect(before.dead).toBe(false); // precondicao: VIVO (senao o bloqueio seria pelo gate de downed, nao pela aggro)
+    expect(chebyshev(before.x, before.z)).toBeGreaterThan(30); // brigando fora da central
+    const px = before.x, pz = before.z;
+    run(sim, a, { t: 'return' }); // tenta recall...
+    const after = ent(sim, a);
+    expect(after.dead).toBe(false); // continua vivo -> o bloqueio foi pela AGGRO, nao por estar downed
+    expect(after.x).toBe(px); // ...BLOQUEADO: recall foi no-op (posicao exatamente inalterada)
+    expect(after.z).toBe(pz);
+  });
+
+  it('o return e deterministico (mesma seed + comandos => mesmo hash)', () => {
+    const play = (): string => {
+      const sim = serverSim(7);
+      const a = sim.addPlayer('A');
+      sim.restorePlayer(a, { gold: 1000 });
+      run(sim, a, { t: 'teleport', cityId: 'leste' });
+      run(sim, a, { t: 'register-city' });
+      run(sim, a, { t: 'teleport', cityId: 'town' });
+      run(sim, a, { t: 'return' }); // recall -> leste
       for (let i = 0; i < 10; i++) sim.step();
       return sim.hash();
     };

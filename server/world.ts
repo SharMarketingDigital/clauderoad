@@ -211,6 +211,10 @@ export class ServerWorld {
       case 'register-city':
         this.sim.sendCommandFor(id, { t: 'register-city' });
         return;
+      // --- return/recall (v0.5 TP2): warp grátis pra cidade cadastrada de qualquer lugar; a sim valida cooldown + combate ---
+      case 'return':
+        this.sim.sendCommandFor(id, { t: 'return' });
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }

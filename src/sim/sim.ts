@@ -24,7 +24,7 @@ import {
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
-import { cityNear, cityById, cityIndex, TELEPORT_COST } from './teleport';
+import { cityNear, cityById, cityIndex, TELEPORT_COST, RETURN_COOLDOWN_SECS } from './teleport';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -122,6 +122,7 @@ const BOT_CLUSTER_PENALTY = 100; // when cautious, bias away from clustered targ
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
+export const RETURN_COOLDOWN_TICKS = Math.round(RETURN_COOLDOWN_SECS * TICK_RATE); // GDD v0.5: free Return recall cooldown
 
 // Progression (provisional — GDD §B4b: GENTLE, rewarding pacing; NOT Silkroad's
 // brutal grind). Per level-up: +HP/+MP max and +5 attribute points.
@@ -355,6 +356,7 @@ export class Sim implements IWorld {
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
       returnCity: 'town', // GDD v0.5: registered city (Return recall + respawn point); default = central town
+      returnReadyAt: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -400,6 +402,7 @@ export class Sim implements IWorld {
       boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
       returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -425,6 +428,7 @@ export class Sim implements IWorld {
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
     });
     return id;
@@ -453,6 +457,7 @@ export class Sim implements IWorld {
       boss: false, summoned: false, spawnZone: -1,
       homeX: WAREHOUSE_SPAWN_X, homeZ: WAREHOUSE_SPAWN_Z,
       returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: WAREHOUSE_SPAWN_X, targetZ: WAREHOUSE_SPAWN_Z, repickAt: 0,
     });
     return id;
@@ -481,6 +486,7 @@ export class Sim implements IWorld {
       boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
       returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: def.spawnX, targetZ: def.spawnZ, repickAt: 0,
     });
     const s = this.bossState[i];
@@ -563,6 +569,7 @@ export class Sim implements IWorld {
       boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,
       returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -1430,6 +1437,32 @@ export class Sim implements IWorld {
     if (c) p.returnCity = c.id; // remember this hub; Return + death respawn now route here
   }
 
+  // Free Return recall (GDD v0.5 TP2): warp the player to their REGISTERED city centre from anywhere.
+  // BLOCKED while in combat (dueling, or a mob aggroed on them — PK joins later) and gated by a cooldown.
+  // Pure position/cooldown mutation (no Rng) — deterministic and folded into the hash.
+  private returnToCity(p: Entity): void {
+    if (this.tick < p.returnReadyAt) return; // still on cooldown
+    if (this.inCombat(p)) return; // can't recall mid-fight (no escaping a duel or a hunting mob)
+    const dest = cityById(p.returnCity) ?? cityById('town');
+    if (!dest) return; // defensive: registered city unknown and even 'town' missing
+    p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(dest.cz, -WORLD_HALF, WORLD_HALF);
+    p.targetId = null;
+    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-recall movement intent
+    p.returnReadyAt = this.tick + RETURN_COOLDOWN_TICKS;
+  }
+
+  // Is the player in COMBAT for the purpose of blocking Return? True while dueling (PK will OR in here
+  // later), or while any LIVING enemy is aggroed on them. O(entities), but only runs on a Return attempt
+  // (player-initiated, rare). Pure read, no Rng — deterministic.
+  private inCombat(p: Entity): boolean {
+    if (this.duelOf.has(p.id)) return true; // a consensual duel
+    for (const e of this.ents.values()) {
+      if (e.kind === 'enemy' && e.hp > 0 && e.targetId === p.id) return true; // a mob is hunting you
+    }
+    return false;
+  }
+
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
     // Party (social) commands work even while downed/stunned — no combat involved.
@@ -1494,6 +1527,9 @@ export class Sim implements IWorld {
         break;
       case 'register-city':
         this.registerCity(p);
+        break;
+      case 'return':
+        this.returnToCity(p);
         break;
       case 'deposit':
         this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
@@ -2684,7 +2720,7 @@ export class Sim implements IWorld {
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
-      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil);
+      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil); mix(e.returnReadyAt);
       mix(cityIndex(e.returnCity)); // GDD v0.5: registered city (per-player state; drives Return + respawn)
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       // Fingerprint a fixed slot range so it stays complete across masteries.

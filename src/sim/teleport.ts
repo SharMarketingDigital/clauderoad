@@ -5,6 +5,7 @@ import { CITIES, type SafeCity } from './zones';
 
 export const TELEPORT_COST = 50; // gold — a cheap, FIXED cost per city-to-city trip (per design)
 export const TELEPORT_RANGE = 6; // world units: must be within this of a city centre (the NPC) to use it
+export const RETURN_COOLDOWN_SECS = 120; // s — the FREE Return recall has no gold cost, so the cooldown is its only limiter
 
 // The city whose centre the point is within TELEPORT_RANGE of (i.e. you're standing at its
 // teleporter), or null when not at any teleport point. Euclidean, like the vendor/warehouse checks.

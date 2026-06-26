@@ -72,6 +72,9 @@ export interface Entity {
   abilityReadyAt: Record<number, number>; // action-bar slot -> earliest usable tick
   // shared "potion cooldown": earliest tick a consumable may be used again.
   potionReadyAt: number;
+  // GDD v0.5 (teleporte): cooldown for the FREE Return recall — earliest tick it may be used again
+  // (0 = ready). Transient like potionReadyAt: NOT persisted (resets to ready on reload). Non-players 0.
+  returnReadyAt: number;
   // player death: tick at which a downed player respawns (0 = alive). The spirit
   // can't act until then. Enemies always carry 0.
   deadUntil: number;

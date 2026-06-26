@@ -267,7 +267,9 @@ export type Command =
   // --- teleporte entre cidades (GDD v0.5): viaja entre os hubs a partir do NPC no centro da cidade ---
   | { t: 'teleport'; cityId: string } // teleport to another city's centre (server validates proximity + gold + destination)
   // --- cadastrar cidade de retorno (GDD v0.5 TP2): register the city you're standing at as your Return/respawn hub ---
-  | { t: 'register-city' }; // no args — the sim registers whichever city teleporter you're at (free)
+  | { t: 'register-city' } // no args — the sim registers whichever city teleporter you're at (free)
+  // --- return/recall (GDD v0.5 TP2): free warp to your registered city from anywhere; sim gates cooldown + combat ---
+  | { t: 'return' }; // no args — recall to the player's registered Return city
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
