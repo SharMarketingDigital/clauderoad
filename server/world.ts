@@ -215,6 +215,12 @@ export class ServerWorld {
       case 'return':
         this.sim.sendCommandFor(id, { t: 'return' });
         return;
+      // --- pegar loot do chão (v0.5 loot físico LF-S2): a sim valida que é loot + o alcance + bolsa cheia ---
+      case 'pickup':
+        if (typeof cmd.lootId === 'number' && Number.isFinite(cmd.lootId)) {
+          this.sim.sendCommandFor(id, { t: 'pickup', lootId: cmd.lootId });
+        }
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }

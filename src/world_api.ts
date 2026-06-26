@@ -302,7 +302,9 @@ export type Command =
   // --- cadastrar cidade de retorno (GDD v0.5 TP2): register the city you're standing at as your Return/respawn hub ---
   | { t: 'register-city' } // no args — the sim registers whichever city teleporter you're at (free)
   // --- return/recall (GDD v0.5 TP2): free warp to your registered city from anywhere; sim gates cooldown + combat ---
-  | { t: 'return' }; // no args — recall to the player's registered Return city
+  | { t: 'return' } // no args — recall to the player's registered Return city
+  // --- pegar loot do chão (GDD v0.5 loot físico LF-S2): pick up a ground item by id (FFA; sim validates range) ---
+  | { t: 'pickup'; lootId: number }; // the ground-loot entity id to pick up into the bag
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

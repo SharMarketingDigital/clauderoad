@@ -130,3 +130,56 @@ describe('loot físico — duelo amigável NÃO dropa (LF-S1)', () => {
     expect(groundLoot(sim).length).toBe(0); // ...mas NADA caiu (duelo amigável: a saída antecipada pula o drop)
   });
 });
+
+describe('loot físico — pegar (pickup) (LF-S2)', () => {
+  // Walk player `id` toward (tx,tz) until within ~3 units (or it dies / gives up). Deterministic.
+  const walkTo = (sim: Sim, id: number, tx: number, tz: number): boolean => {
+    for (let i = 0; i < 3000; i++) {
+      const e = ent(sim, id);
+      if (e.dead) return false;
+      if (Math.hypot(e.x - tx, e.z - tz) <= 3) return true;
+      sim.sendCommandFor(id, { t: 'move', dx: tx - e.x, dz: tz - e.z });
+      sim.step();
+    }
+    return false;
+  };
+
+  it('fora de alcance é no-op; no alcance um SEGUNDO jogador pega (FFA)', () => {
+    const { sim } = simWithDeathDrop();
+    const loot = groundLoot(sim)[0];
+    const lootId = loot.id;
+    const b = sim.addPlayer('B'); // FFA: qualquer um pode pegar (não só quem morreu)
+    sim.restorePlayer(b, { baseStr: 400 }); // forte o bastante pra limpar mobs no caminho
+    const n0 = groundLoot(sim).length;
+    run(sim, b, { t: 'pickup', lootId }); // B está longe (na cidade) -> no-op
+    expect(groundLoot(sim).length).toBe(n0);
+    expect(bagStacks(sim, b)).toBe(0);
+    expect(walkTo(sim, b, loot.x, loot.z)).toBe(true); // caminha até o item
+    run(sim, b, { t: 'pickup', lootId });
+    expect(groundLoot(sim).some((e) => e.id === lootId)).toBe(false); // sumiu do chão
+    expect(bagStacks(sim, b)).toBe(1); // foi pra bolsa do B (FFA)
+  });
+
+  it('id que não é loot é no-op', () => {
+    const { sim } = simWithDeathDrop();
+    const b = sim.addPlayer('B');
+    const n0 = groundLoot(sim).length;
+    run(sim, b, { t: 'pickup', lootId: 999999 }); // id inexistente / não-loot
+    expect(groundLoot(sim).length).toBe(n0);
+    expect(bagStacks(sim, b)).toBe(0);
+  });
+
+  it('deterministico (mesma seed + comandos com pickup => mesmo hash)', () => {
+    const play = (): string => {
+      const { sim } = simWithDeathDrop();
+      const loot = groundLoot(sim)[0];
+      const b = sim.addPlayer('B');
+      sim.restorePlayer(b, { baseStr: 400 });
+      walkTo(sim, b, loot.x, loot.z);
+      run(sim, b, { t: 'pickup', lootId: loot.id });
+      for (let i = 0; i < 20; i++) sim.step();
+      return sim.hash();
+    };
+    expect(play()).toBe(play());
+  });
+});

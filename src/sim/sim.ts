@@ -25,7 +25,7 @@ import {
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, CITIES, type SpawnSpot } from './zones';
 import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
-import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE } from './loot';
+import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE } from './loot';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -1611,6 +1611,9 @@ export class Sim implements IWorld {
       case 'return':
         this.returnToCity(p);
         break;
+      case 'pickup':
+        this.pickupLoot(p, cmd.lootId);
+        break;
       case 'deposit':
         this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
@@ -2762,6 +2765,20 @@ export class Sim implements IWorld {
       if (!removeFromBag(p.bag, s.itemId, s.rarity, s.plus, s.qty)) continue; // safety: must still hold the stack
       this.spawnGroundLoot(p.x, p.z, s);
     }
+  }
+
+  // GDD v0.5 (loot físico) LF-S2: pick up a ground item the player is standing on. FFA — any living
+  // player in range may take it. No-op if it isn't a ground-loot entity, is out of range, or the bag is
+  // full (then it stays on the ground). Pure (no Rng); the bag gain + entity removal fold into the hash.
+  private pickupLoot(p: Entity, lootId: number): void {
+    const e = this.ents.get(lootId);
+    if (!e || !e.loot) return; // not a ground-loot entity (or already gone)
+    const dx = p.x - e.x, dz = p.z - e.z;
+    if (dx * dx + dz * dz > LOOT_PICKUP_RANGE * LOOT_PICKUP_RANGE) return; // too far to reach it
+    const s = e.loot.stack;
+    if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty)) return; // bag full -> leave it on the ground
+    this.ents.delete(lootId);
+    this.lootIds.delete(lootId);
   }
 
   // Down the player: enter the "spirit" state, schedule a respawn, and announce
