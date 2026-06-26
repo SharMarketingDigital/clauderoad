@@ -263,7 +263,9 @@ export type Command =
   // --- PvP duel (Tier 1; consensual 1v1) ---
   | { t: 'duel-challenge'; name: string } // challenge an online player to a duel by name
   | { t: 'duel-accept' } // accept your pending duel challenge (forms the pair)
-  | { t: 'duel-decline' }; // decline your pending duel challenge
+  | { t: 'duel-decline' } // decline your pending duel challenge
+  // --- teleporte entre cidades (GDD v0.5): viaja entre os hubs a partir do NPC no centro da cidade ---
+  | { t: 'teleport'; cityId: string }; // teleport to another city's centre (server validates proximity + gold + destination)
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

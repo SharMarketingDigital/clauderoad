@@ -68,6 +68,14 @@ export const SAFE_CITIES: ReadonlyArray<SafeCity> = [
   { id: 'leste', name: 'Vila do Leste', cx: 250, cz: 0, half: 30 },
 ];
 
+// Every CITY in the world (the safe hubs you teleport between): the central town (ZONES[0], at the
+// origin) plus each extra safe city. The canonical city list for teleport + render — same shape as
+// a SafeCity (id / name / centre / half).
+export const CITIES: ReadonlyArray<SafeCity> = [
+  { id: ZONES[0].id, name: ZONES[0].name, cx: 0, cz: 0, half: ZONES[0].outer },
+  ...SAFE_CITIES,
+];
+
 // Each extra city as a ready ZoneDef (safe, level 0, no spawns), precomputed so zoneAt() returns a
 // stable object with no per-call allocation. inner/outer hold the city's own square half-extent (the
 // concentric-band meaning doesn't apply off-origin); consumers read safe/level/name, and the map

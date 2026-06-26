@@ -201,6 +201,12 @@ export class ServerWorld {
       case 'duel-decline':
         this.sim.sendCommandFor(id, { t: 'duel-decline' });
         return;
+      // --- teleporte entre cidades (v0.5): viajar do NPC da cidade; a sim valida proximidade + gold + destino ---
+      case 'teleport':
+        if (typeof cmd.cityId === 'string' && cmd.cityId.length > 0 && cmd.cityId.length <= 32) {
+          this.sim.sendCommandFor(id, { t: 'teleport', cityId: cmd.cityId });
+        }
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }

@@ -24,6 +24,7 @@ import {
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
+import { cityNear, cityById, TELEPORT_COST } from './teleport';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -1398,6 +1399,23 @@ export class Sim implements IWorld {
     }
   }
 
+  // ---------- teleporte entre cidades (GDD v0.5) ----------
+  // Teleport the player to another city's centre: must be standing at a city teleport point, the
+  // destination must be a DIFFERENT known city, and the fixed gold cost must be affordable. Pure
+  // position + gold mutation (no Rng) — determinism-safe; folded into the hash via the entity.
+  private teleportTo(p: Entity, cityId: string): void {
+    const from = cityNear(p.x, p.z);
+    if (!from) return; // not at a teleport point (the NPC sits at a city centre)
+    const dest = cityById(cityId);
+    if (!dest || dest.id === from.id) return; // unknown destination, or already there
+    if (p.gold < TELEPORT_COST) return; // can't afford the trip
+    p.gold -= TELEPORT_COST;
+    p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(dest.cz, -WORLD_HALF, WORLD_HALF);
+    p.targetId = null;
+    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-teleport movement intent
+  }
+
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
     // Party (social) commands work even while downed/stunned — no combat involved.
@@ -1456,6 +1474,9 @@ export class Sim implements IWorld {
         break;
       case 'select-class':
         this.selectClass(p, cmd.classId);
+        break;
+      case 'teleport':
+        this.teleportTo(p, cmd.cityId);
         break;
       case 'deposit':
         this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
