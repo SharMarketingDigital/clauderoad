@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, TeleporterView, TeleporterCityView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -758,6 +758,39 @@ export class Sim implements IWorld {
     return { name: WAREHOUSE_NAME, capacity: STORAGE_SLOTS, stacks, inRange: p ? this.nearWarehouse(p) : false };
   }
 
+  teleporter(): TeleporterView {
+    return this.teleporterFor(this.localId);
+  }
+
+  // The teleporter menu state for a SPECIFIC player (TP3): the city list + fixed cost, the city they're
+  // standing at (for "register here"), their registered Return city, and whether Return is usable now
+  // (off cooldown AND not in combat — mirrors the returnToCity gate). The IWorld teleporter() uses the
+  // local player; the server calls this per client for the SelfSnap.
+  teleporterFor(id: number): TeleporterView {
+    const p = this.ents.get(id);
+    const at = p ? cityNear(p.x, p.z) : null;
+    const cities: TeleporterCityView[] = CITIES.map((c) => ({
+      id: c.id,
+      name: c.name,
+      cost: at && at.id === c.id ? 0 : TELEPORT_COST,
+      current: at != null && at.id === c.id,
+    }));
+    const onCooldown = p != null && this.tick < p.returnReadyAt;
+    const inFight = p != null && this.inCombat(p);
+    let blocked: string | null = null;
+    if (!p) blocked = 'Indisponível';
+    else if (inFight) blocked = 'Em combate';
+    else if (onCooldown) blocked = `Cooldown: ${Math.ceil((p.returnReadyAt - this.tick) / TICK_RATE)}s`;
+    return {
+      inRange: at != null,
+      atCityId: at?.id ?? null,
+      registeredCityId: p?.returnCity ?? 'town',
+      cities,
+      returnReady: p != null && !onCooldown && !inFight,
+      returnBlockedReason: blocked,
+    };
+  }
+
   botActive(): boolean {
     return this.botActiveFor(this.localId);
   }
@@ -1474,8 +1507,9 @@ export class Sim implements IWorld {
   // BLOCKED while in combat (dueling, or a mob aggroed on them — PK joins later) and gated by a cooldown.
   // Pure position/cooldown mutation (no Rng) — deterministic and folded into the hash.
   private returnToCity(p: Entity): void {
-    if (this.tick < p.returnReadyAt) return; // still on cooldown
-    if (this.inCombat(p)) return; // can't recall mid-fight (no escaping a duel or a hunting mob)
+    if (this.inCombat(p)) return; // headline block: can't recall mid-fight (no escaping a duel or a hunting mob)
+    if (this.tick < p.returnReadyAt) return; // and a cooldown between recalls (checked AFTER combat, so the
+    // teleporter view's blocked-reason priority — combat first, then cooldown — matches this gate order)
     const dest = cityById(p.returnCity) ?? cityById('town');
     if (!dest) return; // defensive: registered city unknown and even 'town' missing
     p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);

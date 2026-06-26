@@ -323,3 +323,66 @@ describe('teleportador NPC (TP3a)', () => {
     expect(play()).toBe(play());
   });
 });
+
+// TeleporterView (TP3b) — the per-player menu state the UI reads (offline via teleporter(), online via
+// the SelfSnap). Tested through teleporterFor(id) on a server-mode Sim.
+describe('teleporter view (TP3b)', () => {
+  it('na cidade: inRange + atCity + lista de cidades com custo fixo (atual = 0)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A'); // nasce na vila central
+    const v = sim.teleporterFor(a);
+    expect(v.inRange).toBe(true);
+    expect(v.atCityId).toBe('town');
+    expect(v.cities.map((c) => c.id).sort()).toEqual(['leste', 'town']);
+    const town = v.cities.find((c) => c.id === 'town')!;
+    const leste = v.cities.find((c) => c.id === 'leste')!;
+    expect(town.current).toBe(true);
+    expect(town.cost).toBe(0); // a cidade onde você está não custa
+    expect(leste.cost).toBe(TELEPORT_COST); // qualquer viagem custa o fixo
+    expect(v.registeredCityId).toBe('town'); // default
+  });
+
+  it('longe de qualquer hub: fora de alcance', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.sendCommandFor(a, { t: 'move', dx: 1, dz: 0 });
+    for (let i = 0; i < 120; i++) sim.step(); // anda pra fora da vila central
+    sim.sendCommandFor(a, { t: 'stop' });
+    sim.step();
+    const v = sim.teleporterFor(a);
+    expect(v.inRange).toBe(false);
+    expect(v.atCityId).toBeNull();
+  });
+
+  it('registeredCityId reflete o cadastro', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'register-city' });
+    expect(sim.teleporterFor(a).registeredCityId).toBe('leste');
+  });
+
+  it('returnReady cai e mostra o motivo apos usar o return (cooldown)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    expect(sim.teleporterFor(a).returnReady).toBe(true); // fresco: pronto
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'return' }); // recall -> inicia o cooldown
+    const v = sim.teleporterFor(a);
+    expect(v.returnReady).toBe(false);
+    expect(v.returnBlockedReason).toContain('Cooldown');
+  });
+
+  it('em duelo, returnReady cai e o motivo e "Em combate" (combate tem prioridade no gate e na view)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    run(sim, a, { t: 'duel-challenge', name: 'B' });
+    run(sim, b, { t: 'duel-accept' }); // duelo ativo
+    const v = sim.teleporterFor(a);
+    expect(v.returnReady).toBe(false);
+    expect(v.returnBlockedReason).toBe('Em combate'); // combate, nao cooldown (mesma ordem do returnToCity)
+  });
+});

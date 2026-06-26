@@ -172,6 +172,27 @@ export interface StorageView {
   readonly inRange: boolean;
 }
 
+// One destination row in the teleporter menu (GDD v0.5 TP3). `cost` is the fixed gold for a one-way
+// trip (0 for the city you're standing in); `current` marks that same city (can't travel to itself).
+export interface TeleporterCityView {
+  readonly id: string;
+  readonly name: string;
+  readonly cost: number;
+  readonly current: boolean;
+}
+
+// The teleporter menu state for the local player (TP3). `inRange` = standing at a city teleporter (so
+// register/teleport are allowed); `atCityId` is that city (for "register here"). `registeredCityId` is
+// where Return + death respawn go. `returnReady`/`returnBlockedReason` drive the HUD's Return button.
+export interface TeleporterView {
+  readonly inRange: boolean;
+  readonly atCityId: string | null;
+  readonly registeredCityId: string;
+  readonly cities: ReadonlyArray<TeleporterCityView>;
+  readonly returnReady: boolean;
+  readonly returnBlockedReason: string | null;
+}
+
 // Party (co-op group), Silkroad-style. The leader picks BOTH modes at creation:
 //   exp:  'each-get'   — each member keeps the XP they earned (no range limit), +bonus
 //                        by party size; capacity 4.
@@ -342,6 +363,8 @@ export interface IWorld {
   shop(): ShopView;
   // The local player's warehouse (armazém) contents + whether in range to deposit/withdraw.
   storage(): StorageView;
+  // The teleporter menu state for the local player (city list + cost, registered city, Return status).
+  teleporter(): TeleporterView;
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;
