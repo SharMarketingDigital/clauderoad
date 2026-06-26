@@ -1,8 +1,9 @@
-// Client entry point. Two modes, chosen by the URL:
-//   • single-player (default)  — runs the offline Sim locally (unchanged).
-//   • multiplayer  (?mp)       — connects to the authoritative server; the local Sim
-//                                is NOT run, the client only sends intent + renders
-//                                server snapshots via a network-backed IWorld.
+// Client entry point. The game is ONLINE-ONLY: the default (and the player's only path) is
+// multiplayer — connect to the authoritative server, the local Sim is NOT run, the client only
+// sends intent + renders server snapshots via a network-backed IWorld. Two modes, chosen by URL:
+//   • multiplayer (DEFAULT, no params) — connects to the server (VITE_SERVER_URL in production).
+//   • single-player (?sp)              — DEV ESCAPE HATCH: runs the offline Sim locally (no server),
+//                                        for offline/sim testing. Not a path normal players take.
 //
 // Note: performance.now() / Date.now() / Math.random() are fine HERE (the host). They
 // are forbidden only inside src/sim/, which must stay deterministic.
@@ -29,18 +30,21 @@ import { NameSelect, normalizeName, isValidName } from './ui/name_select';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 
-// Multiplayer is OPT-IN (?mp, or ?mp=ws://host:port). No flag => the offline game,
-// completely unchanged. So the single-player experience can never break by accident.
+// ONLINE-ONLY: multiplayer is the DEFAULT and the only path for players — no `?mp` needed. `?sp`
+// is a hidden dev-only escape hatch that runs the offline Sim locally (no server) for testing;
+// `?mp=<ws-url>` stays an OPTIONAL override to aim at a specific server (dev), never required.
 const params = new URLSearchParams(location.search);
 // Character creation (GDD v0.4 §1.3): resolve the player NAME *before* the world is
-// built — in MP it's baked into the `join` handshake, in SP into the local player's
+// built — online it's baked into the `join` handshake, offline (?sp) into the local player's
 // spawn. `?name=` stays a shortcut: present + valid skips the screen; absent shows it.
 withChosenName((name) => {
-  if (params.has('mp')) startOnline(resolveServerUrl(params.get('mp')), name);
-  else startOffline(name);
+  // Default => ONLINE (server URL from VITE_SERVER_URL in prod, ws://localhost:8080 in dev, or an
+  // explicit ?mp=<ws-url> override). `?sp` => the offline Sim, for dev/offline testing only.
+  if (params.has('sp')) startOffline(name);
+  else startOnline(resolveServerUrl(params.get('mp')), name);
 });
 
-// ---------- single-player (offline) ----------
+// ---------- single-player (offline) — DEV ONLY, reached via ?sp (never a normal player path) ----------
 function startOffline(name: string): void {
   const WORLD_SEED = 1337; // fixed seed -> the world is the same place every load
 

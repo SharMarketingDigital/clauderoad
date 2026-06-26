@@ -174,10 +174,10 @@ that browser if its Origin is in `ALLOWED_ORIGINS`.
    - Install Command: `npm install`
 3. **Environment Variable**: add `VITE_SERVER_URL = wss://<your-server-domain>` (Production).
    (Vite inlines it at build time — redeploy after changing it.)
-4. **Deploy.** Then open the site:
-   - Single-player (offline): `https://<your-vercel-domain>/`
-   - Multiplayer: `https://<your-vercel-domain>/?mp` → connects to your VPS over `wss://`.
-   - Two players: open `?mp&name=Alice` and `?mp&name=Bob` (two tabs / two devices).
+4. **Deploy.** Then open the site (ONLINE-ONLY — multiplayer is the default, no `?mp` needed):
+   - Play (multiplayer): `https://<your-vercel-domain>/` → connects to your VPS over `wss://`.
+   - Two players: open `/?name=Alice` and `/?name=Bob` (two tabs / two devices).
+   - Offline Sim (DEV ONLY): `https://<your-vercel-domain>/?sp` → runs the local Sim, no server.
 
 ---
 
@@ -185,7 +185,8 @@ that browser if its Origin is in `ALLOWED_ORIGINS`.
 ```bash
 npm run server   # ws://localhost:8080 (dev: ALLOWED_ORIGINS empty -> localhost allowed)
 npm run dev      # http://localhost:5173
-# open http://localhost:5173/?mp in two tabs; http://localhost:5173/ stays single-player
+# ONLINE is the default: open http://localhost:5173/ in two tabs (needs `npm run server` above).
+# Offline Sim (no server needed): http://localhost:5173/?sp
 ```
 
 ## Verify before deploying
