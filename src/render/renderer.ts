@@ -47,7 +47,8 @@ export class Renderer {
   private meshes = new Map<number, THREE.Object3D>();
   private localId: number | null = null; // the local player's id (refreshed each render) — pick() skips its avatar
   private raycaster = new THREE.Raycaster();
-  // One reusable selection marker, moved onto the targeted enemy each frame.
+  // One reusable selection marker, moved onto the CURRENT target each frame — a mob, a boss, or a
+  // duel opponent (localTargetId can be a player in PvP, so the same ring marks a player target too).
   private selectionRing: THREE.Mesh;
   // Hit flashes: entity id -> seconds of white flash remaining. Driven by the
   // host clock (presentation only), decayed each frame.
@@ -549,11 +550,19 @@ export class Renderer {
         this.playerAvatars.release(id); // dispose a remote Knight if this id was one
       }
     }
-    // Park the selection ring under the current target (if any).
+    // Park the selection ring under the CURRENT target (ANY kind). localTargetId can be a player in
+    // an active duel (PvP), so the same ring marks the opponent — it was never restricted to mobs.
     if (targetView) {
       const tp = this.interpPos(targetView.id, targetView); // ring follows the smoothed target (O1)
       this.selectionRing.position.set(tp.x, terrainHeight(tp.x, tp.z) + 0.06, tp.z);
-      this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : (TIER_SCALE[targetView.tier] ?? 1)); // match boss/tier size
+      // Size: boss/tier for enemies; a player (duel opponent) gets the standard ring.
+      const onPlayer = targetView.kind === 'player';
+      this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : onPlayer ? 1 : (TIER_SCALE[targetView.tier] ?? 1));
+      // A player's ground ring is easily hidden in a face-to-face melee duel — your own avatar and the
+      // opponent's body sandwich the small disc — so draw the PLAYER ring ON TOP (no depth test) for
+      // reliable selection feedback. Enemy/boss rings keep the normal depth-tested look.
+      (this.selectionRing.material as THREE.MeshBasicMaterial).depthTest = !onPlayer;
+      this.selectionRing.renderOrder = onPlayer ? 10 : 0;
       this.selectionRing.visible = true;
     } else {
       this.selectionRing.visible = false;
