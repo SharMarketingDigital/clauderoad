@@ -188,21 +188,18 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     farm(w, a, 3000); // only A farms
     const sa = w.selfState(a);
     const sb = w.selfState(b);
-    expect(sa.inventory.stacks.length).toBeGreaterThan(0); // A looted items
-    expect(sa.gold).toBeGreaterThan(0); // and earned gold from kills
-    expect(sb.inventory.stacks.length).toBe(0); // B got nothing — loot is personal
+    expect(w.snapshot().entities.filter((e) => e.kind === 'loot').length).toBeGreaterThan(0); // LF-S4: items drop on the GROUND (FFA), not into the bag
+    expect(sa.gold).toBeGreaterThan(0); // the killer still earns gold from kills
+    expect(sb.inventory.stacks.length).toBe(0); // B got nothing in its bag (loot is on the ground)
     expect(sb.gold).toBe(0);
   });
 
   it('accepts equip — a looted item goes onto the character (server applies it)', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
-    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
-    for (let r = 0; r < 10 && !gear; r++) {
-      farm(w, a, 1200);
-      gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null) as typeof gear;
-    }
-    expect(gear).toBeDefined(); // looted some equippable gear
+    w.restorePlayer(a, { bag: [{ itemId: 'old_sword', rarity: 'normal', plus: 0, qty: 1 }] }); // LF-S4: inject (mob loot drops on the ground now)
+    const gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null) as { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
+    expect(gear).toBeDefined(); // injected some equippable gear
     w.command(a, { t: 'equip', itemId: gear!.itemId, rarity: gear!.rarity, plus: gear!.plus });
     w.step();
     const eq = w.selfState(a).inventory.equipment.find((e) => e.slot === gear!.equipSlot);
@@ -215,12 +212,9 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     // that exact path through ServerWorld.command() with a looted armor piece (e.g. chest).
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
-    let gear: { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
-    for (let r = 0; r < 15 && !gear; r++) {
-      farm(w, a, 1200);
-      gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null && s.equipSlot !== 'weapon') as typeof gear;
-    }
-    expect(gear).toBeDefined(); // looted a non-weapon piece (armor/accessory)
+    w.restorePlayer(a, { bag: [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }] }); // LF-S4: inject a non-weapon piece (loot drops on the ground now)
+    const gear = w.selfState(a).inventory.stacks.find((s) => s.equipSlot != null && s.equipSlot !== 'weapon') as { itemId: string; rarity: 'normal' | 'sos' | 'som' | 'sun'; plus: number; equipSlot?: EquipSlot } | undefined;
+    expect(gear).toBeDefined(); // injected a non-weapon piece (armor/accessory)
     expect(gear!.equipSlot).not.toBe('weapon');
     const slot = gear!.equipSlot!;
     w.command(a, { t: 'equip', itemId: gear!.itemId, rarity: gear!.rarity, plus: gear!.plus });
@@ -293,7 +287,7 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
   it('the vendor loop works in MP — walk into range, sell loot for gold', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
-    farm(w, a, 2500); // earn loot to sell
+    w.restorePlayer(a, { bag: [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 10 }] }); // LF-S4: inject sellable items (loot drops on the ground now)
     const vendor = w.snapshot().entities.find((e) => e.kind === 'npc')!;
     for (let i = 0; i < 2500 && !w.selfState(a).shop.inRange; i++) {
       const me = selfOf(w, a);

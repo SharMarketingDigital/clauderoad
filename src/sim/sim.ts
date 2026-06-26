@@ -166,7 +166,6 @@ export class Sim implements IWorld {
   private dropRng: Rng; // independent substream for player-death loot drops (GDD v0.5; never perturbs the main stream)
   // GDD v0.5 (loot físico): ids of the kind 'loot' ground items in this.ents, so the despawn scan is O(loot) not O(all).
   private lootIds = new Set<number>();
-  private partyRng: Rng; // independent substream for party loot auto-share recipient picks (see constructor)
   private ents = new Map<number, Entity>();
   // O3 — entities() view cache. Built lazily on first read each tick and reused by every caller
   // (render/ui hit it ~8x/frame) until step()/addPlayer/removePlayer/restorePlayer invalidate it.
@@ -236,10 +235,6 @@ export class Sim implements IWorld {
     // Enemy on-hit status PROCS roll from their own substream, so a mob/boss
     // debuffing the player never perturbs the main loot/position stream.
     this.procRng = new Rng((seed ^ 0xc2b2ae35) >>> 0);
-    // And party LOOT auto-share picks its random recipient from its own substream, so
-    // WHICH member gets an item never perturbs the main loot stream (the items that drop
-    // are unchanged — only their owner differs).
-    this.partyRng = new Rng((seed ^ 0x27d4eb2f) >>> 0);
     // And zone spawn POSITIONS roll from their own substream, so scattering mobs across
     // the rings never perturbs the main loot/position stream (determinism stays clean).
     this.spawnRng = new Rng((seed ^ 0x165667b1) >>> 0);
@@ -1391,34 +1386,19 @@ export class Sim implements IWorld {
     const rarities = bt ? bt.rarities : RARITIES;
     // Gold goes to the killer/picker (it is not an "item"); same Rng draw as before.
     p.gold += Math.round(this.rng.int(t.goldMin, t.goldMax + 1) * goldMult);
-    // Where each dropped ITEM goes: the picker (Item Distribution / solo) or a random
-    // in-range party member (Item Auto Share). Resolved once; the per-item random pick
-    // uses partyRng, so the ITEM ROLL (which/how rare, via this.rng) is unchanged.
-    const recipients = this.lootRecipients(p);
+    // GDD v0.5 (loot físico LF-S4): a mob's dropped ITEMS now fall to the GROUND at its spot (FFA pickup)
+    // instead of going straight to the killer's bag. Gold still goes to the killer (above). The this.rng
+    // draw order (per-drop chance, then rarity) is UNCHANGED, so the loot STREAM is preserved; only the
+    // destination (ground vs bag) changes. Party loot MODES no longer apply to mob loot (the ground is FFA).
     for (const drop of t.drops) {
-      // First decide if the item drops at all, then roll HOW rare it is.
-      // Only equippable gear has a meaningful rarity; materials/consumables drop
-      // as plain Normal. Everything drops un-enhanced (+0).
+      // First decide if the item drops at all, then roll HOW rare it is. Only equippable gear has a
+      // meaningful rarity; materials/consumables drop as plain Normal. Everything drops un-enhanced (+0).
       if (this.rng.next() < drop.chance) {
         const equippable = ITEMS[drop.itemId]?.slot != null;
         const rarity = equippable ? rollRarity(this.rng, rarities) : 'normal';
-        const to = recipients.length === 1 ? recipients[0] : recipients[this.partyRng.int(0, recipients.length)];
-        addToBag(to.bag, drop.itemId, rarity, 0, 1);
+        this.spawnGroundLoot(dead.x, dead.z, { itemId: drop.itemId, rarity, plus: 0, qty: 1 });
       }
     }
-  }
-
-  // Who receives this kill's dropped items (GDD B6 loot modes / Silkroad). Solo or
-  // "Item Distribution" -> just the picker (the killer), byte-identical to before. "Item
-  // Auto Share" -> the living members within PARTY_SHARE_RANGE of the killer (each item
-  // then goes to a RANDOM one of these via partyRng); none in range -> falls back to the
-  // killer so an item is never lost.
-  private lootRecipients(killer: Entity): Entity[] {
-    const pid = this.partyOfPlayer.get(killer.id);
-    const party = pid !== undefined ? this.parties.get(pid) : undefined;
-    if (!party || party.lootMode !== 'auto-share') return [killer];
-    const inRange = this.partyMembersInRange(party, killer);
-    return inRange.length > 0 ? inRange : [killer];
   }
 
   // The LIVING party members within share range of the killer — the shared eligibility

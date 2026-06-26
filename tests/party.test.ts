@@ -325,27 +325,32 @@ function bagItems(sim: Sim, id: number): number {
 }
 
 describe('party loot distribution (SF3)', () => {
-  it('item-distribution: dropped items go only to the killer (others get none)', () => {
+  it('LF-S4: mob loot é FFA no chão (modos de loot de party não valem mais p/ loot de mob)', () => {
     const sim = serverSim();
     const a = sim.addPlayer('A');
     const b = sim.addPlayer('B');
     run(sim, a, { t: 'party-create', exp: 'each-get', loot: 'distribution' });
     run(sim, a, { t: 'party-invite', name: 'B' });
     run(sim, b, { t: 'party-accept' });
-    for (let i = 0; i < 6; i++) killOneWolf(sim, a); // A farms; B does nothing
-    expect(bagItems(sim, a)).toBeGreaterThan(0); // A collected its loot
-    expect(bagItems(sim, b)).toBe(0); // distribution: B never receives A's drops
+    const goldA0 = sim.entities().find((e) => e.id === a)!.gold;
+    for (let i = 0; i < 6; i++) killOneWolf(sim, a); // A mata; os itens caem no CHÃO (FFA), não na bolsa
+    expect(sim.entities().filter((e) => e.kind === 'loot').length).toBeGreaterThan(0); // caiu no chão
+    expect(bagItems(sim, a)).toBe(0); // nada vai direto pra bolsa do matador (loot físico)
+    expect(bagItems(sim, b)).toBe(0); // nem do B
+    expect(sim.entities().find((e) => e.id === a)!.gold).toBeGreaterThan(goldA0); // gold ainda vai pro matador
   });
 
-  it('item-auto-share: dropped items are shared out to in-range members', () => {
+  // LF-S4: a distribuição de loot de party (auto-share pra bolsa de um membro) não se aplica mais ao loot
+  // de MOB — todo loot de mob agora cai no chão (FFA). Pulado até (e se) houver loot assignável de novo.
+  it.skip('item-auto-share: dropped items are shared out to in-range members (obsoleto pós loot físico)', () => {
     const sim = serverSim();
     const a = sim.addPlayer('A');
     const b = sim.addPlayer('B');
     run(sim, a, { t: 'party-create', exp: 'each-get', loot: 'auto-share' });
     run(sim, a, { t: 'party-invite', name: 'B' });
     run(sim, b, { t: 'party-accept' });
-    for (let i = 0; i < 18; i++) killOneWolf(sim, a, [b]); // B follows -> in range for the random hand-out
-    expect(bagItems(sim, b)).toBeGreaterThan(0); // B received some auto-shared drops
+    for (let i = 0; i < 18; i++) killOneWolf(sim, a, [b]);
+    expect(bagItems(sim, b)).toBeGreaterThan(0);
     expect(bagItems(sim, a) + bagItems(sim, b)).toBeGreaterThan(0);
   });
 

@@ -58,7 +58,7 @@ import {
   VENDOR_INTERACT_RANGE,
   VENDOR_STOCK,
 } from '../src/sim/content/vendor';
-import type { Command } from '../src/world_api';
+import type { Command, Rarity } from '../src/world_api';
 import type { ItemStack, Entity } from '../src/sim/types';
 import { spellDamage, spellAbilityDamage, INT_TO_DAMAGE, mitigate, MAGIC_DEF_PER_INT } from '../src/sim/combat';
 import type { Damage } from '../src/sim/combat';
@@ -1619,34 +1619,35 @@ describe('loot & inventory', () => {
   });
 
   it('a kill always drops gold, items come from the drop table with resolved names, reproducibly', () => {
-    const lootAfter = (seed: number, kills: number): { gold: number; inv: ReturnType<Sim['inventory']> } => {
+    // LF-S4: gold still goes to the killer; items now spawn as ground-loot entities (FFA), not the bag.
+    const lootAfter = (seed: number, kills: number) => {
       const sim = new Sim(seed);
       for (let i = 0; i < kills; i++) killNearestEnemy(sim);
       const gold = sim.entities().find((e) => e.kind === 'player')!.gold;
-      return { gold, inv: sim.inventory() };
+      const ground = sim.entities().filter((e) => e.kind === 'loot');
+      return { gold, ground };
     };
 
     // one kill -> always some gold, within the template's range
     const one = lootAfter(7, 1);
     expect(one.gold).toBeGreaterThanOrEqual(ENEMY_TEMPLATE.goldMin);
     expect(one.gold).toBeLessThanOrEqual(ENEMY_TEMPLATE.goldMax);
-    expect(one.inv.capacity).toBe(BAG_SLOTS); // the view reports the slot count
 
-    // over a dozen kills: at least one item, every stack a VALID drop-table item
-    // with its display name resolved from ITEMS (exactly what the HUD renders)
+    // over a dozen kills: at least one item spawns as GROUND loot, each a valid drop-table item with
+    // its display name resolved from ITEMS (what the HUD renders), dropped un-enhanced.
     const many = lootAfter(7, 12);
-    expect(many.inv.stacks.length).toBeGreaterThan(0);
+    expect(many.ground.length).toBeGreaterThan(0);
     const dropIds = ENEMY_TEMPLATE.drops.map((d) => d.itemId);
-    for (const s of many.inv.stacks) {
-      expect(dropIds).toContain(s.itemId);
-      expect(s.qty).toBeGreaterThan(0);
-      expect(s.name).toBe(ITEMS[s.itemId].name);
-      expect(['normal', 'sos', 'som', 'sun']).toContain(s.rarity); // a valid rarity
-      expect(s.rarityName.length).toBeGreaterThan(0);
-      expect(s.plus).toBe(0); // loot drops un-enhanced
+    for (const g of many.ground) {
+      expect(g.loot).toBeTruthy();
+      expect(dropIds).toContain(g.loot!.itemId);
+      expect(g.loot!.qty).toBeGreaterThan(0);
+      expect(g.loot!.name).toBe(ITEMS[g.loot!.itemId].name);
+      expect(['normal', 'sos', 'som', 'sun']).toContain(g.loot!.rarity); // a valid rarity
+      expect(g.loot!.plus).toBe(0); // loot drops un-enhanced
     }
 
-    // reproducible: same seed + same kills => identical gold AND bag contents
+    // reproducible: same seed + same kills => identical gold AND ground loot
     expect(lootAfter(7, 12)).toEqual(many);
   });
 
@@ -1661,13 +1662,14 @@ describe('loot & inventory', () => {
   });
 });
 
-// Kill mobs until `itemId` lands in the bag (deterministic for a fixed seed;
-// `cap` is just a safety net). Returns whether it was obtained.
-function killUntilBagHas(sim: Sim, itemId: string, cap: number): boolean {
-  for (let i = 0; i < cap; i++) {
-    if (sim.inventory().stacks.some((s) => s.itemId === itemId)) return true;
-    killNearestEnemy(sim);
-  }
+// Put `itemId` in the player's bag. Since LF-S4 (mob loot drops on the GROUND, not into the bag), the
+// old "farm until it drops into the bag" is no longer a valid setup; inject the item directly via
+// serialize/restore. The test then equips/consumes/sells it exactly as before — its real subject.
+function killUntilBagHas(sim: Sim, itemId: string, _cap: number): boolean {
+  const id = sim.localPlayerId()!;
+  const save = sim.serializePlayer(id)!;
+  save.bag = [...save.bag, { itemId, rarity: 'normal', plus: 0, qty: 1 }];
+  sim.restorePlayer(id, save);
   return sim.inventory().stacks.some((s) => s.itemId === itemId);
 }
 
@@ -1752,14 +1754,14 @@ describe('equipment', () => {
   });
 });
 
-// Kill mobs until `itemId` lands in the bag at a specific rarity (deterministic
-// for a fixed seed; `cap` is a safety net). Used when a test needs a KNOWN stat
-// bonus (e.g. a Normal leather's small, predictable +maxHp).
-function killUntilBagHasRarity(sim: Sim, itemId: string, rarity: string, cap: number): boolean {
-  const has = (): boolean =>
-    sim.inventory().stacks.some((s) => s.itemId === itemId && s.rarity === rarity);
-  for (let i = 0; i < cap && !has(); i++) killNearestEnemy(sim);
-  return has();
+// Put `itemId` at a specific rarity in the bag (a test that needs a KNOWN stat bonus). Post LF-S4,
+// inject it directly (mob loot now lands on the ground, not the bag) instead of farming.
+function killUntilBagHasRarity(sim: Sim, itemId: string, rarity: Rarity, _cap: number): boolean {
+  const id = sim.localPlayerId()!;
+  const save = sim.serializePlayer(id)!;
+  save.bag = [...save.bag, { itemId, rarity, plus: 0, qty: 1 }];
+  sim.restorePlayer(id, save);
+  return sim.inventory().stacks.some((s) => s.itemId === itemId && s.rarity === rarity);
 }
 
 describe('consumables', () => {
@@ -1785,9 +1787,17 @@ describe('consumables', () => {
 
   it('using a Health Potion heals HP (clamped to the max) and consumes one from the stack', () => {
     const sim = new Sim(7);
-    expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
-    for (let i = 0; i < 800 && potionQty(sim) < 7; i++) killNearestEnemy(sim);
-    expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
+    // LF-S4: mob loot drops on the ground, so inject the potions + leather directly (the test's
+    // subject is healing/clamping/consumption, not how the items were acquired).
+    killUntilBagHasRarity(sim, 'health_potion', 'normal', 0); // injects 1
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [
+      { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 7 },
+      { itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 },
+    ];
+    sim.restorePlayer(pid, save0);
+    expect(potionQty(sim)).toBeGreaterThanOrEqual(7);
     restoreToFull(sim); // full HP, safe
     // equip the Normal leather: +20 maxHp but HP isn't topped up -> gap EXACTLY 20,
     // which is below the 50 heal, so the heal MUST clamp at the max.
@@ -1809,10 +1819,15 @@ describe('consumables', () => {
 
   it('refuses at full HP — no potion consumed and no cooldown armed', () => {
     const sim = new Sim(7);
-    expect(killUntilBagHas(sim, 'health_potion', 800)).toBe(true);
-    // grind a buffer of potions (to refill after combat) and a leather for the gap
-    for (let i = 0; i < 800 && potionQty(sim) < 7; i++) killNearestEnemy(sim);
-    expect(killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 800)).toBe(true);
+    // LF-S4: inject the potions + leather directly (loot now drops on the ground, not into the bag).
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [
+      { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 7 },
+      { itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 },
+    ];
+    sim.restorePlayer(pid, save0);
+    expect(potionQty(sim)).toBeGreaterThanOrEqual(7);
     restoreToFull(sim); // flee + drink to full; player ends safe and topped up
     expect(player(sim).hp).toBe(player(sim).maxHp);
     const qtyFull = potionQty(sim);
@@ -1836,8 +1851,12 @@ describe('consumables', () => {
 
   it('respects the shared potion cooldown before another can be used', () => {
     const sim = new Sim(7);
-    // two real uses are needed, so make sure at least two potions are in the bag
-    for (let i = 0; i < 800 && potionQty(sim) < 2; i++) killNearestEnemy(sim);
+    // LF-S4: inject the potions + leather directly (loot now drops on the ground); setupHealGap then
+    // flees + equips the injected leather (it uses the inject-based helpers now), opening the HP gap.
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 3 }];
+    sim.restorePlayer(pid, save0);
     expect(potionQty(sim)).toBeGreaterThanOrEqual(2);
     setupHealGap(sim); // flees to safety + equips Normal leather (opens an HP gap)
     expect(player(sim).hp).toBeLessThan(player(sim).maxHp);
@@ -2018,9 +2037,10 @@ describe('vendor (shop)', () => {
 
   it('selling scales the payout with item rarity (non-Normal pays above base)', () => {
     const sim = new Sim(7);
+    // LF-S4: inject a rarer leather directly (loot now drops on the ground, not into the bag).
+    killUntilBagHasRarity(sim, 'wolf_leather', 'sos', 0);
     const findLeather = () =>
       sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather' && s.rarity !== 'normal');
-    for (let i = 0; i < 800 && !findLeather(); i++) killNearestEnemy(sim); // farm a rarer leather
     const leather = findLeather();
     expect(leather).toBeDefined();
     if (!leather) return;
@@ -2100,9 +2120,9 @@ describe('item rarity (lucky drops)', () => {
     const player = () => sim.entities().find((e) => e.kind === 'player')!;
     const rareLeather = () =>
       sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather' && s.rarity !== 'normal');
-    // Farm until a NON-Normal Couro de Lobo drops (deterministic; cap is a safety net).
-    let guard = 0;
-    while (!rareLeather() && guard++ < 600) killNearestEnemy(sim);
+    // LF-S4: inject a Normal + a rarer Couro de Lobo directly (loot now drops on the ground).
+    killUntilBagHasRarity(sim, 'wolf_leather', 'normal', 0);
+    killUntilBagHasRarity(sim, 'wolf_leather', 'sos', 0);
     const stack = rareLeather();
     expect(stack).toBeDefined();
 
@@ -2134,9 +2154,12 @@ describe('alchemy ("+N")', () => {
     sim.sendCommand({ t: 'stop' });
     sim.step();
   };
-  const farm = (sim: Sim, id: string, n: number, cap: number): boolean => {
-    let g = 0;
-    while (count(sim, id) < n && g++ < cap) killNearestEnemy(sim);
+  const farm = (sim: Sim, id: string, n: number, _cap: number): boolean => {
+    // Post LF-S4 (mob loot drops on the ground), inject the materials directly into the bag.
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.bag = [...save.bag, { itemId: id, rarity: 'normal', plus: 0, qty: n }];
+    sim.restorePlayer(pid, save);
     return count(sim, id) >= n;
   };
 
@@ -2720,9 +2743,12 @@ describe('bot (auto-play): self-sufficiency', () => {
 
   it('survival: below the heal threshold it drinks a Health Potion', () => {
     const sim = new Sim(7);
-    // stock a couple of potions from drops, hands-on (bot OFF — nothing is drunk yet)
-    let g = 0;
-    while (bagQty(sim, 'health_potion') < 2 && g++ < 400) killNearestEnemy(sim);
+    // LF-S4: mob loot drops on the ground now, so inject the potions directly (the test's subject is
+    // the bot's self-heal decision given potions, not how it acquired them — that's the bot rework).
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 2 }];
+    sim.restorePlayer(pid, save0);
     expect(bagQty(sim, 'health_potion')).toBeGreaterThanOrEqual(2);
     // take bites until below the heal threshold, without dying
     hurtBelow(sim, BOT_HEAL_FRAC);
@@ -2740,8 +2766,12 @@ describe('bot (auto-play): self-sufficiency', () => {
 
   it('inventory: it auto-equips a looted upgrade (empty armor slot -> Couro de Lobo, raising max HP)', () => {
     const sim = new Sim(7);
-    let g = 0;
-    while (bagQty(sim, 'wolf_leather') < 1 && g++ < 400) killNearestEnemy(sim);
+    // LF-S4: inject the armor directly (loot now drops on the ground); the bot then auto-equips it from
+    // the bag — the equip-the-upgrade decision is the subject (bag acquisition is the bot rework).
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    sim.restorePlayer(pid, save0);
     expect(bagQty(sim, 'wolf_leather')).toBeGreaterThanOrEqual(1);
     expect(sim.inventory().equipment.find((e) => e.slot === 'chest')!.itemId).toBeNull();
     const maxHp0 = player(sim).maxHp;
@@ -2755,9 +2785,13 @@ describe('bot (auto-play): self-sufficiency', () => {
 
   it('evolution: with spare materials in a safe lull, it enhances its equipped gear (keeping a reserve)', () => {
     const sim = new Sim(7);
-    // farm a piece of armor + a purse, equip the armor (bot OFF)
-    let g = 0;
-    while ((bagQty(sim, 'wolf_leather') < 1 || player(sim).gold < 250) && g++ < 1200) killNearestEnemy(sim);
+    // LF-S4: inject the armor + gold directly (loot now drops on the ground). The bot's enhance
+    // decision with a surplus is the subject (acquisition is the upcoming bot rework).
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    save0.gold = 250;
+    sim.restorePlayer(pid, save0);
     const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
     expect(lea).toBeDefined();
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
@@ -2784,8 +2818,12 @@ describe('bot (auto-play): self-sufficiency', () => {
 
   it('evolution: it never enhances down past the material reserve', () => {
     const sim = new Sim(7);
-    let g = 0;
-    while ((bagQty(sim, 'wolf_leather') < 1 || player(sim).gold < 160) && g++ < 1200) killNearestEnemy(sim);
+    // LF-S4: inject the armor + gold directly (loot now drops on the ground).
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    save0.gold = 160;
+    sim.restorePlayer(pid, save0);
     const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
     sim.step();
@@ -2942,8 +2980,11 @@ describe('death penalty (durability / repair)', () => {
 
   // Equip a freshly-looted Couro de Lobo (armor) at full durability.
   const equipFreshArmor = (sim: Sim): void => {
-    let g = 0;
-    while (bagQty(sim, 'wolf_leather') < 1 && g++ < 400) killNearestEnemy(sim);
+    // Post LF-S4 (mob loot drops on the ground), inject the armor directly into the bag, then equip it.
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.bag = [...save.bag, { itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    sim.restorePlayer(pid, save);
     const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
     sim.step();
@@ -2970,10 +3011,13 @@ describe('death penalty (durability / repair)', () => {
 
   it('worn gear gives a smaller bonus, and repairing at the vendor (for gold) restores it', () => {
     const sim = new Sim(7);
-    // Do ALL the farming up front (so XP/levels don't change base maxHp between the
-    // measurements), getting the armor + enough gold to repair later.
-    let g = 0;
-    while ((bagQty(sim, 'wolf_leather') < 1 || player(sim).gold < 120) && g++ < 800) killNearestEnemy(sim);
+    // LF-S4: inject the armor + repair gold directly (loot now drops on the ground), so XP/levels don't
+    // shift base maxHp between measurements. The subject is wear -> smaller bonus -> repair restores it.
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    save0.gold = 120;
+    sim.restorePlayer(pid, save0);
     const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
     sim.step();
