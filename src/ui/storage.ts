@@ -7,6 +7,7 @@
 import type { IWorld, InventoryView, StorageView, ItemStackView } from '../world_api';
 import { isTyping } from './typing';
 import { registerOverlay } from './overlays';
+import { decoratePanel } from './theme';
 
 export class StoragePanel {
   private root: HTMLDivElement;
@@ -43,6 +44,7 @@ export class StoragePanel {
       </div>
     `;
     document.body.appendChild(this.root);
+    decoratePanel(this.root); // medieval stone frame (dual-grid bank)
     this.hint = this.root.querySelector('.storage-hint') as HTMLDivElement;
     // Dedicated hook (not the HUD's global `.bag-title`) so the storage title's styling can't
     // hinge on CSS source order; `.storage-col-title` provides the look for both columns.
@@ -83,8 +85,8 @@ export class StoragePanel {
     this.hint.textContent = store.inRange
       ? 'Clique um item para guardá-lo / retirá-lo (stack inteiro).'
       : 'Aproxime-se do armazém para depositar e sacar.';
-    this.bagTitle.textContent = `Bolsa (${inv.stacks.length}) — clique p/ guardar`;
-    this.storeTitle.textContent = `${store.name || 'Armazém'} (${store.stacks.length}/${store.capacity}) — clique p/ retirar`;
+    this.bagTitle.textContent = `Bolsa (${inv.stacks.length}) - clique p/ guardar`;
+    this.storeTitle.textContent = `${store.name || 'Armazém'} (${store.stacks.length}/${store.capacity}) - clique p/ retirar`;
 
     // capacidade lida da view A CADA frame (online o 1º frame vem vazio antes do snapshot).
     this.fillGrid(this.bagGrid, this.bagSlots, inv.stacks, inv.capacity, store.inRange, (i) => this.onBagClick(i));

@@ -27,8 +27,15 @@ import { MusicPlayer } from './ui/audio';
 import { SettingsMenu } from './ui/settings_menu';
 import { EscMenu } from './ui/esc_menu';
 import { NameSelect, normalizeName, isValidName } from './ui/name_select';
+import { installTheme } from './ui/theme';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
+
+// Skin the whole UI with the "stone" medieval theme BEFORE any screen/HUD is built, so the very
+// first screen the player sees is already themed (no flash). Global palette = basic; specific
+// panels (e.g. the shop) opt into other palettes later. `?ui=legacy` is an instant rollback.
+// Host-side, pure presentation — never touches the sim.
+installTheme('basic');
 
 // ONLINE-ONLY: multiplayer is the DEFAULT and the only path for players — no `?mp` needed. `?sp`
 // is a hidden dev-only escape hatch that runs the offline Sim locally (no server) for testing;

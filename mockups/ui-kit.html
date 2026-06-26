@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Openrealm — UI Kit Oficial (mapa de componentes)</title>
+
+<!--
+  ============================================================================
+  OPENREALM · UI KIT OFICIAL — mapa de componentes
+  ----------------------------------------------------------------------------
+  • UM seletor de estilo (basic / gold / premium) no topo controla a PÁGINA TODA:
+    ele só troca `data-style` no contêiner raiz (#kit) e todos os componentes
+    herdam os tokens de cor/gradiente. (Para tematizar 1 painel isolado, basta
+    pôr data-style nele — o seletor `[data-style]` funciona em qualquer elemento.)
+  • Moldura, arabescos (quinas) e textura de pedra/rachadura: 100% SVG + CSS,
+    sem nenhuma mídia/imagem.
+  • Ao final: a "nova versão" de TODOS os tipos de componente usados hoje no jogo
+    (frames de unidade, barras, slots, habilidades, contadores, botões, toggles,
+    inputs, menus, ranks de skill, tooltip, raridades, texto de combate flutuante,
+    banner de anúncio, toast, nameplate, cards de classe, minimapa, hint, autoplay).
+  ============================================================================
+-->
+
+<style>
+/* ===========================================================================
+   0) RESET + TOKENS GLOBAIS
+   =========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body{
+  margin:0; min-height:100dvh;
+  font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+  color:#e9e2cf; background:#0c0b0e; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+@property --cd { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+
+:root{
+  /* texturas + máscaras procedurais (preenchidas via JS no fim) */
+  --tex-stone:none; --tex-cracks:none; --tex-grain:none;
+  --m-corner-a:none; --m-corner-b:none; --m-corner-c:none; --m-edge:none; --m-edge-v:none;
+  --font-display:"Trajan Pro","Cinzel","Iowan Old Style","Palatino Linotype",Georgia,serif;
+
+  /* TEMA PADRÃO (basic) — qualquer elemento fora de #kit usa isto */
+  --g1:#686c73; --g2:#a7abb0; --g3:#393c41;
+  --edge-grad:linear-gradient(135deg,#393c41 0%,#a7abb0 28%,#686c73 50%,#a7abb0 72%,#393c41 100%);
+  --bg-1:#1a1b1e; --bg-2:#111214; --bg-3:#0a0b0c;
+  --line-inner:rgba(0,0,0,.55); --glow:rgba(150,162,178,.28);
+  --ink:#e7e8ea; --ink-soft:#a2a6ad; --accent:#c3c9d2;
+  --m-corner:var(--m-corner-a); --btn-edge:var(--edge-grad);
+}
+
+/* ===========================================================================
+   1) TEMAS — trocam SOMENTE cor/gradiente. Aplicáveis a QUALQUER elemento
+      (o seletor global põe isto em #kit; pode-se pôr em 1 painel isolado também).
+   =========================================================================== */
+[data-style="basic"]{
+  --g1:#686c73; --g2:#a7abb0; --g3:#393c41;
+  --edge-grad:linear-gradient(135deg,#393c41 0%,#a7abb0 28%,#686c73 50%,#a7abb0 72%,#393c41 100%);
+  --bg-1:#1a1b1e; --bg-2:#111214; --bg-3:#0a0b0c;
+  --line-inner:rgba(0,0,0,.55); --glow:rgba(150,162,178,.28);
+  --ink:#e7e8ea; --ink-soft:#a2a6ad; --accent:#c3c9d2;
+  --m-corner:var(--m-corner-a); --btn-edge:var(--edge-grad);
+}
+[data-style="gold"]{
+  --g1:#7a571d; --g2:#f1d893; --g3:#a87f33;
+  --edge-grad:linear-gradient(135deg,#5e421a 0%,#caa14e 20%,#f6e6ad 46%,#b98a3a 70%,#5e421a 100%);
+  --bg-1:#1c1c1c; --bg-2:#121212; --bg-3:#0a0a0a;                 /* fundo escala de cinza */
+  --line-inner:rgba(20,12,4,.6); --glow:rgba(214,170,80,.34);
+  --ink:#e7e8ea; --ink-soft:#a2a6ad; --accent:#e6c477;            /* texto neutro; realce dourado */
+  --m-corner:var(--m-corner-a);
+  --btn-edge:linear-gradient(135deg,#393c41 0%,#a7abb0 28%,#686c73 50%,#a7abb0 72%,#393c41 100%); /* botão prata */
+}
+[data-style="premium"]{
+  --g1:#8a651f; --g2:#ffeaa6; --g3:#c79a44;
+  --edge-grad:linear-gradient(135deg,#6e4f17 0%,#d8ad53 18%,#ffeaa6 46%,#c99a44 72%,#6e4f17 100%);
+  --bg-1:#241308; --bg-2:#170b03; --bg-3:#0d0602;                 /* dourado escuro, p/ laranja */
+  --line-inner:rgba(40,26,2,.65); --glow:rgba(255,206,98,.42);
+  --ink:#f3e7c6; --ink-soft:#c2ad7f; --accent:#ffd877;            /* texto levemente dourado */
+  --m-corner:var(--m-corner-c); --btn-edge:var(--edge-grad);      /* botão dourado (só aqui) */
+}
+
+/* ===========================================================================
+   2) AMBIENTAÇÃO DA PÁGINA
+   =========================================================================== */
+.scene{ position:relative; min-height:100dvh; padding:52px 24px 110px; isolation:isolate;
+  background:radial-gradient(1200px 700px at 50% -10%,#20202c 0%,#121119 45%,#0a090d 100%),#0a090d; overflow:hidden; }
+.scene::before{ content:""; position:absolute; inset:-2px; z-index:-2; background:var(--tex-stone) center; background-size:210px; opacity:.03; mix-blend-mode:soft-light; pointer-events:none; }
+.scene::after{ content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; background:radial-gradient(120% 80% at 50% 25%,transparent 55%,rgba(0,0,0,.6) 100%); }
+.motes{ position:absolute; inset:0; z-index:-1; pointer-events:none; }
+.mote{ position:absolute; width:4px; height:4px; border-radius:50%; background:radial-gradient(circle,rgba(255,228,160,.9),rgba(255,200,90,0) 70%); filter:blur(.4px); animation:float 9s ease-in-out infinite; }
+.mote:nth-child(1){left:12%;top:26%} .mote:nth-child(2){left:80%;top:20%;animation-delay:1.4s;transform:scale(1.6)} .mote:nth-child(3){left:33%;top:72%;animation-delay:3s}
+.mote:nth-child(4){left:64%;top:60%;animation-delay:2.2s;transform:scale(.7)} .mote:nth-child(5){left:90%;top:78%;animation-delay:4.1s} .mote:nth-child(6){left:20%;top:86%;animation-delay:5s;transform:scale(1.3)}
+@keyframes float{ 0%,100%{transform:translateY(0) scale(1);opacity:.22} 50%{transform:translateY(-26px) scale(1.15);opacity:.8} }
+
+/* títulos / layout */
+.wrap{ max-width:1180px; margin:0 auto; position:relative; z-index:1; }
+.page-head{ text-align:center; margin-bottom:30px; }
+.page-head h1{ font-family:var(--font-display); font-weight:700; letter-spacing:.05em; text-transform:uppercase; line-height:1.0; font-size:clamp(22px,4.2vw,38px); margin:0 0 8px; color:#f3e4bd; text-shadow:0 1px 0 #000,0 0 26px rgba(214,170,80,.35); }
+.page-head p{ margin:0 auto; max-width:62ch; color:#a9a293; font-size:14.5px; }
+.eyebrow{ display:inline-block; margin-bottom:14px; padding:5px 14px; font:600 11px/1 var(--font-display); letter-spacing:.32em; text-transform:uppercase; color:#d7b873; border:1px solid rgba(215,184,115,.35); border-radius:999px; background:rgba(215,184,115,.06); }
+.section-label{ display:flex; align-items:center; gap:14px; margin:50px 0 20px; font:600 12px/1 var(--font-display); letter-spacing:.28em; text-transform:uppercase; color:#9a917d; }
+.section-label::before,.section-label::after{ content:""; height:1px; flex:1; background:linear-gradient(90deg,transparent,rgba(180,150,90,.4),transparent); }
+
+/* grade de espécimes (cada componente legendado) */
+.specs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:22px 18px; align-items:start; margin-top:4px; }
+.spec{ display:flex; flex-direction:column; gap:9px; min-width:0; }
+.spec.w2{ grid-column:span 2; } .spec.w3{ grid-column:span 3; } .spec.w4{ grid-column:span 4; }
+.spec__cap{ font:600 10px/1.3 var(--font-display); letter-spacing:.12em; text-transform:uppercase; color:var(--ink-soft); opacity:.72; }
+.spec__demo{ display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+.stack{ display:flex; flex-direction:column; gap:10px; }
+
+/* ===========================================================================
+   3) PAINEL BASE (.rpg-panel) — consome os tokens do tema herdado
+   =========================================================================== */
+.rpg-panel{ position:relative; padding:4px; border-radius:14px; isolation:isolate; color:var(--ink);
+  border:2px solid transparent;
+  background:linear-gradient(#000,#000) padding-box, var(--edge-grad) border-box;
+  box-shadow:0 0 0 1px rgba(0,0,0,.7), 0 14px 40px -12px rgba(0,0,0,.8), 0 0 34px -10px var(--glow); }
+.rpg-panel__bg{ position:absolute; inset:0; z-index:0; border-radius:inherit; overflow:hidden;
+  background-image:var(--tex-grain), radial-gradient(ellipse at center,var(--bg-1) 0%,var(--bg-2) 58%,var(--bg-3) 100%);
+  background-size:112px,cover; background-position:center,center; background-blend-mode:overlay,normal; }
+.rpg-panel__bg::before{ content:""; position:absolute; inset:0; background:var(--tex-stone) center; background-size:195px; mix-blend-mode:soft-light; opacity:.3; }
+.rpg-panel__bg::after{ content:""; position:absolute; inset:0; background:var(--tex-cracks) center; background-size:255px; mix-blend-mode:multiply; opacity:.24; }
+.rpg-panel__vignette{ position:absolute; inset:0; z-index:1; border-radius:inherit; pointer-events:none;
+  box-shadow:inset 0 0 0 1px var(--line-inner), inset 0 2px 10px rgba(0,0,0,.55), inset 0 -30px 60px -30px rgba(0,0,0,.7); }
+
+.rpg-frame{ position:absolute; inset:0; z-index:3; pointer-events:none; }
+.rpg-corner{ position:absolute; width:62px; height:62px; background:var(--edge-grad);
+  -webkit-mask:var(--m-corner) center/contain no-repeat; mask:var(--m-corner) center/contain no-repeat;
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.65)); }
+.rpg-corner.tl{ top:-6px; left:-6px; } .rpg-corner.tr{ top:-6px; right:-6px; transform:scaleX(-1); }
+.rpg-corner.bl{ bottom:-6px; left:-6px; transform:scaleY(-1); } .rpg-corner.br{ bottom:-6px; right:-6px; transform:scale(-1,-1); }
+.rpg-edge{ position:absolute; background:var(--edge-grad); opacity:.92; filter:drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+.rpg-edge.top,.rpg-edge.bottom{ left:48px; right:48px; height:8px; -webkit-mask:var(--m-edge) repeat-x; mask:var(--m-edge) repeat-x; -webkit-mask-size:auto 100%; mask-size:auto 100%; }
+.rpg-edge.top{ top:-7px; } .rpg-edge.bottom{ bottom:-7px; transform:scaleY(-1); }
+.rpg-edge.left,.rpg-edge.right{ top:48px; bottom:48px; width:8px; -webkit-mask:var(--m-edge) repeat-y; mask:var(--m-edge) repeat-y; -webkit-mask-size:100% auto; mask-size:100% auto; }
+.rpg-edge.left{ left:-7px; -webkit-mask-image:var(--m-edge-v); mask-image:var(--m-edge-v); }
+.rpg-edge.right{ right:-7px; -webkit-mask-image:var(--m-edge-v); mask-image:var(--m-edge-v); transform:scaleX(-1); }
+[data-style="premium"] .rpg-frame::after{ content:""; position:absolute; inset:-6px; border-radius:inherit; pointer-events:none; background:radial-gradient(60% 50% at 50% 0%,rgba(255,226,150,.18),transparent 70%); animation:pulse 4.5s ease-in-out infinite; }
+@keyframes pulse{ 0%,100%{opacity:.35} 50%{opacity:.9} }
+
+.rpg-panel__content{ position:relative; z-index:2; padding:25px 25px 28px; }
+.panel-title{ display:flex; align-items:center; gap:10px; margin:0 0 4px; padding-bottom:8px;
+  font:700 16px/0.82 var(--font-display); letter-spacing:.03em; text-transform:uppercase; color:#f4e8c8;
+  text-shadow:0 1px 0 #000,0 0 14px var(--glow); border-bottom:1px solid color-mix(in srgb,var(--g2) 22%,transparent); }
+.panel-title .sigil{ width:18px; height:18px; color:var(--g2); opacity:.95; flex:none; }
+.panel-sub{ margin:10px 0 16px; color:var(--ink-soft); font-size:13.5px; }
+
+/* ===========================================================================
+   4) BARRAS (vitais & uso) — HP / MP / XP / alvo / boss / conjuração
+   =========================================================================== */
+.stat{ margin:11px 0; }
+.stat__row{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--ink-soft); margin-bottom:5px; letter-spacing:.03em; }
+.bar{ position:relative; height:12px; border-radius:6px; background:rgba(0,0,0,.45); overflow:hidden;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.04); }
+.bar > i{ display:block; height:100%; border-radius:6px; background:var(--accent); box-shadow:0 0 10px -1px var(--glow); transition:width .25s ease; }
+.bar.hp > i{ --accent:#c2502f; } .bar.mp > i{ --accent:#3f6bd6; } .bar.xp{ height:8px; } .bar.xp > i{ --accent:#caa14e; }
+.bar.enemy{ height:9px; } .bar.enemy > i{ --accent:#c2502f; }
+.bar.boss{ height:15px; } .bar.boss > i{ --accent:#b23b2a; }
+.bar.boss::after{ content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),rgba(0,0,0,.5) calc(10% - 1px) 10%); }
+.bar__txt{ position:absolute; inset:0; display:grid; place-items:center; font:700 10px/1 system-ui; color:#fff; text-shadow:0 1px 2px #000; letter-spacing:.02em; }
+
+.castbar{ position:relative; height:18px; border-radius:8px; background:rgba(0,0,0,.5); overflow:hidden; box-shadow:inset 0 0 0 1px rgba(255,255,255,.05), inset 0 1px 3px #000; }
+.castbar > i{ display:block; height:100%; width:64%; background:repeating-linear-gradient(45deg,#e6c477 0 9px,#cf9f3e 9px 18px); animation:cast 0.7s linear infinite; box-shadow:0 0 12px -2px var(--glow); }
+.castbar__txt{ position:absolute; inset:0; display:flex; align-items:center; justify-content:space-between; padding:0 9px; font:700 11px var(--font-display); letter-spacing:.05em; color:#1a140a; }
+@keyframes cast{ from{background-position:0 0} to{background-position:25.4px 0} }
+
+/* ===========================================================================
+   5) SLOTS — item (raridade) / equipamento / habilidade (cooldown)
+   =========================================================================== */
+.islot{ position:relative; width:54px; height:54px; flex:none; border-radius:7px; cursor:pointer;
+  background:linear-gradient(160deg,#1b222e,#0d121a); border:1.5px solid var(--rar,#8a93a3);
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.6); transition:.12s; }
+.islot:hover{ filter:brightness(1.12); }
+.islot__icon{ position:absolute; inset:9px; display:grid; place-items:center; color:var(--rar,#cdd2da); }
+.islot__icon svg{ width:100%; height:100%; }
+.islot__qty{ position:absolute; right:3px; bottom:1px; font:700 10px/1 system-ui; color:#fff; text-shadow:0 1px 2px #000; }
+.islot__enh{ position:absolute; left:3px; top:2px; font:700 10px/1 var(--font-display); color:#ffd877; text-shadow:0 1px 2px #000; }
+.islot[data-rar="raro"]{ --rar:#4aa3ff; } .islot[data-rar="epico"]{ --rar:#b06cff; }
+.islot[data-rar="lendario"]{ --rar:#f2c44a; box-shadow:inset 0 2px 6px rgba(0,0,0,.6), 0 0 12px -1px rgba(242,196,74,.7); }
+.islot.locked{ opacity:.5; } .islot.locked:hover{ border-color:#ff6b6b; }
+
+.eslot{ position:relative; width:54px; height:54px; flex:none; border-radius:7px;
+  background:linear-gradient(160deg,#161c25,#0d121a); border:1.5px dashed #3a4757; display:grid; place-items:center; }
+.eslot__label{ position:absolute; top:3px; left:0; right:0; text-align:center; font:700 8px/1 var(--font-display); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); opacity:.7; }
+.eslot__icon{ color:var(--ink-soft); opacity:.6; width:24px; height:24px; }
+.eslot.filled{ border-style:solid; border-color:var(--rar,#8a93a3); }
+.eslot.filled .eslot__icon{ color:var(--rar,#cdd2da); opacity:1; }
+.eslot[data-rar="epico"]{ --rar:#b06cff; } .eslot[data-rar="lendario"]{ --rar:#f2c44a; }
+.eslot__enh{ position:absolute; right:3px; top:2px; font:700 10px/1 var(--font-display); color:#ffd877; text-shadow:0 1px 2px #000; }
+
+.ability{ position:relative; width:52px; height:52px; flex:none; border-radius:7px; overflow:hidden;
+  background:radial-gradient(circle at 50% 36%,color-mix(in srgb,var(--bg-1) 92%,#000),var(--bg-3));
+  box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--g2) 42%,transparent), inset 0 2px 6px rgba(0,0,0,.55), 0 0 16px -8px var(--glow); }
+.ability__key{ position:absolute; top:2px; left:5px; z-index:2; font:700 11px/1 var(--font-display); color:var(--g2); text-shadow:0 1px 2px #000; }
+.ability__icon{ position:absolute; inset:0; display:grid; place-items:center; }
+.ability__icon svg{ width:24px; height:24px; color:color-mix(in srgb,var(--g2) 72%,#fff); }
+.ability__mp{ position:absolute; bottom:1px; right:4px; z-index:2; font:700 10px/1 system-ui; color:#86b4ff; text-shadow:0 1px 2px #000; }
+.ability__cd{ position:absolute; inset:0; z-index:1; pointer-events:none; border-radius:inherit;
+  background:conic-gradient(rgba(6,8,12,.74) var(--cd,0deg),transparent 0deg); }
+.ability.demo-cd{ animation:cdsweep 4s linear infinite; }
+@keyframes cdsweep{ from{--cd:360deg} to{--cd:0deg} }
+
+/* ===========================================================================
+   6) FRAMES DE UNIDADE — jogador / alvo / membro de grupo
+   =========================================================================== */
+.uframe{ display:flex; gap:11px; align-items:center; padding:10px 12px; border-radius:11px; min-width:240px;
+  background:linear-gradient(160deg,color-mix(in srgb,var(--bg-1) 92%,#000),var(--bg-3));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04), inset 0 0 0 1px color-mix(in srgb,var(--g3) 55%,transparent), 0 8px 22px -12px #000; }
+.uframe__portrait{ position:relative; width:48px; height:48px; flex:none; border-radius:8px; display:grid; place-items:center;
+  background:radial-gradient(circle at 50% 32%,#2b3446,#0e1219); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g2) 35%,transparent); }
+.uframe__portrait svg{ width:26px; height:26px; color:color-mix(in srgb,var(--g2) 85%,#fff); opacity:.85; }
+.uframe__portrait .lvl{ position:absolute; right:-5px; bottom:-5px; min-width:18px; height:18px; padding:0 4px; border-radius:9px; display:grid; place-items:center; font:700 10px/1 var(--font-display); color:#1a140a; background:linear-gradient(180deg,var(--g2),var(--g1)); box-shadow:0 1px 3px #000; }
+.uframe__body{ flex:1; min-width:0; }
+.uframe__name{ font:600 13px/1 var(--font-display); letter-spacing:.02em; color:var(--ink); margin-bottom:6px; }
+.uframe__name.enemy{ color:#e7a6a6; } .uframe .stat{ margin:5px 0 0; } .uframe .bar{ height:9px; }
+
+/* ===========================================================================
+   7) BOTÕES / TOGGLES / CONTADORES / INPUTS
+   =========================================================================== */
+.rpg-btn{ appearance:none; cursor:pointer; font:600 12.5px/1 var(--font-display); letter-spacing:.04em; text-transform:uppercase;
+  color:#f3e8cc; padding:11px 18px; border-radius:5px; border:1.5px solid transparent;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 80%,#000),var(--bg-3)) padding-box, var(--btn-edge) border-box;
+  box-shadow:0 2px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 20px -8px var(--glow);
+  transition:transform .12s ease, box-shadow .12s ease, filter .12s ease; }
+.rpg-btn:hover{ filter:brightness(1.12); }
+.rpg-btn:active{ transform:translateY(1px); }
+.rpg-btn:focus-visible{ outline:2px solid var(--g2); outline-offset:3px; }
+.rpg-btn.ghost{ color:var(--ink-soft); background:rgba(255,255,255,.015) padding-box, color-mix(in srgb,var(--g3) 60%,transparent) border-box; box-shadow:none; }
+.rpg-btn.ghost:hover{ color:var(--ink); }
+.rpg-btn[data-risk="danger"]{ color:#ffd6d0; background:linear-gradient(180deg,#3a1c1c,#1d0d0d) padding-box, linear-gradient(135deg,#7a2a2a,#d14a4a,#7a2a2a) border-box; }
+.rpg-btn[data-risk="protected"]{ color:#cfe8ff; background:linear-gradient(180deg,#12202e,#0b141d) padding-box, linear-gradient(135deg,#2a5a7a,#4a9fd1,#2a5a7a) border-box; }
+.rpg-btn[disabled]{ opacity:.4; cursor:not-allowed; filter:grayscale(.4); }
+.btn-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+.toggle{ display:inline-flex; align-items:center; gap:9px; cursor:pointer; user-select:none; font:600 12px/1 var(--font-display); letter-spacing:.03em; color:var(--ink-soft); }
+.toggle__sw{ position:relative; width:42px; height:22px; border-radius:999px; flex:none; background:#0c0e12; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g3) 60%,transparent), inset 0 1px 3px #000; transition:.18s; }
+.toggle__sw::after{ content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:linear-gradient(180deg,#cfd4db,#7d828b); box-shadow:0 1px 2px #000; transition:.18s; }
+.toggle[aria-pressed="true"]{ color:#9fd06a; }
+.toggle[aria-pressed="true"] .toggle__sw{ background:linear-gradient(180deg,#2e5a1e,#1c3712); box-shadow:inset 0 0 0 1px #4f7a2e; }
+.toggle[aria-pressed="true"] .toggle__sw::after{ left:22px; background:linear-gradient(180deg,#bfe89a,#7fb34a); }
+
+.counter{ display:inline-flex; align-items:center; gap:8px; padding:7px 13px; border-radius:999px; font:600 13px/1 var(--font-display); letter-spacing:.02em;
+  background:linear-gradient(180deg,rgba(0,0,0,.35),rgba(0,0,0,.55)); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g3) 55%,transparent); }
+.counter .coin{ width:16px; height:16px; border-radius:50%; flex:none; }
+.counter.gold{ color:#f0d488; } .counter.gold .coin{ background:radial-gradient(circle at 35% 30%,#ffe6a0,#c8932f 70%,#6e4f17); box-shadow:0 0 8px -2px #e6b94a; }
+.counter.sp{ color:#c9b6ff; } .counter.sp .coin{ background:radial-gradient(circle at 35% 30%,#e6d4ff,#8a5cff 70%,#3a1f7a); box-shadow:0 0 8px -2px #a07dff; }
+
+.rpg-input{ width:100%; font:400 14px var(--font-display); color:var(--ink); border:1.5px solid transparent; border-radius:6px; padding:10px 12px;
+  background:linear-gradient(180deg,#0d0f13,#0a0c0f) padding-box, var(--btn-edge) border-box; }
+.rpg-input::placeholder{ color:color-mix(in srgb,var(--ink-soft) 65%,transparent); }
+.rpg-input:focus{ outline:none; box-shadow:0 0 0 2px color-mix(in srgb,var(--g2) 38%,transparent), 0 0 18px -6px var(--glow); }
+.rpg-range{ -webkit-appearance:none; appearance:none; width:100%; height:8px; border-radius:999px; background:linear-gradient(90deg,var(--accent) 0 60%,#0d0f13 60%); box-shadow:inset 0 1px 3px #000, inset 0 0 0 1px color-mix(in srgb,var(--g3) 50%,transparent); }
+.rpg-range::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:radial-gradient(circle at 35% 30%,color-mix(in srgb,var(--g2) 92%,#fff),var(--g1)); box-shadow:0 1px 3px #000,0 0 10px -2px var(--glow); cursor:pointer; }
+.rpg-range::-moz-range-thumb{ width:18px; height:18px; border:0; border-radius:50%; background:radial-gradient(circle at 35% 30%,var(--g2),var(--g1)); cursor:pointer; }
+
+/* ===========================================================================
+   8) LISTAS / MENUS / TOOLTIP / RARIDADE
+   =========================================================================== */
+.menu-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; border-radius:8px; cursor:pointer; color:var(--ink); font:500 14px var(--font-display); transition:.12s; }
+.menu-row:hover{ background:color-mix(in srgb,var(--g2) 10%,transparent); }
+.menu-row .key{ font:600 11px/1 ui-monospace,"SF Mono",monospace; color:var(--ink-soft); padding:4px 7px; border-radius:5px; background:rgba(0,0,0,.4); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g3) 50%,transparent); }
+.menu-row.danger{ color:#e88c84; } .menu-row.danger:hover{ background:rgba(180,50,50,.15); }
+
+.skill-row{ display:flex; gap:11px; align-items:center; padding:10px 6px; line-height:1.2; border-bottom:1px solid rgba(255,255,255,.05); }
+.skill-row:last-child{ border-bottom:0; }
+.skill-row .rune{ width:30px; height:30px; flex:none; border-radius:7px; display:grid; place-items:center; background:linear-gradient(160deg,color-mix(in srgb,var(--g2) 30%,#000),#000); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g2) 40%,transparent), 0 0 14px -4px var(--glow); }
+.skill-row .rune svg{ width:16px; height:16px; color:var(--g2); }
+.skill-row__info{ flex:1; min-width:0; }
+.skill-row b{ display:block; font:600 13.5px/1.0 var(--font-display); letter-spacing:.03em; color:var(--ink); }
+.skill-row .rank{ font-size:11.5px; color:var(--ink-soft); }
+.rankbtn{ appearance:none; cursor:pointer; white-space:nowrap; font:600 11px/1 var(--font-display); letter-spacing:.04em; color:var(--ink); padding:7px 11px; border-radius:5px; border:1.5px solid transparent; background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 80%,#000),var(--bg-3)) padding-box, var(--btn-edge) border-box; }
+.rankbtn[disabled]{ opacity:.4; cursor:not-allowed; }
+
+.tooltip{ width:236px; border-radius:9px; padding:11px 13px; font-size:12.5px; color:var(--ink);
+  background:linear-gradient(160deg,#15110b,#0b0907); box-shadow:0 12px 32px -8px #000, inset 0 0 0 1px color-mix(in srgb,var(--g2) 30%,transparent), 0 0 22px -10px var(--glow); }
+.tooltip__name{ font:700 13px var(--font-display); letter-spacing:.02em; color:var(--rar,#f2c44a); }
+.tooltip__rar{ font-size:11px; color:var(--ink-soft); margin:1px 0 9px; }
+.tooltip__stat{ display:flex; justify-content:space-between; gap:10px; margin:3px 0; }
+.tooltip__stat b{ color:#bfe89a; font-weight:600; }
+.tooltip__req{ margin-top:9px; padding-top:8px; border-top:1px solid rgba(255,255,255,.06); font-size:11px; color:#e0843e; }
+.tooltip[data-rar="lendario"]{ --rar:#f2c44a; } .tooltip[data-rar="epico"]{ --rar:#b06cff; }
+
+.rar-legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink-soft); }
+.rar-legend span{ display:inline-flex; align-items:center; gap:7px; }
+.rar-legend i{ width:13px; height:13px; border-radius:3px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.5); }
+
+/* ===========================================================================
+   9) FEEDBACK — texto de combate flutuante / anúncio / toast
+   =========================================================================== */
+.fct{ font:800 22px/1 var(--font-display); letter-spacing:.02em; text-shadow:0 2px 4px #000, 0 0 14px currentColor; animation:fctfloat 2.6s ease-in-out infinite; }
+.fct.dmg{ color:#fff5cc; } .fct.crit{ color:#ffd86b; font-size:30px; } .fct.heal{ color:#6bff8a; } .fct.hurt{ color:#ff5555; } .fct.lvl{ color:#ffd86b; font-size:24px; }
+@keyframes fctfloat{ 0%,100%{transform:translateY(4px);opacity:.85} 50%{transform:translateY(-6px);opacity:1} }
+
+.announce{ text-align:center; font:800 24px/1.12 var(--font-display); letter-spacing:.04em; color:#e7b3ff; padding:14px 26px; border-radius:11px;
+  background:linear-gradient(180deg,rgba(30,16,40,.86),rgba(12,8,18,.92)); box-shadow:0 12px 44px -10px #000, inset 0 0 0 1px rgba(160,110,200,.4), 0 0 44px -14px rgba(170,90,220,.6); text-shadow:0 2px 8px rgba(120,40,160,.8); }
+
+.toast{ display:inline-flex; align-items:center; gap:9px; padding:10px 16px; border-radius:8px; color:var(--ink); font-size:13px;
+  background:linear-gradient(180deg,rgba(18,16,12,.92),rgba(10,9,7,.95)); box-shadow:0 8px 24px -8px #000, inset 0 0 0 1px color-mix(in srgb,var(--g2) 30%,transparent); }
+.toast .dot{ width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); flex:none; }
+
+/* ===========================================================================
+   10) MUNDO — nameplate / card de classe / minimapa / hint / autoplay
+   =========================================================================== */
+.nameplate{ display:inline-flex; flex-direction:column; align-items:center; gap:4px; }
+.nameplate__name{ font:600 12px/1 var(--font-display); padding:3px 10px; border-radius:6px; color:var(--np,#ffe9a8); background:rgba(8,8,12,.72); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g3) 60%,transparent); }
+.nameplate__hp{ width:66px; height:5px; border-radius:3px; background:rgba(0,0,0,.6); overflow:hidden; box-shadow:inset 0 0 0 1px rgba(0,0,0,.5); }
+.nameplate__hp > i{ display:block; height:100%; background:#6fae4a; }
+.nameplate.enemy .nameplate__name{ --np:#ffb3a8; } .nameplate.enemy .nameplate__hp > i{ background:#d14a4a; }
+
+.class-card{ position:relative; cursor:pointer; text-align:left; width:100%; padding:14px; border-radius:10px; border:1.5px solid transparent;
+  background:linear-gradient(160deg,color-mix(in srgb,var(--bg-1) 90%,#000),var(--bg-3)) padding-box, color-mix(in srgb,var(--g3) 55%,transparent) border-box; transition:.14s; }
+.class-card:hover,.class-card.sel{ background:linear-gradient(160deg,color-mix(in srgb,var(--bg-1) 90%,#000),var(--bg-3)) padding-box, var(--edge-grad) border-box; box-shadow:0 0 22px -10px var(--glow); }
+.class-card .ic{ width:26px; height:26px; color:var(--g2); margin-bottom:9px; }
+.class-card h5{ margin:0 0 3px; font:700 14px var(--font-display); letter-spacing:.03em; color:var(--ink); }
+.class-card p{ margin:0; font-size:12px; color:var(--ink-soft); line-height:1.4; }
+
+.minimap{ position:relative; width:200px; height:200px; border-radius:10px; overflow:hidden; background:#0d1622; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g3) 60%,transparent), inset 0 0 44px rgba(0,0,0,.7); }
+.minimap .zone{ position:absolute; inset:0; margin:auto; border-radius:5px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.4); }
+.minimap .z1{ width:100%; height:100%; background:#3a2018; } .minimap .z2{ width:80%; height:80%; background:#5a3a20; }
+.minimap .z3{ width:60%; height:60%; background:#5c5a24; } .minimap .z4{ width:40%; height:40%; background:#2f5a2c; } .minimap .z5{ width:22%; height:22%; background:#2a4254; }
+.minimap .pin{ position:absolute; left:50%; top:50%; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%; background:radial-gradient(circle at 35% 30%,#ffe9a8,#c8932f); box-shadow:0 0 0 2px rgba(0,0,0,.5), 0 0 12px 1px rgba(240,200,110,.9); }
+.minimap__coord{ position:absolute; left:8px; bottom:7px; font:600 10px/1 ui-monospace,monospace; color:#cdb98a; text-shadow:0 1px 2px #000; }
+
+.hint{ display:inline-block; padding:8px 16px; border-radius:999px; font-size:12.5px; color:var(--ink-soft); background:rgba(8,8,12,.6); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g3) 50%,transparent); }
+.hint b{ color:var(--g2); font-weight:600; }
+.autoplay{ display:inline-flex; align-items:center; gap:8px; padding:7px 15px; border-radius:999px; font:700 12px var(--font-display); letter-spacing:.1em; text-transform:uppercase; color:#9fd06a; background:rgba(20,30,14,.7); box-shadow:inset 0 0 0 1px rgba(79,122,46,.4); animation:pulse 1.6s ease-in-out infinite; }
+.autoplay .dot{ width:8px; height:8px; border-radius:50%; background:#9fd06a; box-shadow:0 0 10px #9fd06a; }
+
+/* ===========================================================================
+   11) SELETOR GLOBAL + RODAPÉ
+   =========================================================================== */
+.switcher{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:0 0 30px; }
+.switch-btn{ cursor:pointer; font:600 12px/1 var(--font-display); letter-spacing:.07em; text-transform:uppercase; color:#cbb988; padding:10px 20px; border-radius:999px; background:rgba(255,255,255,.02); border:1px solid rgba(200,170,100,.28); transition:.15s; }
+.switch-btn[aria-pressed="true"]{ color:#1a140a; background:linear-gradient(180deg,#f0d488,#c79a44); border-color:#f0d488; box-shadow:0 0 22px -6px rgba(240,200,110,.7); }
+.switch-btn:focus-visible{ outline:2px solid #f0d488; outline-offset:3px; }
+.stage{ max-width:560px; margin:0 auto; }
+.kit-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:26px; align-items:start; }
+footer.note{ text-align:center; color:#6f6a5e; font-size:12.5px; margin-top:64px; line-height:1.7; }
+footer.note code{ color:#caa75e; background:rgba(200,167,94,.08); padding:1px 6px; border-radius:4px; }
+.svg-defs{ position:absolute; width:0; height:0; overflow:hidden; }
+@media (prefers-reduced-motion: reduce){ .mote,.castbar > i,.fct,.autoplay,.ability.demo-cd,[data-style="premium"] .rpg-frame::after{ animation:none; } }
+</style>
+</head>
+
+<body>
+<!-- ===================== ÍCONES (SVG, nunca emoji) ===================== -->
+<svg class="svg-defs" aria-hidden="true"><defs>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M12 2.6 4.5 5.4v6.1c0 4.6 3.2 7.5 7.5 9.9 4.3-2.4 7.5-5.3 7.5-9.9V5.4z"/></symbol>
+  <symbol id="i-bag" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M6 8h12l1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M4 4h7a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-7a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h7z"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M12 3c2 3 5 4.5 5 8.5A5 5 0 0 1 7 12c0-1.5.5-2.5 1.3-3.3C8.5 11 10 11 10 9c0-2 1-4 2-6"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M13 2 4 14h6l-1 8 9-12h-6z"/></symbol>
+  <symbol id="i-snow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/></symbol>
+  <symbol id="i-sword" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M6.5 17.5 16 8l-1.2-3.2L18.5 6 20 9.4 16.8 8 7.4 17.4zM4 20l2.5-2.5M3 21l1.6-1.6"/></symbol>
+  <symbol id="i-potion" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M9 3h6M10 3v4.5l-3.2 7A3.8 3.8 0 0 0 10.3 20h3.4a3.8 3.8 0 0 0 3.5-5.5L14 7.5V3M7.5 14h9"/></symbol>
+  <symbol id="i-helm" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M5 13a7 7 0 0 1 14 0v4H5zM5 17h14M12 8v5"/></symbol>
+  <symbol id="i-ring" viewBox="0 0 24 24"><circle cx="12" cy="14.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M9.2 9.3 12 5l2.8 4.3"/></symbol>
+  <symbol id="i-boot" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M8 4v8.5L5.5 15v4H18v-2.5a4 4 0 0 0-4-4h-2V4z"/></symbol>
+  <symbol id="i-face" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4" fill="none" stroke="currentColor" stroke-width="1.6"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M5 20a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-skull" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M5 11a7 7 0 0 1 14 0v4.5l-2 1.5v2H9v-2H7v-2H5zM9 11h.01M15 11h.01"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></symbol>
+</defs></svg>
+
+<div class="scene">
+  <div class="motes"><i class="mote"></i><i class="mote"></i><i class="mote"></i><i class="mote"></i><i class="mote"></i><i class="mote"></i></div>
+
+  <!-- ===== RAIZ TEMÁTICA: o seletor troca data-style aqui e tudo herda ===== -->
+  <div class="wrap kit" id="kit" data-style="gold">
+
+    <header class="page-head">
+      <span class="eyebrow">Openrealm · UI Kit Oficial</span>
+      <h1>Mapa de Componentes</h1>
+      <p>Um seletor de estilo controla a <strong>página inteira</strong> — basic / gold / premium. Abaixo, a nova versão de
+         todos os componentes que o jogo usa hoje. Tudo é SVG + CSS, sem imagens.</p>
+    </header>
+
+    <!-- ===== SELETOR GLOBAL ===== -->
+    <div class="switcher" role="group" aria-label="Estilo global da interface">
+      <button class="switch-btn" data-set="basic"   aria-pressed="false">Basic</button>
+      <button class="switch-btn" data-set="gold"    aria-pressed="true">Gold</button>
+      <button class="switch-btn" data-set="premium" aria-pressed="false">Premium</button>
+    </div>
+
+    <!-- ===== PAINEL SHOWCASE ===== -->
+    <div class="stage">
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-shield"/></svg> Atributos do Herói</h2>
+          <p class="panel-sub">Painel base do sistema. Toda a interface herda este estilo pelo seletor acima.</p>
+          <div class="stat"><div class="stat__row"><span>Vida</span><span>248 / 320</span></div><div class="bar hp"><i style="width:77%"></i></div></div>
+          <div class="stat"><div class="stat__row"><span>Mana</span><span>140 / 180</span></div><div class="bar mp"><i style="width:62%"></i></div></div>
+          <div class="stat"><div class="stat__row"><span>Experiência</span><span>Nível 14</span></div><div class="bar xp"><i style="width:45%"></i></div></div>
+          <div class="btn-row" style="margin-top:18px"><button class="rpg-btn">Equipar</button><button class="rpg-btn ghost">Fechar</button></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="section-label">Mapa de componentes — nova versão de tudo</div>
+
+    <div class="kit-grid">
+
+      <!-- ===== BARRAS ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-shield"/></svg> Barras (vitais &amp; uso)</h2>
+          <div class="specs" style="grid-template-columns:1fr">
+            <div class="spec"><span class="spec__cap">Vida (HP)</span><div class="bar hp"><i style="width:72%"></i><span class="bar__txt">231 / 320</span></div></div>
+            <div class="spec"><span class="spec__cap">Mana (MP)</span><div class="bar mp"><i style="width:58%"></i><span class="bar__txt">104 / 180</span></div></div>
+            <div class="spec"><span class="spec__cap">Experiência (XP)</span><div class="bar xp"><i style="width:45%"></i></div></div>
+            <div class="spec"><span class="spec__cap">Alvo / inimigo</span><div class="bar enemy"><i style="width:84%"></i></div></div>
+            <div class="spec"><span class="spec__cap">Chefe (segmentada)</span><div class="bar boss"><i style="width:66%"></i><span class="bar__txt">Guardião · 66%</span></div></div>
+            <div class="spec"><span class="spec__cap">Conjuração (cast)</span><div class="castbar"><i></i><span class="castbar__txt"><span>Bola de Fogo</span><span>1.4s</span></span></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== FRAMES DE UNIDADE ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-face"/></svg> Frames de unidade</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Jogador</span>
+              <div class="uframe"><div class="uframe__portrait"><svg><use href="#i-face"/></svg><span class="lvl">14</span></div>
+                <div class="uframe__body"><div class="uframe__name">Tankerson</div>
+                  <div class="bar hp"><i style="width:77%"></i></div><div class="stat"><div class="bar mp"><i style="width:62%"></i></div></div></div></div></div>
+            <div class="spec"><span class="spec__cap">Alvo (inimigo)</span>
+              <div class="uframe"><div class="uframe__portrait"><svg><use href="#i-skull"/></svg><span class="lvl">18</span></div>
+                <div class="uframe__body"><div class="uframe__name enemy">Ogro Selvagem</div><div class="bar enemy"><i style="width:84%"></i></div></div></div></div>
+            <div class="spec"><span class="spec__cap">Membro de grupo</span>
+              <div class="uframe" style="min-width:0"><div class="uframe__portrait" style="width:38px;height:38px"><svg><use href="#i-face"/></svg></div>
+                <div class="uframe__body"><div class="uframe__name" style="margin-bottom:4px">Gabriel</div><div class="bar hp" style="height:7px"><i style="width:54%"></i></div></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== SLOTS ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-bag"/></svg> Slots</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Item · raridades (comum / raro / épico / lendário)</span>
+              <div class="spec__demo">
+                <span class="islot"><span class="islot__icon"><svg><use href="#i-potion"/></svg></span><span class="islot__qty">12</span></span>
+                <span class="islot" data-rar="raro"><span class="islot__icon"><svg><use href="#i-sword"/></svg></span></span>
+                <span class="islot" data-rar="epico"><span class="islot__icon"><svg><use href="#i-helm"/></svg></span><span class="islot__enh">+4</span></span>
+                <span class="islot" data-rar="lendario"><span class="islot__icon"><svg><use href="#i-ring"/></svg></span><span class="islot__enh">+9</span></span>
+                <span class="islot locked"><span class="islot__icon"><svg><use href="#i-boot"/></svg></span></span>
+              </div></div>
+            <div class="spec"><span class="spec__cap">Equipamento (vazio / equipado)</span>
+              <div class="spec__demo">
+                <span class="eslot"><span class="eslot__label">Arma</span><svg class="eslot__icon"><use href="#i-sword"/></svg></span>
+                <span class="eslot filled" data-rar="epico"><span class="eslot__label">Elmo</span><svg class="eslot__icon"><use href="#i-helm"/></svg><span class="eslot__enh">+4</span></span>
+                <span class="eslot filled" data-rar="lendario"><span class="eslot__label">Anel</span><svg class="eslot__icon"><use href="#i-ring"/></svg></span>
+                <span class="eslot"><span class="eslot__label">Botas</span><svg class="eslot__icon"><use href="#i-boot"/></svg></span>
+              </div></div>
+            <div class="spec"><span class="spec__cap">Habilidade (pronta / em recarga)</span>
+              <div class="spec__demo">
+                <span class="ability"><span class="ability__key">1</span><span class="ability__icon"><svg><use href="#i-sword"/></svg></span><span class="ability__mp">0</span></span>
+                <span class="ability"><span class="ability__key">2</span><span class="ability__icon"><svg><use href="#i-flame"/></svg></span><span class="ability__mp">35</span></span>
+                <span class="ability demo-cd"><span class="ability__key">3</span><span class="ability__icon"><svg><use href="#i-bolt"/></svg></span><span class="ability__mp">28</span><span class="ability__cd"></span></span>
+                <span class="ability"><span class="ability__key">4</span><span class="ability__icon"><svg><use href="#i-snow"/></svg></span><span class="ability__mp">42</span></span>
+              </div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CONTADORES / TOGGLES / HINT ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-gear"/></svg> Contadores &amp; estados</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Moedas / pontos</span>
+              <div class="spec__demo"><span class="counter gold"><span class="coin"></span>5 000</span><span class="counter sp"><span class="coin"></span>SP 150</span></div></div>
+            <div class="spec"><span class="spec__cap">Toggle (auto-play / proteção)</span>
+              <div class="spec__demo">
+                <span class="toggle" data-on="Bot: ON (B)" data-off="Bot: OFF (B)"><span class="toggle__sw"></span><span class="toggle__lbl">Bot: OFF (B)</span></span>
+                <span class="toggle" aria-pressed="true" data-on="Proteção: ON" data-off="Proteção: OFF"><span class="toggle__sw"></span><span class="toggle__lbl">Proteção: ON</span></span>
+              </div></div>
+            <div class="spec"><span class="spec__cap">Banner auto-play (ativo)</span>
+              <div class="spec__demo"><span class="autoplay"><span class="dot"></span>Auto-play</span></div></div>
+            <div class="spec"><span class="spec__cap">Hint de controles (rodapé)</span>
+              <div class="spec__demo"><span class="hint"><b>WASD</b> mover · <b>Tab</b> alvo · <b>1</b> golpe · <b>I</b> bolsa · <b>K</b> habilidades</span></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== BOTÕES ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-shield"/></svg> Botões</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Primário / secundário / desabilitado</span>
+              <div class="btn-row"><button class="rpg-btn">Confirmar</button><button class="rpg-btn ghost">Cancelar</button><button class="rpg-btn" disabled>Indisponível</button></div></div>
+            <div class="spec"><span class="spec__cap">Risco (refino) — perigo / protegido</span>
+              <div class="btn-row"><button class="rpg-btn" data-risk="danger">Refinar +7 (45%)</button><button class="rpg-btn" data-risk="protected">Refinar protegido</button></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== INPUTS ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-gear"/></svg> Inputs</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Campo de texto (nome / chat)</span>
+              <input class="rpg-input" type="text" value="Tankerson" aria-label="Nome do personagem"></div>
+            <div class="spec"><span class="spec__cap">Slider (volume)</span>
+              <input class="rpg-range" type="range" min="0" max="100" value="60" aria-label="Volume"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== MENU / RANKS DE SKILL ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-book"/></svg> Menus &amp; listas</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Linha de menu (label + atalho)</span>
+              <div class="menu-row"><span>Inventário</span><span class="key">I</span></div>
+              <div class="menu-row"><span>Habilidades</span><span class="key">K</span></div>
+              <div class="menu-row danger"><span>Sair</span><span class="key">Ctrl+Esc</span></div></div>
+            <div class="spec"><span class="spec__cap">Rank de habilidade (subir com SP)</span>
+              <div class="skill-row"><span class="rune"><svg><use href="#i-flame"/></svg></span><div class="skill-row__info"><b>Lança Flamejante</b><span class="rank">Rank 3 / 5</span></div><button class="rankbtn">Subir (40 SP)</button></div>
+              <div class="skill-row"><span class="rune"><svg><use href="#i-snow"/></svg></span><div class="skill-row__info"><b>Prisão de Gelo</b><span class="rank">Rank 5 / 5</span></div><button class="rankbtn" disabled>Máx</button></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== TOOLTIP / RARIDADE ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-bag"/></svg> Tooltip &amp; raridade</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Tooltip de item</span>
+              <div class="tooltip" data-rar="lendario">
+                <div class="tooltip__name">Lâmina do Sol Poente +9</div>
+                <div class="tooltip__rar">Arma · Lendário (SUN)</div>
+                <div class="tooltip__stat"><span>Dano</span><b>184–212</b></div>
+                <div class="tooltip__stat"><span>Força</span><b>+24</b></div>
+                <div class="tooltip__req">Requer nível 40 · Durab. 120/120</div>
+              </div></div>
+            <div class="spec"><span class="spec__cap">Cores de raridade</span>
+              <div class="rar-legend">
+                <span><i style="background:#8a93a3"></i>Comum</span><span><i style="background:#4aa3ff"></i>Raro</span>
+                <span><i style="background:#b06cff"></i>Épico</span><span><i style="background:#f2c44a"></i>Lendário</span>
+              </div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== FEEDBACK DE COMBATE ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-flame"/></svg> Feedback de combate</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Texto flutuante (dano / crítico / cura / recebido / nível)</span>
+              <div class="spec__demo" style="align-items:center; gap:22px; min-height:46px">
+                <span class="fct dmg">248</span><span class="fct crit">512!</span><span class="fct heal">+90</span><span class="fct hurt">-64</span><span class="fct lvl">Nível 15!</span>
+              </div></div>
+            <div class="spec"><span class="spec__cap">Toast (feedback transitório)</span>
+              <div class="spec__demo"><span class="toast"><span class="dot"></span>Desafio enviado para Gabriel</span></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== ANÚNCIO ===== -->
+      <section class="rpg-panel w2" style="grid-column:1 / -1">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-skull"/></svg> Banner de anúncio (chefe / evento)</h2>
+          <div style="display:grid;place-items:center;padding:8px 0 2px"><div class="announce">O Guardião do Ermo despertou</div></div>
+        </div>
+      </section>
+
+      <!-- ===== MUNDO: NAMEPLATES + CLASSES + MINIMAPA ===== -->
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-face"/></svg> Mundo — nameplates &amp; classes</h2>
+          <div class="stack">
+            <div class="spec"><span class="spec__cap">Nameplate (aliado / inimigo)</span>
+              <div class="spec__demo" style="gap:26px">
+                <span class="nameplate"><span class="nameplate__name">Gabriel</span><span class="nameplate__hp"><i style="width:80%"></i></span></span>
+                <span class="nameplate enemy"><span class="nameplate__name">Ogro</span><span class="nameplate__hp"><i style="width:55%"></i></span></span>
+              </div></div>
+            <div class="spec"><span class="spec__cap">Card de classe (selecionável)</span>
+              <div class="spec__demo" style="gap:12px">
+                <button class="class-card sel" style="flex:1"><svg class="ic"><use href="#i-shield"/></svg><h5>Cavaleiro</h5><p>Tanque corpo-a-corpo, alta defesa.</p></button>
+                <button class="class-card" style="flex:1"><svg class="ic"><use href="#i-flame"/></svg><h5>Mago</h5><p>Dano mágico em área, frágil.</p></button>
+              </div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rpg-panel">
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-snow"/></svg> Minimapa</h2>
+          <div class="spec"><span class="spec__cap">Zonas concêntricas + posição</span>
+            <div class="spec__demo" style="justify-content:center">
+              <div class="minimap">
+                <div class="zone z1"></div><div class="zone z2"></div><div class="zone z3"></div><div class="zone z4"></div><div class="zone z5"></div>
+                <div class="pin"></div><div class="minimap__coord">X 12 · Z -4 · Campina</div>
+              </div></div></div>
+        </div>
+      </section>
+
+    </div>
+
+    <footer class="note">
+      UI oficializado · <code>data-style="basic | gold | premium"</code> na raiz tematiza tudo.<br>
+      Frames, barras, slots, habilidades, tooltip, feedback e mundo — 100% SVG + CSS, sem imagens.
+    </footer>
+  </div>
+</div>
+
+<script>
+/* ===========================================================================
+   TEXTURAS + MÁSCARAS (data-URI legível) — idêntico ao painel aprovado
+   =========================================================================== */
+const dataURI = (svg) => `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+const setVar = (k,v) => document.documentElement.style.setProperty(k, v);
+
+const STONE = `
+<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'>
+  <filter id='s'><feTurbulence type='fractalNoise' baseFrequency='0.035' numOctaves='5' seed='7' stitchTiles='stitch' result='n'/>
+    <feDiffuseLighting in='n' lighting-color='#ffffff' surfaceScale='1.7' diffuseConstant='1.1'><feDistantLight azimuth='235' elevation='55'/></feDiffuseLighting></filter>
+  <rect width='100%' height='100%' filter='url(#s)'/></svg>`;
+const CRACKS = `
+<svg xmlns='http://www.w3.org/2000/svg' width='340' height='340'>
+  <filter id='c'><feTurbulence type='fractalNoise' baseFrequency='0.012 0.016' numOctaves='4' seed='21' result='n'/>
+    <feColorMatrix in='n' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 7 -3.05' result='a'/>
+    <feComponentTransfer in='a' result='b'><feFuncA type='discrete' tableValues='0 0 1 1 0 0'/></feComponentTransfer>
+    <feFlood flood-color='#000000' result='ink'/><feComposite in='ink' in2='b' operator='in' result='veins'/>
+    <feGaussianBlur in='veins' stdDeviation='0.35'/></filter>
+  <rect width='100%' height='100%' filter='url(#c)'/></svg>`;
+const GRAIN = `
+<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150'>
+  <filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter>
+  <rect width='100%' height='100%' filter='url(#g)' opacity='0.25'/></svg>`;
+
+/* CANTOS: A heráldico (basic/gold) · C selo arcano (premium) · B lírio (reserva) */
+const CORNER_A = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none' stroke='#fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>
+  <path d='M50 9 L22 9 Q9 9 9 22 L9 50'/><path d='M50 16 L27 16 Q16 16 16 27 L16 50' stroke-width='1.6' opacity='0.82'/>
+  <circle cx='20.5' cy='20.5' r='5.6'/><circle cx='20.5' cy='20.5' r='1.9' fill='#fff' stroke='none'/>
+  <path d='M50 9 l4.5 -3 M9 50 l-3 4.5' stroke-width='1.7'/></svg>`;
+const CORNER_B = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='#fff' stroke='none'>
+  <path d='M19 19 C13 19 8 14 6.5 6.5 C14 8 19 13 19 19 Z'/><path d='M19.5 18.5 C18 12 19.5 6.5 24.5 4 C26.6 9.6 24 15 19.5 18.5 Z'/>
+  <path d='M18.5 19.5 C12 18 6.5 19.5 4 24.5 C9.6 26.6 15 24 18.5 19.5 Z'/><circle cx='19' cy='19' r='2.5'/>
+  <path d='M28 13 Q20.5 20.5 13 28' fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round' opacity='0.85'/></svg>`;
+const CORNER_C = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+  <circle cx='19' cy='19' r='10'/><circle cx='19' cy='19' r='13.6' stroke-width='1.2' stroke-dasharray='1.6 3.4' opacity='0.6'/>
+  <path d='M19 11.5 V26.5 M12.2 15.25 L25.8 22.75 M25.8 15.25 L12.2 22.75' stroke-width='1.5'/>
+  <path d='M10 10 L4 4 M4 4 L7 4 M4 4 L4 7' stroke-width='1.6'/></svg>`;
+
+const EDGE_H = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 14' fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round'>
+  <path d='M0 7 C9 1 19 1 28 7 C37 13 47 13 56 7' opacity='0.95'/>
+  <path d='M0 7 C9 13 19 13 28 7 C37 1 47 1 56 7' stroke-width='1.5' opacity='0.7'/>
+  <circle cx='28' cy='7' r='1.6' fill='#fff' stroke='none'/></svg>`;
+const EDGE_V = EDGE_H.replace("viewBox='0 0 56 14'","viewBox='0 0 14 56'").replace(/<path /g,"<path transform='rotate(90 7 7)' ").replace(/<circle /g,"<circle transform='rotate(90 7 7)' ");
+
+setVar('--tex-stone',dataURI(STONE)); setVar('--tex-cracks',dataURI(CRACKS)); setVar('--tex-grain',dataURI(GRAIN));
+setVar('--m-corner-a',dataURI(CORNER_A)); setVar('--m-corner-b',dataURI(CORNER_B)); setVar('--m-corner-c',dataURI(CORNER_C));
+setVar('--m-edge',dataURI(EDGE_H)); setVar('--m-edge-v',dataURI(EDGE_V));
+
+/* ===========================================================================
+   INJETA A MOLDURA (bg + vinheta + cantos/bordas) em todo .rpg-panel.
+   Mantém o HTML limpo — cada painel é só <section.rpg-panel><.content>…
+   =========================================================================== */
+const FRAME = `<div class="rpg-panel__bg"></div><div class="rpg-panel__vignette"></div>`
+  + `<div class="rpg-frame"><span class="rpg-edge top"></span><span class="rpg-edge bottom"></span><span class="rpg-edge left"></span><span class="rpg-edge right"></span>`
+  + `<span class="rpg-corner tl"></span><span class="rpg-corner tr"></span><span class="rpg-corner bl"></span><span class="rpg-corner br"></span></div>`;
+document.querySelectorAll('.rpg-panel').forEach(p => p.insertAdjacentHTML('afterbegin', FRAME));
+
+/* ===========================================================================
+   SELETOR GLOBAL — só troca data-style na raiz #kit (tudo herda)
+   =========================================================================== */
+const kit = document.getElementById('kit');
+const buttons = document.querySelectorAll('.switch-btn');
+buttons.forEach(btn => btn.addEventListener('click', () => {
+  kit.setAttribute('data-style', btn.dataset.set);
+  buttons.forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+}));
+
+/* toggles (auto-play / proteção) — alternam estado + label */
+document.querySelectorAll('.toggle').forEach(t => t.addEventListener('click', () => {
+  const on = t.getAttribute('aria-pressed') !== 'true';
+  t.setAttribute('aria-pressed', String(on));
+  const lbl = t.querySelector('.toggle__lbl');
+  if (lbl) lbl.textContent = on ? t.dataset.on : t.dataset.off;
+}));
+</script>
+</body>
+</html>

@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Openrealm — Sistema de Painéis Modular (medieval + magia)</title>
+
+<!--
+  ============================================================================
+  PROPOSTA VISUAL — Sistema de UI modular para painéis (Openrealm)
+  ----------------------------------------------------------------------------
+  Ideia central (o que torna isto "modular"):
+    • UMA base de layout/moldura compartilhada por TODOS os painéis.
+    • Cada estilo (basic / gold / premium) troca SOMENTE variáveis de cor/gradiente.
+    • A moldura/arabescos são desenhados por SVG aplicado como `mask`, e a cor vem
+      de `background: var(--edge-grad)`. Logo, trocar 1 gradiente recolore moldura
+      + cantos + bordas de uma vez só. (Combina com seu pedido: "trocam apenas cor".)
+    • O fundo é UMA textura de pedra/rachadura procedural (feTurbulence), em escala
+      de cinza, recolorida por `mix-blend-mode` sobre o gradiente de cada estilo.
+      => 1 textura, 3 paletas, sem nenhuma mídia/imagem.
+
+  Tudo é código: SVG (filtros + máscaras) e CSS. Nenhum arquivo de imagem.
+  Troque o estilo de um painel apenas com  data-style="basic|gold|premium".
+  ============================================================================
+-->
+
+<style>
+/* ===========================================================================
+   0) TOKENS GLOBAIS + RESET
+   =========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  color: #e9e2cf;
+  background: #0c0b0e;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+:root{
+  /* Texturas procedurais (cinza, compartilhadas). Preenchidas via JS no fim. */
+  --tex-stone:  none;
+  --tex-cracks: none;
+  --tex-grain:  none;
+  /* Máscaras de filigrana. 3 opções de canto (A/B/C) + borda corrida. Preenchidas via JS. */
+  --m-corner-a: none;   /* A: heráldico (bracket + rebite) */
+  --m-corner-b: none;   /* B: flor-de-lis */
+  --m-corner-c: none;   /* C: selo arcano (runa) */
+  --m-edge:   none;
+
+  /* Tipografia display medieval (fallback seguro em qualquer SO). */
+  --font-display: "Trajan Pro", "Cinzel", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+}
+
+/* ===========================================================================
+   1) AMBIENTAÇÃO DA PÁGINA (fundo de "câmara de pedra" + brilho mágico)
+   =========================================================================== */
+.scene{
+  position: relative;
+  min-height: 100dvh;
+  padding: 56px 24px 96px;
+  isolation: isolate;
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #20202c 0%, #121119 45%, #0a090d 100%),
+    #0a090d;
+  overflow: hidden;
+}
+/* leve textura de pedra na própria cena (mesmo motor procedural) */
+.scene::before{
+  content:""; position:absolute; inset:-2px; z-index:-2;
+  background: var(--tex-stone) center; background-size: 210px;
+  opacity:.03; mix-blend-mode: soft-light; pointer-events:none;
+}
+/* vinheta para focar o olhar no conteúdo */
+.scene::after{
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background: radial-gradient(120% 80% at 50% 30%, transparent 55%, rgba(0,0,0,.6) 100%);
+}
+/* motas de magia flutuando (puro CSS, respeitam reduced-motion) */
+.motes{ position:absolute; inset:0; z-index:-1; pointer-events:none; }
+.mote{
+  position:absolute; width:4px; height:4px; border-radius:50%;
+  background: radial-gradient(circle, rgba(255,228,160,.9), rgba(255,200,90,0) 70%);
+  filter: blur(.4px);
+  animation: float 9s ease-in-out infinite;
+}
+.mote:nth-child(1){ left:12%; top:30%; animation-delay:0s;   }
+.mote:nth-child(2){ left:78%; top:22%; animation-delay:1.4s; transform:scale(1.6); }
+.mote:nth-child(3){ left:35%; top:70%; animation-delay:3s;   }
+.mote:nth-child(4){ left:62%; top:62%; animation-delay:2.2s; transform:scale(.7); }
+.mote:nth-child(5){ left:88%; top:78%; animation-delay:4.1s; }
+.mote:nth-child(6){ left:22%; top:84%; animation-delay:5s;   transform:scale(1.3); }
+@keyframes float{
+  0%,100%{ transform: translateY(0) scale(1);   opacity:.25; }
+  50%    { transform: translateY(-26px) scale(1.15); opacity:.85; }
+}
+
+/* ===========================================================================
+   2) ESTRUTURA DE TÍTULOS / LAYOUT DA DEMO
+   =========================================================================== */
+.wrap{ max-width: 1180px; margin: 0 auto; position: relative; z-index: 1; }
+.page-head{ text-align:center; margin-bottom: 40px; }
+.page-head h1{
+  font-family: var(--font-display);
+  font-weight: 700; letter-spacing: .05em; text-transform: uppercase; line-height: 1.0;
+  font-size: clamp(22px, 4.2vw, 38px); margin: 0 0 8px;
+  color: #f3e4bd;
+  text-shadow: 0 1px 0 #000, 0 0 26px rgba(214,170,80,.35);
+}
+.page-head p{ margin:0 auto; max-width: 60ch; color:#a9a293; font-size:15px; }
+.eyebrow{
+  display:inline-block; margin-bottom:14px; padding:5px 14px;
+  font: 600 11px/1 var(--font-display); letter-spacing:.32em; text-transform:uppercase;
+  color:#d7b873; border:1px solid rgba(215,184,115,.35); border-radius:999px;
+  background: rgba(215,184,115,.06);
+}
+.section-label{
+  display:flex; align-items:center; gap:14px; margin: 56px 0 22px;
+  font: 600 12px/1 var(--font-display); letter-spacing:.28em; text-transform:uppercase;
+  color:#9a917d;
+}
+.section-label::before,.section-label::after{ content:""; height:1px; flex:1; background:linear-gradient(90deg,transparent,rgba(180,150,90,.4),transparent); }
+
+.gallery{ display:grid; grid-template-columns: repeat(auto-fit, minmax(300px,1fr)); gap: 28px; align-items:start; }
+
+/* ===========================================================================
+   3) A PEÇA CENTRAL — .rpg-panel  (base compartilhada por todos os estilos)
+   ----------------------------------------------------------------------------
+   Variáveis que CADA estilo redefine (e só elas):
+     --g1 --g2 --g3   : paradas do gradiente da moldura (borda + cantos + filigrana)
+     --edge-grad      : o gradiente de moldura derivado de g1..g3
+     --bg-1 --bg-2 --bg-3 : paradas do gradiente de fundo
+     --line-inner     : cor da linha interna (moldura dupla)
+     --glow           : cor do brilho externo (magia)
+     --ink            : cor do texto sobre o painel
+     --ink-soft       : texto secundário
+     --accent         : detalhes (barras, ícones)
+   =========================================================================== */
+.rpg-panel{
+  /* defaults seguros; sobrescritos pelos data-style abaixo */
+  --g1:#9aa0a8; --g2:#e8edf3; --g3:#5d626a;
+  --edge-grad: linear-gradient(135deg, var(--g3) 0%, var(--g2) 28%, var(--g1) 50%, var(--g2) 72%, var(--g3) 100%);
+  --bg-1:#34373d; --bg-2:#222428; --bg-3:#16171a;
+  --line-inner: rgba(0,0,0,.55);
+  --glow: rgba(150,160,175,.30);
+  --ink:#e9e2cf; --ink-soft:#a59f90; --accent:#cfd4db;
+  --m-corner: var(--m-corner-a);   /* selo de canto padrão (cada estilo sobrescreve) */
+  --btn-edge: linear-gradient(135deg,#393c41 0%,#a7abb0 28%,#686c73 50%,#a7abb0 72%,#393c41 100%); /* borda do botão = prata (basic); só premium vira ouro */
+
+  position: relative;
+  padding: 4px;                 /* espessura da "borda física" externa */
+  border-radius: 14px;          /* quinas arredondadas (médio) */
+  isolation: isolate;
+  /* contorno em gradiente que RESPEITA o arredondamento
+     (truque padding-box/border-box — border-image ignora border-radius) */
+  border: 2px solid transparent;
+  background:
+    linear-gradient(#000, #000) padding-box,
+    var(--edge-grad) border-box;
+  /* profundidade + brilho mágico */
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.7),
+    0 14px 40px -12px rgba(0,0,0,.8),
+    0 0 34px -10px var(--glow);
+  color: var(--ink);
+}
+
+/* 3a) Camada de FUNDO (pedra + rachadura + grão), atrás do conteúdo */
+.rpg-panel__bg{
+  position:absolute; inset:0; z-index:0; border-radius:inherit; overflow:hidden;
+  /* base de cor do estilo (RADIAL: claro no centro, escuro nas pontas) + grão por cima */
+  background-image: var(--tex-grain), radial-gradient(ellipse at center, var(--bg-1) 0%, var(--bg-2) 58%, var(--bg-3) 100%);
+  background-size: 112px, cover;
+  background-position: center, center;
+  background-blend-mode: overlay, normal;
+}
+.rpg-panel__bg::before{ /* relevo de pedra (cinza), recolorido por blend. centralizado p/ crescer do centro */
+  content:""; position:absolute; inset:0;
+  background: var(--tex-stone) center; background-size: 195px;
+  mix-blend-mode: soft-light; opacity:.3;
+}
+.rpg-panel__bg::after{  /* rachaduras (cinza), escurecem o fundo nas veias */
+  content:""; position:absolute; inset:0;
+  background: var(--tex-cracks) center; background-size: 255px;
+  mix-blend-mode: multiply; opacity:.24;
+}
+/* sombreado interno (dá volume de "pedra escavada") */
+.rpg-panel__vignette{
+  position:absolute; inset:0; z-index:1; border-radius:inherit; pointer-events:none;
+  box-shadow:
+    inset 0 0 0 1px var(--line-inner),
+    inset 0 2px 10px rgba(0,0,0,.55),
+    inset 0 -30px 60px -30px rgba(0,0,0,.7);
+}
+
+/* 3b) MOLDURA decorativa — cantos (arabescos) + bordas entrelaçadas.
+       Tudo é gradiente revelado por máscara SVG => recolore com --edge-grad. */
+.rpg-frame{ position:absolute; inset:0; z-index:3; pointer-events:none; }
+
+.rpg-corner{
+  position:absolute; width:62px; height:62px;
+  background: var(--edge-grad);
+  -webkit-mask: var(--m-corner) center/contain no-repeat;
+          mask: var(--m-corner) center/contain no-repeat;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.65));
+}
+.rpg-corner.tl{ top:-6px; left:-6px; }
+.rpg-corner.tr{ top:-6px; right:-6px; transform: scaleX(-1); }
+.rpg-corner.bl{ bottom:-6px; left:-6px; transform: scaleY(-1); }
+.rpg-corner.br{ bottom:-6px; right:-6px; transform: scale(-1,-1); }
+
+.rpg-edge{
+  position:absolute; background: var(--edge-grad);
+  opacity:.92; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5));
+}
+.rpg-edge.top,.rpg-edge.bottom{
+  left:48px; right:48px; height:8px;             /* mais fino => trama menor e mais repetida */
+  -webkit-mask: var(--m-edge) repeat-x; mask: var(--m-edge) repeat-x;
+  -webkit-mask-size:auto 100%; mask-size:auto 100%;
+}
+.rpg-edge.top{ top:-7px; }                        /* levemente para FORA do painel (deslocamento) */
+.rpg-edge.bottom{ bottom:-7px; transform: scaleY(-1); }
+.rpg-edge.left,.rpg-edge.right{
+  top:48px; bottom:48px; width:8px;
+  -webkit-mask: var(--m-edge) repeat-y; mask: var(--m-edge) repeat-y;
+  -webkit-mask-size:100% auto; mask-size:100% auto;
+}
+/* gira o ladrilho horizontal para virar vertical nas laterais.
+   IMPORTANTE: usar mask-IMAGE (longhand) para não resetar mask-size/repeat acima. */
+.rpg-edge.left{  left:-7px;  -webkit-mask-image: var(--m-edge-v); mask-image: var(--m-edge-v); }
+.rpg-edge.right{ right:-7px; -webkit-mask-image: var(--m-edge-v); mask-image: var(--m-edge-v); transform: scaleX(-1); }
+
+/* 3c) CONTEÚDO do painel (acima de tudo) */
+.rpg-panel__content{ position:relative; z-index:2; padding: 25px 25px 28px; } /* +15% de padding */
+
+/* cabeçalho interno do painel */
+.panel-title{
+  display:flex; align-items:center; gap:10px;
+  margin:0 0 4px; padding-bottom:8px;
+  font: 700 16px/0.82 var(--font-display); letter-spacing:.03em; text-transform:uppercase; /* entrelinha + tracking menores */
+  color: #f4e8c8;
+  text-shadow: 0 1px 0 #000, 0 0 14px var(--glow);
+  border-bottom: 1px solid color-mix(in srgb, var(--g2) 22%, transparent);
+}
+.panel-title .sigil{ width:18px; height:18px; color: var(--g2); opacity:.95; flex:none; }
+.panel-sub{ margin:10px 0 16px; color:var(--ink-soft); font-size:13.5px; }
+
+/* ===========================================================================
+   4) OS TRÊS ESTILOS — trocam SOMENTE cor/gradiente (nada de layout)
+   =========================================================================== */
+
+/* 4.1 BASIC — bordas e fundo em escala de cinza, tom escuro */
+.rpg-panel[data-style="basic"]{
+  --g1:#686c73; --g2:#a7abb0; --g3:#393c41;          /* bordas 25% mais escuras */
+  --bg-1:#1a1b1e; --bg-2:#111214; --bg-3:#0a0b0c;     /* fundo 50% mais escuro */
+  --m-corner: var(--m-corner-a);                      /* quina: A — heráldico */
+  --line-inner: rgba(0,0,0,.55);
+  --glow: rgba(150,162,178,.28);
+  --ink:#e7e8ea; --ink-soft:#a2a6ad; --accent:#c3c9d2;
+}
+
+/* 4.2 GOLD — borda dourada (gradiente) + fundo cinza-escuro/marrom dessaturado */
+.rpg-panel[data-style="gold"]{
+  --g1:#7a571d; --g2:#f1d893; --g3:#a87f33;
+  --edge-grad: linear-gradient(135deg, #5e421a 0%, #caa14e 20%, #f6e6ad 46%, #b98a3a 70%, #5e421a 100%);
+  --bg-1:#1c1c1c; --bg-2:#121212; --bg-3:#0a0a0a;     /* fundo em escala de cinza, 50% mais escuro */
+  --m-corner: var(--m-corner-a);                      /* quina: A — heráldico (rebite) */
+  --line-inner: rgba(20,12,4,.6);
+  --glow: rgba(214,170,80,.34);
+  --ink:#e7e8ea; --ink-soft:#a2a6ad; --accent:#e6c477;   /* textos neutros (= basic); só a barra/realce fica dourado */
+}
+
+/* 4.3 PREMIUM — borda dourada (gradiente) + fundo dourado, MUITO mais escuro que a borda */
+.rpg-panel[data-style="premium"]{
+  --g1:#8a651f; --g2:#ffeaa6; --g3:#c79a44;
+  --edge-grad: linear-gradient(135deg, #6e4f17 0%, #d8ad53 18%, #ffeaa6 46%, #c99a44 72%, #6e4f17 100%);
+  --bg-1:#241308; --bg-2:#170b03; --bg-3:#0d0602;     /* 50% mais escuro + espectro p/ laranja/vermelho */
+  --m-corner: var(--m-corner-c);                      /* quina: C — selo arcano */
+  --btn-edge: var(--edge-grad);                       /* ÚNICO estilo com botão dourado */
+  --line-inner: rgba(40,26,2,.65);
+  --glow: rgba(255,206,98,.42);
+  --ink:#f3e7c6; --ink-soft:#c2ad7f; --accent:#ffd877;   /* textos levemente dourados (só aqui) */
+}
+/* brilho/varredura mágica exclusiva do premium (sobre os cantos/bordas) */
+.rpg-panel[data-style="premium"] .rpg-frame::after{
+  content:""; position:absolute; inset:-6px; border-radius:inherit; pointer-events:none;
+  background: radial-gradient(60% 50% at 50% 0%, rgba(255,226,150,.18), transparent 70%);
+  animation: pulse 4.5s ease-in-out infinite;
+}
+@keyframes pulse{ 0%,100%{opacity:.35} 50%{opacity:.9} }
+
+/* ===========================================================================
+   5) COMPONENTES INTERNOS (mostram que o sistema vale p/ todo o HUD)
+   =========================================================================== */
+/* Barras de atributo (HP/MP/EXP) — usam --accent do estilo */
+.stat{ margin:12px 0; }
+.stat__row{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--ink-soft); margin-bottom:5px; letter-spacing:.04em; }
+.bar{ height:12px; border-radius:6px; background:rgba(0,0,0,.45); box-shadow: inset 0 1px 3px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.04); overflow:hidden; }
+.bar > i{ display:block; height:100%; border-radius:6px;
+  background: var(--accent);              /* cor sólida, sem gradiente interno */
+  box-shadow: 0 0 10px -1px var(--glow);
+}
+.bar.hp > i{ --accent:#c2502f; }
+.bar.mp > i{ --accent:#3f6bd6; }
+
+/* Grade de slots (inventário) — moldura interna no mesmo idioma visual */
+.slots{ display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; margin-top:6px; }
+.slot{
+  aspect-ratio:1; border-radius:5px; position:relative;
+  background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(0,0,0,.35));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--g3) 50%, transparent), inset 0 2px 6px rgba(0,0,0,.6);
+}
+.slot.filled::after{ content:""; position:absolute; inset:24%; border-radius:4px;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb,var(--accent) 90%,#fff), var(--accent) 60%, #000);
+  box-shadow: 0 0 12px -2px var(--glow); }
+
+/* Lista de habilidades/feitiços */
+.spell{ display:flex; gap:11px; align-items:center; padding:9px 6px; line-height:1.2; border-bottom:1px solid rgba(255,255,255,.05); }
+.spell:last-child{ border-bottom:0; }
+.spell .rune{ width:30px; height:30px; flex:none; border-radius:7px; display:grid; place-items:center;
+  background: linear-gradient(160deg, color-mix(in srgb,var(--g2) 30%, #000), #000);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--g2) 40%, transparent), 0 0 14px -4px var(--glow); }
+.spell .rune svg{ width:16px; height:16px; color:var(--g2); }
+/* título da habilidade: BLOCK p/ não herdar o line-height 1.55 do corpo; entrelinha padrão apertada */
+.spell b{ display:block; font: 600 13.5px/1.0 var(--font-display); letter-spacing:.03em; color:var(--ink); }
+.spell small{ display:block; color:var(--ink-soft); font-size:11.5px; margin-top:2px; }
+.spell .cost{ margin-left:auto; font-size:12px; color:var(--accent); white-space:nowrap; }
+
+/* Botões no mesmo idioma (borda gradiente + relevo) */
+.rpg-btn{
+  appearance:none; cursor:pointer; font: 600 12.5px/1 var(--font-display); letter-spacing:.04em; text-transform:uppercase;
+  color:#f3e8cc; padding:11px 18px; border-radius:5px; border:1.5px solid transparent; /* arredondado (pouco) */
+  background:
+    linear-gradient(180deg, color-mix(in srgb,var(--bg-1) 80%,#000), var(--bg-3)) padding-box,
+    var(--btn-edge) border-box;
+  box-shadow: 0 2px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 20px -8px var(--glow);
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.rpg-btn:hover{ filter:brightness(1.12); box-shadow: 0 2px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.08), 0 0 26px -6px var(--glow); }
+.rpg-btn:active{ transform: translateY(1px); }
+.rpg-btn:focus-visible{ outline:2px solid var(--g2); outline-offset:3px; }
+.panel-actions{ display:flex; gap:12px; margin-top:18px; flex-wrap:wrap; }
+
+/* ===========================================================================
+   6) SWITCHER ao vivo (prova a modularidade: mesmo painel troca de estilo)
+   =========================================================================== */
+.switcher{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:0 0 26px; }
+.switch-btn{
+  cursor:pointer; font: 600 12px/1 var(--font-display); letter-spacing:.07em; text-transform:uppercase;
+  color:#cbb988; padding:10px 18px; border-radius:999px; background:rgba(255,255,255,.02);
+  border:1px solid rgba(200,170,100,.28); transition:.15s;
+}
+.switch-btn[aria-pressed="true"]{ color:#1a140a; background:linear-gradient(180deg,#f0d488,#c79a44); border-color:#f0d488; box-shadow:0 0 22px -6px rgba(240,200,110,.7); }
+.switch-btn:focus-visible{ outline:2px solid #f0d488; outline-offset:3px; }
+.stage{ max-width:560px; margin:0 auto; }
+
+footer.note{ text-align:center; color:#6f6a5e; font-size:12.5px; margin-top:64px; line-height:1.7; }
+footer.note code{ color:#caa75e; background:rgba(200,167,94,.08); padding:1px 6px; border-radius:4px; }
+
+@media (prefers-reduced-motion: reduce){
+  .mote, .rpg-panel[data-style="premium"] .rpg-frame::after{ animation:none; }
+}
+
+/* ===========================================================================
+   7) FILTROS SVG (o "motor" procedural de pedra/rachadura). Fica oculto.
+   =========================================================================== */
+.svg-defs{ position:absolute; width:0; height:0; overflow:hidden; }
+</style>
+</head>
+
+<body>
+<!-- Definições SVG: filtros de textura. São aplicados via data-URI (ver JS),
+     mas mantemos legíveis aqui para você ajustar livremente. -->
+<svg class="svg-defs" aria-hidden="true">
+  <defs>
+    <!-- ícones (sigilos/runas) reutilizáveis: SVG, nunca emoji -->
+    <symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M12 2.6 4.5 5.4v6.1c0 4.6 3.2 7.5 7.5 9.9 4.3-2.4 7.5-5.3 7.5-9.9V5.4z"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M6 8h12l1 12H5zM9 8V6a3 3 0 0 1 6 0v2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M4 4h7a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-7a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h7z"/></symbol>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M12 3c2 3 5 4.5 5 8.5A5 5 0 0 1 7 12c0-1.5.5-2.5 1.3-3.3C8.5 11 10 11 10 9c0-2 1-4 2-6"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M13 2 4 14h6l-1 8 9-12h-6z"/></symbol>
+    <symbol id="i-snow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/></symbol>
+  </defs>
+</svg>
+
+<div class="scene">
+  <div class="motes"><i class="mote"></i><i class="mote"></i><i class="mote"></i><i class="mote"></i><i class="mote"></i><i class="mote"></i></div>
+
+  <div class="wrap">
+    <header class="page-head">
+      <span class="eyebrow">Openrealm · UI Kit</span>
+      <h1>Painéis Modulares — Medieval &amp; Magia</h1>
+      <p>Uma única base de moldura e fundo. Cada estilo troca apenas <strong>cor/gradiente</strong>.
+         Bordas com entrelaçamento e arabescos nas quinas; fundo de pedra com rachaduras — tudo em código, sem imagens.</p>
+    </header>
+
+    <!-- ====== SWITCHER AO VIVO ====== -->
+    <div class="switcher" role="group" aria-label="Trocar estilo do painel de demonstração">
+      <button class="switch-btn" data-set="basic"   aria-pressed="false">Basic</button>
+      <button class="switch-btn" data-set="gold"    aria-pressed="true">Gold</button>
+      <button class="switch-btn" data-set="premium" aria-pressed="false">Premium</button>
+    </div>
+
+    <div class="stage">
+      <section class="rpg-panel" id="stage-panel" data-style="gold">
+        <div class="rpg-panel__bg"></div>
+        <div class="rpg-panel__vignette"></div>
+        <div class="rpg-frame">
+          <span class="rpg-edge top"></span><span class="rpg-edge bottom"></span>
+          <span class="rpg-edge left"></span><span class="rpg-edge right"></span>
+          <span class="rpg-corner tl"></span><span class="rpg-corner tr"></span>
+          <span class="rpg-corner bl"></span><span class="rpg-corner br"></span>
+        </div>
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-shield"/></svg> Atributos do Herói</h2>
+          <p class="panel-sub">O mesmo painel, recolorido em tempo real. Clique em Basic / Gold / Premium acima.</p>
+          <div class="stat"><div class="stat__row"><span>Vida</span><span>248 / 320</span></div><div class="bar hp"><i style="width:77%"></i></div></div>
+          <div class="stat"><div class="stat__row"><span>Mana</span><span>140 / 180</span></div><div class="bar mp"><i style="width:62%"></i></div></div>
+          <div class="stat"><div class="stat__row"><span>Experiência</span><span>Nível 14</span></div><div class="bar"><i style="width:45%"></i></div></div>
+          <div class="panel-actions">
+            <button class="rpg-btn">Equipar</button>
+            <button class="rpg-btn">Atributos</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ====== GALERIA: OS 3 ESTILOS LADO A LADO ====== -->
+    <div class="section-label">Os três estilos, lado a lado</div>
+    <div class="gallery">
+
+      <!-- BASIC -->
+      <section class="rpg-panel" data-style="basic">
+        <div class="rpg-panel__bg"></div><div class="rpg-panel__vignette"></div>
+        <div class="rpg-frame">
+          <span class="rpg-edge top"></span><span class="rpg-edge bottom"></span><span class="rpg-edge left"></span><span class="rpg-edge right"></span>
+          <span class="rpg-corner tl"></span><span class="rpg-corner tr"></span><span class="rpg-corner bl"></span><span class="rpg-corner br"></span>
+        </div>
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-bag"/></svg> Inventário</h2>
+          <p class="panel-sub"><code>basic</code> — cinza escuro, sóbrio. Para painéis comuns/HUD.</p>
+          <div class="slots">
+            <span class="slot filled"></span><span class="slot filled"></span><span class="slot"></span><span class="slot filled"></span><span class="slot"></span>
+            <span class="slot"></span><span class="slot filled"></span><span class="slot"></span><span class="slot"></span><span class="slot filled"></span>
+          </div>
+          <div class="panel-actions"><button class="rpg-btn">Organizar</button></div>
+        </div>
+      </section>
+
+      <!-- GOLD -->
+      <section class="rpg-panel" data-style="gold">
+        <div class="rpg-panel__bg"></div><div class="rpg-panel__vignette"></div>
+        <div class="rpg-frame">
+          <span class="rpg-edge top"></span><span class="rpg-edge bottom"></span><span class="rpg-edge left"></span><span class="rpg-edge right"></span>
+          <span class="rpg-corner tl"></span><span class="rpg-corner tr"></span><span class="rpg-corner bl"></span><span class="rpg-corner br"></span>
+        </div>
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-shield"/></svg> Personagem</h2>
+          <p class="panel-sub"><code>gold</code> — borda dourada, fundo em escala de cinza.</p>
+          <div class="stat"><div class="stat__row"><span>Força</span><span>62</span></div><div class="bar"><i style="width:80%"></i></div></div>
+          <div class="stat"><div class="stat__row"><span>Destreza</span><span>48</span></div><div class="bar"><i style="width:60%"></i></div></div>
+          <div class="stat"><div class="stat__row"><span>Inteligência</span><span>55</span></div><div class="bar"><i style="width:70%"></i></div></div>
+          <div class="panel-actions"><button class="rpg-btn">Distribuir</button></div>
+        </div>
+      </section>
+
+      <!-- PREMIUM -->
+      <section class="rpg-panel" data-style="premium">
+        <div class="rpg-panel__bg"></div><div class="rpg-panel__vignette"></div>
+        <div class="rpg-frame">
+          <span class="rpg-edge top"></span><span class="rpg-edge bottom"></span><span class="rpg-edge left"></span><span class="rpg-edge right"></span>
+          <span class="rpg-corner tl"></span><span class="rpg-corner tr"></span><span class="rpg-corner bl"></span><span class="rpg-corner br"></span>
+        </div>
+        <div class="rpg-panel__content">
+          <h2 class="panel-title"><svg class="sigil"><use href="#i-book"/></svg> Grimório Arcano</h2>
+          <p class="panel-sub"><code>premium</code> — dourado dramático e escuro. Para itens lendários/loja.</p>
+          <div class="spell"><span class="rune"><svg><use href="#i-flame"/></svg></span><div><b>Lança Flamejante</b><small>Dano de fogo em área</small></div><span class="cost">35 MP</span></div>
+          <div class="spell"><span class="rune"><svg><use href="#i-bolt"/></svg></span><div><b>Corrente Voltaica</b><small>Salta entre inimigos</small></div><span class="cost">28 MP</span></div>
+          <div class="spell"><span class="rune"><svg><use href="#i-snow"/></svg></span><div><b>Prisão de Gelo</b><small>Congela o alvo</small></div><span class="cost">42 MP</span></div>
+          <div class="panel-actions"><button class="rpg-btn">Conjurar</button></div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="note">
+      Trocar de estilo é só <code>data-style="basic | gold | premium"</code>. &nbsp;·&nbsp;
+      Moldura, arabescos e textura de pedra/rachadura: 100% SVG + CSS, sem imagens.<br>
+      Mesma base de layout — os estilos divergem apenas em cor e gradiente.
+    </footer>
+  </div>
+</div>
+
+<script>
+/* ===========================================================================
+   8) GERAÇÃO DAS TEXTURAS E MÁSCARAS (mantidas legíveis como string e
+      embutidas como data-URI — assim você ajusta sem ferramenta externa).
+      Em produção isto pode ser pré-codificado num .css; aqui no mockup geramos
+      em runtime só para o código-fonte ficar fácil de ler/editar.
+   =========================================================================== */
+const dataURI = (svg) => `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+const css = getComputedStyle(document.documentElement);
+const setVar = (k,v) => document.documentElement.style.setProperty(k, v);
+
+/* --- 8a) PEDRA: relevo rugoso (feTurbulence + iluminação difusa) --- */
+const STONE = `
+<svg xmlns='http://www.w3.org/2000/svg' width='260' height='260'>
+  <filter id='s'>
+    <feTurbulence type='fractalNoise' baseFrequency='0.035' numOctaves='5' seed='7' stitchTiles='stitch' result='n'/>
+    <feDiffuseLighting in='n' lighting-color='#ffffff' surfaceScale='1.7' diffuseConstant='1.1' result='l'>
+      <feDistantLight azimuth='235' elevation='55'/>
+    </feDiffuseLighting>
+  </filter>
+  <rect width='100%' height='100%' filter='url(#s)'/>
+</svg>`;
+
+/* --- 8b) RACHADURAS: ruído de baixa frequência afinado em veias finas --- */
+const CRACKS = `
+<svg xmlns='http://www.w3.org/2000/svg' width='340' height='340'>
+  <filter id='c'>
+    <feTurbulence type='fractalNoise' baseFrequency='0.012 0.016' numOctaves='4' seed='21' result='n'/>
+    <!-- realça contraste e isola uma faixa estreita = linhas de fratura -->
+    <feColorMatrix in='n' type='matrix' values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 7 -3.05' result='a'/>
+    <feComponentTransfer in='a' result='b'>
+      <feFuncA type='discrete' tableValues='0 0 1 1 0 0'/>
+    </feComponentTransfer>
+    <feFlood flood-color='#000000' result='ink'/>
+    <feComposite in='ink' in2='b' operator='in' result='veins'/>
+    <!-- leve borrão para a veia parecer desgaste, não vetor perfeito -->
+    <feGaussianBlur in='veins' stdDeviation='0.35'/>
+  </filter>
+  <rect width='100%' height='100%' filter='url(#c)'/>
+</svg>`;
+
+/* --- 8c) GRÃO fino: tooth sutil sobre tudo --- */
+const GRAIN = `
+<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150'>
+  <filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter>
+  <rect width='100%' height='100%' filter='url(#g)' opacity='0.25'/>
+</svg>`;
+
+/* --- 8d) CANTOS: TRÊS abordagens distintas (uma por estilo, p/ você escolher).
+        Cada uma é máscara branca s/ transparente, desenhada p/ o canto SUP-ESQ;
+        os outros 3 cantos são espelhados por CSS (scaleX/scaleY). --- */
+
+/* A — HERÁLDICO: bracket angular que acompanha a quina + rebite/cravo central.
+       Sóbrio e "construído"; combina com o basic. */
+const CORNER_A = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none' stroke='#fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>
+  <path d='M50 9 L22 9 Q9 9 9 22 L9 50'/>
+  <path d='M50 16 L27 16 Q16 16 16 27 L16 50' stroke-width='1.6' opacity='0.82'/>
+  <circle cx='20.5' cy='20.5' r='5.6'/>
+  <circle cx='20.5' cy='20.5' r='1.9' fill='#fff' stroke='none'/>
+  <path d='M50 9 l4.5 -3 M9 50 l-3 4.5' stroke-width='1.7'/>
+</svg>`;
+
+/* B — LÍRIO/TREVO: três lóbulos (teardrops) limpos e separados, abrindo da quina
+       (um p/ a quina, dois pelas bordas). Clássico medieval; combina com o gold. */
+const CORNER_B = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='#fff' stroke='none'>
+  <path d='M19 19 C13 19 8 14 6.5 6.5 C14 8 19 13 19 19 Z'/>
+  <path d='M19.5 18.5 C18 12 19.5 6.5 24.5 4 C26.6 9.6 24 15 19.5 18.5 Z'/>
+  <path d='M18.5 19.5 C12 18 6.5 19.5 4 24.5 C9.6 26.6 15 24 18.5 19.5 Z'/>
+  <circle cx='19' cy='19' r='2.5'/>
+  <path d='M28 13 Q20.5 20.5 13 28' fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round' opacity='0.85'/>
+</svg>`;
+
+/* C — SELO ARCANO: anel + runa + halo pontilhado, como um selo mágico fixado na
+       quina. Tema "magia"; combina com o premium. */
+const CORNER_C = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+  <circle cx='19' cy='19' r='10'/>
+  <circle cx='19' cy='19' r='13.6' stroke-width='1.2' stroke-dasharray='1.6 3.4' opacity='0.6'/>
+  <path d='M19 11.5 V26.5 M12.2 15.25 L25.8 22.75 M25.8 15.25 L12.2 22.75' stroke-width='1.5'/>
+  <path d='M10 10 L4 4 M4 4 L7 4 M4 4 L4 7' stroke-width='1.6'/>
+</svg>`;
+
+/* --- 8e) BORDA CORRIDA (horizontal): ladrilho entrelaçado que repete.
+        Tile 56x14, desenha um trançado leve entre as quinas. --- */
+const EDGE_H = `
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 14' fill='none' stroke='#fff' stroke-width='2' stroke-linecap='round'>
+  <!-- duas fitas que se cruzam (over/under sugerido pelos cortes) -->
+  <path d='M0 7 C9 1 19 1 28 7 C37 13 47 13 56 7' opacity='0.95'/>
+  <path d='M0 7 C9 13 19 13 28 7 C37 1 47 1 56 7' stroke-width='1.5' opacity='0.7'/>
+  <circle cx='28' cy='7' r='1.6' fill='#fff' stroke='none'/>
+</svg>`;
+
+/* versão vertical da borda (mesmo trançado, girado 90°) p/ as laterais */
+const EDGE_V = EDGE_H
+  .replace("viewBox='0 0 56 14'", "viewBox='0 0 14 56'")
+  .replace(/<path /g, "<path transform='rotate(90 7 7) translate(0 0)' ")
+  .replace(/<circle /g, "<circle transform='rotate(90 7 7)' ");
+
+/* aplica tudo às CSS custom properties */
+setVar('--tex-stone',  dataURI(STONE));
+setVar('--tex-cracks', dataURI(CRACKS));
+setVar('--tex-grain',  dataURI(GRAIN));
+setVar('--m-corner-a', dataURI(CORNER_A));
+setVar('--m-corner-b', dataURI(CORNER_B));
+setVar('--m-corner-c', dataURI(CORNER_C));
+setVar('--m-edge',     dataURI(EDGE_H));
+setVar('--m-edge-v',   dataURI(EDGE_V));
+
+/* ===========================================================================
+   9) SWITCHER — demonstra a modularidade (só muda data-style)
+   =========================================================================== */
+const panel  = document.getElementById('stage-panel');
+const buttons = document.querySelectorAll('.switch-btn');
+buttons.forEach(btn => btn.addEventListener('click', () => {
+  panel.setAttribute('data-style', btn.dataset.set);
+  buttons.forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+}));
+</script>
+</body>
+</html>

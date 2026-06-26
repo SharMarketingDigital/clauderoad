@@ -4,6 +4,7 @@
 // command (the sim equips that class's starter weapon/kit, for a fresh character). Works
 // identically in single-player and multiplayer — it only emits the chosen id.
 import { PLAYER_CLASSES } from '../sim/content/classes';
+import { decoratePanel } from './theme';
 
 export class ClassSelect {
   private root: HTMLDivElement;
@@ -31,6 +32,7 @@ export class ClassSelect {
       grid.appendChild(card);
     }
     panel.appendChild(grid);
+    decoratePanel(panel); // stone frame (basic palette) — the entry class screen
     this.root.appendChild(panel);
     document.body.appendChild(this.root);
   }

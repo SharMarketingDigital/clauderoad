@@ -9,6 +9,7 @@
 import type { MusicPlayer } from './audio';
 import { registerOverlay, anyOverlayOpen } from './overlays';
 import { isTyping } from './typing';
+import { decoratePanel } from './theme';
 
 export class SettingsMenu {
   private readonly root: HTMLDivElement;
@@ -103,6 +104,7 @@ export class SettingsMenu {
     audio.append(muteRow);
 
     panel.append(audio);
+    decoratePanel(panel); // medieval stone frame around the settings panel
     root.append(panel);
 
     // Pull current MusicPlayer state into the controls.

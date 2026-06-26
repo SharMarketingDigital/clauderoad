@@ -132,15 +132,16 @@ function injectStyle(): void {
   const s = document.createElement('style');
   s.id = 'wm-style';
   s.textContent = `
+    /* No giant panel around the map — just the minimap itself, centered (caveat #3). */
     .wm { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 45;
-      pointer-events: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px;
-      background: rgba(14,19,28,0.96); border: 1px solid rgba(120,160,220,0.5); border-radius: 12px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.55); font-family: system-ui, sans-serif; color: #eaf1ff; }
-    .wm-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
-    .wm-title { font: 800 15px/1.1 system-ui, sans-serif; color: #ffd24a; }
+      pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 10px;
+      font-family: system-ui, sans-serif; color: #eaf1ff; }
+    .wm-header { display: flex; align-items: baseline; justify-content: center; gap: 14px; }
+    .wm-title { font: 800 15px/1.1 system-ui, sans-serif; color: #f4e8c8; text-shadow: 0 1px 0 #000, 0 0 12px var(--glow); }
     .wm-close { font: 600 11px/1 system-ui, sans-serif; color: #8294ad; }
-    .wm-area { position: relative; align-self: center; background: #0a0d12;
-      border: 1px solid rgba(120,160,220,0.4); border-radius: 6px; overflow: hidden; }
+    .wm-area { position: relative; align-self: center; border: 2px solid transparent; border-radius: 8px; overflow: hidden;
+      background: #0a0d12 padding-box, var(--edge-grad) border-box;
+      box-shadow: 0 12px 40px -10px rgba(0,0,0,0.7), 0 0 24px -10px var(--glow); }
     .wm-ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
       border: 1px solid rgba(0,0,0,0.5); border-radius: 3px; }
     .wm-ring-label { position: absolute; top: 3px; left: 50%; transform: translateX(-50%);

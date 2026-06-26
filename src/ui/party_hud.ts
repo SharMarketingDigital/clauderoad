@@ -12,6 +12,7 @@
 // you type a name (same mechanism as chat).
 import type { IWorld, PartyExpMode, PartyLootMode } from '../world_api';
 import { isTyping } from './typing';
+import { decoratePanel } from './theme';
 
 export class PartyHud {
   private root: HTMLDivElement;
@@ -91,6 +92,8 @@ export class PartyHud {
 
     this.root.append(this.header, this.framesEl, controls);
     document.body.append(this.root, this.invitePopup);
+    decoratePanel(this.root); // stone frame on the party column
+    decoratePanel(this.invitePopup); // and on the invite popup
 
     // P toggles the party panel open/closed (MMO social key). Guarded by isTyping() so
     // it never fires while typing in chat or the invite-name field. The invite popup is
@@ -202,10 +205,10 @@ function injectStyle(): void {
   const s = document.createElement('style');
   s.id = 'party-style';
   s.textContent = `
-    /* Left rail under the player frame runs on a 32px rhythm: gold(92) · bot(124) ·
-       SP(156). The party panel continues it at 188 so the member frames never cover
-       the wallet/SP again (was top:116, which sat on top of bot + SP). */
-    .party { position: fixed; left: 16px; top: 188px; z-index: 41; width: 196px;
+    /* The party panel hangs under the whole top-left HUD column (.hud-tl: player frame ·
+       gold/SP counters · "Bot" toggle). In the stone theme that column's bottom sits at
+       ~201px, so top:216 leaves a clean gap and the member frames never cover the Bot toggle. */
+    .party { position: fixed; left: 16px; top: 216px; z-index: 41; width: 196px;
       display: flex; flex-direction: column; gap: 7px; font-family: system-ui, sans-serif; }
     .party-header { font: 700 10px/1 system-ui, sans-serif; color: #9fb2cc; letter-spacing: 0.06em;
       text-transform: uppercase; padding: 1px 3px; text-shadow: 0 1px 2px #000; }

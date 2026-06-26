@@ -338,14 +338,14 @@ export class ClipRecorder {
 
   private renderCountdown(secs: number): void {
     this.button.textContent = `● ${secs}s`;
-    document.title = `🔴 Clipe ${secs}s — Clauderoad`;
+    document.title = `🔴 Clipe ${secs}s - Clauderoad`;
     if (!SHOW_COUNTDOWN_OVERLAY) return;
     if (!this.indicator) {
       this.indicator = document.createElement('div');
       this.indicator.className = 'cr-clip-ind';
       document.body.appendChild(this.indicator);
     }
-    this.indicator.textContent = `🔴 Gravando clipe — ${secs}s`;
+    this.indicator.textContent = `🔴 Gravando clipe - ${secs}s`;
   }
 
   private clearCountdown(): void {

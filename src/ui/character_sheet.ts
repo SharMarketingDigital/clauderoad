@@ -9,6 +9,7 @@
 import type { EntityView } from '../world_api';
 import { isTyping } from './typing';
 import { registerOverlay } from './overlays';
+import { decoratePanel } from './theme';
 
 export class CharacterSheet {
   private root: HTMLDivElement;
@@ -31,6 +32,7 @@ export class CharacterSheet {
       <div class="sheet-body"></div>
     `;
     document.body.appendChild(this.root);
+    decoratePanel(this.root); // medieval stone frame (read-only ficha)
     this.nameEl = this.root.querySelector('.sheet-name') as HTMLSpanElement;
     this.levelEl = this.root.querySelector('.sheet-level') as HTMLSpanElement;
     this.body = this.root.querySelector('.sheet-body') as HTMLDivElement;
