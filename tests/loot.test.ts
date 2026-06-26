@@ -182,4 +182,17 @@ describe('loot físico — pegar (pickup) (LF-S2)', () => {
     };
     expect(play()).toBe(play());
   });
+
+  it('pickup-nearby (tecla G) pega TODO o loot no alcance de uma vez', () => {
+    const { sim } = simWithDeathDrop();
+    const all = groundLoot(sim);
+    expect(all.length).toBeGreaterThan(0);
+    const b = sim.addPlayer('B');
+    sim.restorePlayer(b, { baseStr: 400 });
+    // os drops da morte ficam todos no MESMO ponto, então andar até um põe B no alcance de todos
+    expect(walkTo(sim, b, all[0].x, all[0].z)).toBe(true);
+    run(sim, b, { t: 'pickup-nearby' }); // tecla G
+    expect(groundLoot(sim).length).toBe(0); // pegou todos de uma vez
+    expect(bagStacks(sim, b)).toBeGreaterThan(0); // foram pra bolsa do B (FFA)
+  });
 });

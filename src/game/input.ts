@@ -37,6 +37,12 @@ export class Input {
         if (!e.repeat) this.pending.push({ t: 'cycle-target' });
         return;
       }
+      // G — grab ALL nearby ground loot at once (GDD v0.5 loot físico: the manual "pegar sozinho" when
+      // there's no collection pet yet). One-shot; the sim validates range + bag-full per item.
+      if (e.key.toLowerCase() === 'g') {
+        if (!e.repeat) this.pending.push({ t: 'pickup-nearby' });
+        return;
+      }
       // Action-bar slots 1..9 (top-row digits). The sim no-ops empty slots.
       if (e.key.length === 1 && e.key >= '1' && e.key <= '9') {
         if (!e.repeat) this.pending.push({ t: 'use-ability', slot: Number(e.key) });

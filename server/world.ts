@@ -221,6 +221,10 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'pickup', lootId: cmd.lootId });
         }
         return;
+      // --- pegar TODO o loot no alcance (tecla G): a sim valida alcance/bolsa por item ---
+      case 'pickup-nearby':
+        this.sim.sendCommandFor(id, { t: 'pickup-nearby' });
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }

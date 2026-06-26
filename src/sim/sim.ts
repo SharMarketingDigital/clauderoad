@@ -1594,6 +1594,9 @@ export class Sim implements IWorld {
       case 'pickup':
         this.pickupLoot(p, cmd.lootId);
         break;
+      case 'pickup-nearby':
+        this.pickupNearby(p);
+        break;
       case 'deposit':
         this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
@@ -2759,6 +2762,13 @@ export class Sim implements IWorld {
     if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty)) return; // bag full -> leave it on the ground
     this.ents.delete(lootId);
     this.lootIds.delete(lootId);
+  }
+
+  // GDD v0.5 (loot físico): grab EVERY ground item within reach in one press — the manual "pick up by
+  // yourself" (key G) for when there's no collection pet yet. Reuses pickupLoot per item (range + bag-full
+  // gating). FFA. Deterministic: snapshots lootIds (insertion order) since pickupLoot mutates the set.
+  private pickupNearby(p: Entity): void {
+    for (const lootId of [...this.lootIds]) this.pickupLoot(p, lootId);
   }
 
   // Down the player: enter the "spirit" state, schedule a respawn, and announce
