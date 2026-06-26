@@ -51,6 +51,7 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
         ring: null,
       },
       storage: [{ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 3 }],
+      returnCity: 'leste', // GDD v0.5: the registered Return/respawn city round-trips too
     };
     sim.restorePlayer(a, JSON.parse(JSON.stringify(save))); // through JSON, like the DB
     expect(sim.serializePlayer(a)).toEqual(save);

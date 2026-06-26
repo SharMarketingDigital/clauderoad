@@ -85,6 +85,11 @@ export interface Entity {
   skillRanks: Record<string, number>; // ability id -> current rank (absent = rank 1)
   // economy & inventory (player; enemies carry 0 / empty)
   gold: number;
+  // GDD v0.5 (teleporte): the city the player is REGISTERED to — where Return recalls them and
+  // where they respawn on death. A known city id (zones CITIES); the player defaults to 'town'
+  // (central). Persistent per-player state (save.ts) and folded into the hash. Non-players carry
+  // '' (unused), the same "N/A" marker as `species`.
+  returnCity: string;
   // SPARSE/positional: fixed-length grid (length = BAG_SLOTS for players), holes are null so an
   // item stays at the slot the player dragged it to (loot refills the lowest hole in F-order).
   bag: (ItemStack | null)[];

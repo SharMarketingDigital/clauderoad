@@ -206,6 +206,28 @@ describe('duel PvP damage (A2)', () => {
     expect(chebyshev(br.x, br.z)).toBeLessThanOrEqual(30); // ...in town (the safe spawn)
   });
 
+  it('um jogador cadastrado em outra cidade renasce LÁ, não na vila central (GDD v0.5 TP2)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    // B viaja ao hub leste, CADASTRA o retorno ali, e volta pra central pra brigar perto da origem.
+    sim.restorePlayer(b, { gold: 1000 });
+    run(sim, b, { t: 'teleport', cityId: 'leste' });
+    run(sim, b, { t: 'register-city' }); // cidade de retorno = leste (250,0)
+    run(sim, b, { t: 'teleport', cityId: 'town' }); // volta à central (teleporte NÃO re-cadastra)
+    sim.restorePlayer(a, { baseStr: 400 }); // derruba rápido e deterministico
+    run(sim, a, { t: 'duel-challenge', name: 'B' });
+    run(sim, b, { t: 'duel-accept' });
+    duelToDown(sim, a, b);
+    expect(ent(sim, b).dead).toBe(true); // caiu fora da vila central
+    for (let i = 0; i < DEATH_RESPAWN_TICKS + 5; i++) sim.step();
+    const br = ent(sim, b);
+    expect(br.dead).toBe(false); // renasceu...
+    expect(br.x).toBe(250); // ...no CENTRO da Vila do Leste (a cidade cadastrada)...
+    expect(br.z).toBe(0);
+    expect(chebyshev(br.x, br.z)).toBeGreaterThan(30); // ...e NÃO na vila central (o respawn antigo)
+  });
+
   it('PvP damage + duel resolution is deterministic (same seed + commands => identical hash)', () => {
     const play = (): string => {
       const sim = serverSim(7);

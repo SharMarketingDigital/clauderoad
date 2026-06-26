@@ -24,7 +24,7 @@ import {
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
-import { cityNear, cityById, TELEPORT_COST } from './teleport';
+import { cityNear, cityById, cityIndex, TELEPORT_COST } from './teleport';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -354,6 +354,7 @@ export class Sim implements IWorld {
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
+      returnCity: 'town', // GDD v0.5: registered city (Return recall + respawn point); default = central town
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -398,6 +399,7 @@ export class Sim implements IWorld {
       species: sp.id,
       boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
+      returnCity: '', // N/A: player-only state
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -422,6 +424,7 @@ export class Sim implements IWorld {
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
+      returnCity: '', // N/A: player-only state
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
     });
     return id;
@@ -449,6 +452,7 @@ export class Sim implements IWorld {
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: WAREHOUSE_SPAWN_X, homeZ: WAREHOUSE_SPAWN_Z,
+      returnCity: '', // N/A: player-only state
       targetX: WAREHOUSE_SPAWN_X, targetZ: WAREHOUSE_SPAWN_Z, repickAt: 0,
     });
     return id;
@@ -476,6 +480,7 @@ export class Sim implements IWorld {
       species: t.id, // the boss id, so kill/summon/render resolve its def
       boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
+      returnCity: '', // N/A: player-only state
       targetX: def.spawnX, targetZ: def.spawnZ, repickAt: 0,
     });
     const s = this.bossState[i];
@@ -557,6 +562,7 @@ export class Sim implements IWorld {
       species: def.minionSpecies,
       boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,
+      returnCity: '', // N/A: player-only state
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -1416,6 +1422,14 @@ export class Sim implements IWorld {
     this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-teleport movement intent
   }
 
+  // Register the city the player is STANDING at (its teleporter NPC) as their Return/respawn city
+  // (GDD v0.5 TP2). Free, no-op when not at a teleport point. Pure per-player state write — the
+  // new value is deterministic and folded into the hash, so it's desync-detectable.
+  private registerCity(p: Entity): void {
+    const c = cityNear(p.x, p.z);
+    if (c) p.returnCity = c.id; // remember this hub; Return + death respawn now route here
+  }
+
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
     // Party (social) commands work even while downed/stunned — no combat involved.
@@ -1477,6 +1491,9 @@ export class Sim implements IWorld {
         break;
       case 'teleport':
         this.teleportTo(p, cmd.cityId);
+        break;
+      case 'register-city':
+        this.registerCity(p);
         break;
       case 'deposit':
         this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
@@ -2626,8 +2643,11 @@ export class Sim implements IWorld {
   private respawnPlayer(p: Entity): void {
     if (p.deadUntil === 0 || this.tick < p.deadUntil) return;
     p.deadUntil = 0;
-    p.x = PLAYER_SPAWN_X;
-    p.z = PLAYER_SPAWN_Z;
+    // GDD v0.5: revive at the player's REGISTERED city centre (default 'town' = the original safe
+    // point). cityById falls back to 'town', and PLAYER_SPAWN if even that is somehow unknown.
+    const home = cityById(p.returnCity) ?? cityById('town');
+    p.x = home ? home.cx : PLAYER_SPAWN_X;
+    p.z = home ? home.cz : PLAYER_SPAWN_Z;
     this.recomputeStats(p); // keep effective maxHp/maxMp current, then top up
     p.hp = p.maxHp;
     p.mp = p.maxMp;
@@ -2665,6 +2685,7 @@ export class Sim implements IWorld {
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
       mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil);
+      mix(cityIndex(e.returnCity)); // GDD v0.5: registered city (per-player state; drives Return + respawn)
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       // Fingerprint a fixed slot range so it stays complete across masteries.
       for (let slot = 1; slot <= MAX_ABILITY_SLOTS; slot++) mix(e.abilityReadyAt[slot] ?? 0);

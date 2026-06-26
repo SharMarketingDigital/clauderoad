@@ -94,3 +94,74 @@ describe('teleporte entre cidades (TP1)', () => {
     expect(play()).toBe(play());
   });
 });
+
+// Cadastrar cidade de retorno (TP2a) — the player REGISTERS a hub (at its teleporter NPC); that city
+// becomes their Return/respawn point and persists in the save. returnCity isn't on the EntityView, so
+// we read it through the persistence seam: serializePlayer(id).returnCity.
+describe('cadastrar cidade de retorno (TP2a)', () => {
+  const regCity = (sim: Sim, id: number): string | undefined => sim.serializePlayer(id)?.returnCity;
+
+  it('um jogador novo tem a cidade central como retorno por padrão', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    expect(regCity(sim, a)).toBe('town');
+  });
+
+  it('cadastra a cidade onde o jogador está (no NPC de cada hub)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' }); // viaja ao hub leste
+    run(sim, a, { t: 'register-city' }); // cadastra ali
+    expect(regCity(sim, a)).toBe('leste');
+    run(sim, a, { t: 'teleport', cityId: 'town' }); // volta à central
+    run(sim, a, { t: 'register-city' }); // re-cadastra na central
+    expect(regCity(sim, a)).toBe('town'); // o cadastro sempre aponta pro hub atual
+  });
+
+  it('cadastrar longe de qualquer hub é no-op (mantém o último cadastro)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'register-city' }); // cadastra leste
+    sim.sendCommandFor(a, { t: 'move', dx: 1, dz: 0 });
+    for (let i = 0; i < 120; i++) sim.step(); // anda pra longe do centro de leste
+    sim.sendCommandFor(a, { t: 'stop' });
+    sim.step();
+    expect(Math.hypot(ent(sim, a).x - 250, ent(sim, a).z)).toBeGreaterThan(TELEPORT_RANGE); // fora do NPC
+    run(sim, a, { t: 'register-city' }); // sem NPC por perto -> no-op
+    expect(regCity(sim, a)).toBe('leste'); // segue o último cadastro válido
+  });
+
+  it('persiste no save e ignora cidade desconhecida ao restaurar', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { gold: 1000 });
+    run(sim, a, { t: 'teleport', cityId: 'leste' });
+    run(sim, a, { t: 'register-city' });
+    const saved = sim.serializePlayer(a)!;
+    expect(saved.returnCity).toBe('leste'); // round-trips through the save
+
+    const b = sim.addPlayer('B');
+    sim.restorePlayer(b, saved); // carrega o save do A num personagem novo
+    expect(regCity(sim, b)).toBe('leste'); // cidade cadastrada restaurada
+
+    const c = sim.addPlayer('C');
+    sim.restorePlayer(c, { returnCity: 'cidade-fantasma' }); // id inválido no save
+    expect(regCity(sim, c)).toBe('town'); // mantém o default seguro (nunca aceita id desconhecido)
+  });
+
+  it('cadastrar é deterministico (mesma seed + comandos => mesmo hash)', () => {
+    const play = (): string => {
+      const sim = serverSim(7);
+      const a = sim.addPlayer('A');
+      sim.restorePlayer(a, { gold: 1000 });
+      run(sim, a, { t: 'teleport', cityId: 'leste' });
+      run(sim, a, { t: 'register-city' });
+      for (let i = 0; i < 10; i++) sim.step();
+      return sim.hash();
+    };
+    expect(play()).toBe(play());
+  });
+});

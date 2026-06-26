@@ -207,6 +207,10 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'teleport', cityId: cmd.cityId });
         }
         return;
+      // --- cadastrar cidade de retorno (v0.5 TP2): registra o hub onde o jogador está (sem args; a sim valida proximidade) ---
+      case 'register-city':
+        this.sim.sendCommandFor(id, { t: 'register-city' });
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }

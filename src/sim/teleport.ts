@@ -19,3 +19,11 @@ export function cityNear(x: number, z: number): SafeCity | null {
 export function cityById(id: string): SafeCity | undefined {
   return CITIES.find((c) => c.id === id);
 }
+
+// The index of a city id in CITIES (0 = the central town), or 0 when unknown. A stable numeric key
+// for folding the per-player registered city (returnCity) into the deterministic hash — the id is a
+// string, but its CITIES position is a small stable integer that desyncs would diverge on.
+export function cityIndex(id: string): number {
+  const i = CITIES.findIndex((c) => c.id === id);
+  return i < 0 ? 0 : i;
+}
