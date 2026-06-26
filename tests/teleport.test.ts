@@ -282,3 +282,44 @@ describe('return / recall (TP2b)', () => {
     expect(play()).toBe(play());
   });
 });
+
+// Teleportador NPC (TP3a) — a visible, clickable hub entity at the centre of EVERY city. It's a plain
+// non-combat NPC (kind 'npc', species 'teleporter'); the teleport/register/return RULES stay in the sim.
+describe('teleportador NPC (TP3a)', () => {
+  it('ha um NPC teleportador no centro de cada cidade', () => {
+    const sim = serverSim();
+    const tp = sim.entities().filter((e) => e.kind === 'npc' && e.species === 'teleporter');
+    expect(tp.length).toBe(2); // uma central + Vila do Leste
+    expect(tp.some((e) => e.x === 0 && e.z === 0)).toBe(true); // vila central
+    expect(tp.some((e) => e.x === 250 && e.z === 0)).toBe(true); // Vila do Leste
+  });
+
+  it('usa ids reservados que nao perturbam a alocacao de ids dos jogadores', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    expect(a).toBeLessThan(1_000_000_000); // jogadores vêm do nextId pequeno...
+    expect(b).toBeLessThan(1_000_000_000); // ...nunca colidindo com os ids reservados (>= 1e9)
+    const tp = sim.entities().filter((e) => e.species === 'teleporter');
+    expect(tp.every((e) => e.id >= 1_000_000_001)).toBe(true); // teleportadores acima do armazem (1e9)
+  });
+
+  it('o teleportador e inerte ao combate (kind npc nao e alvo nem agro)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const tpId = sim.entities().find((e) => e.species === 'teleporter')!.id;
+    sim.sendCommandFor(a, { t: 'set-target', id: tpId });
+    sim.step();
+    expect(sim.targetOf(a)).toBeNull(); // um NPC nunca vira alvo de combate
+  });
+
+  it('o mundo com teleportadores e deterministico (mesma seed => mesmo hash)', () => {
+    const play = (): string => {
+      const sim = serverSim(7);
+      sim.addPlayer('A');
+      for (let i = 0; i < 20; i++) sim.step();
+      return sim.hash();
+    };
+    expect(play()).toBe(play());
+  });
+});

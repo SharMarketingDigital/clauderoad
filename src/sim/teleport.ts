@@ -28,3 +28,13 @@ export function cityIndex(id: string): number {
   const i = CITIES.findIndex((c) => c.id === id);
   return i < 0 ? 0 : i;
 }
+
+// The per-city teleporter NPC (GDD v0.5 TP3): the visible, clickable hub at each city centre.
+export const TELEPORTER_NAME = 'Teleportador'; // display name of every city's teleporter NPC
+// Reserved entity-id base for the teleporter NPCs (one per CITIES). Sits just ABOVE the warehouse's
+// reserved id (1_000_000_000 in storage.ts) and far above any nextId-allocated player/vendor id — so
+// adding teleporters never perturbs networked player id allocation. id = base + cityIndex(city.id).
+export const TELEPORTER_ENTITY_ID_BASE = 1_000_000_001;
+export function teleporterEntityId(cityId: string): number {
+  return TELEPORTER_ENTITY_ID_BASE + cityIndex(cityId);
+}

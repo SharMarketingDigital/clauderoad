@@ -23,8 +23,8 @@ import {
   ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, speciesForLevel, SPECIES_BY_ID,
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
-import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
-import { cityNear, cityById, cityIndex, TELEPORT_COST, RETURN_COOLDOWN_SECS } from './teleport';
+import { SPAWN_ZONES, WORLD_HALF, zoneAt, CITIES, type SpawnSpot } from './zones';
+import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -253,6 +253,7 @@ export class Sim implements IWorld {
     }
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
     this.warehouseId = this.spawnWarehouse(); // AFTER the vendor (vendor stays the first 'npc')
+    this.spawnTeleporters(); // GDD v0.5 TP3: one hub NPC per city, AFTER vendor/warehouse (reserved ids)
   }
 
   // Wire up a player's per-player intent/command state and add it to the iteration
@@ -461,6 +462,38 @@ export class Sim implements IWorld {
       targetX: WAREHOUSE_SPAWN_X, targetZ: WAREHOUSE_SPAWN_Z, repickAt: 0,
     });
     return id;
+  }
+
+  // A teleporter NPC at the CENTRE of every city (GDD v0.5 TP3) — the visible, clickable travel hub.
+  // Same fixed, non-combat NPC shape as the vendor/warehouse, but one per CITIES and tagged
+  // species 'teleporter' (the renderer picks its look + the UI opens the menu on a click). RESERVED
+  // ids (teleporterEntityId, above the warehouse's) keep networked player id allocation stable.
+  // Spawned AFTER the warehouse so the town vendor stays the first 'npc'. The teleport/register/return
+  // RULES already live in the sim (TP1/TP2, proximity via cityNear); this NPC is only the anchor.
+  private spawnTeleporters(): void {
+    for (const city of CITIES) {
+      const id = teleporterEntityId(city.id); // RESERVED, stable across sessions (never from nextId)
+      this.ents.set(id, {
+        id, kind: 'npc', name: TELEPORTER_NAME,
+        x: city.cx, z: city.cz, facing: 0,
+        hp: 100, maxHp: 100,
+        targetId: null,
+        str: 0, weaponDamage: 0,
+        baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+        basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
+        swingTicks: 0, nextSwingAt: 0,
+        mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+        level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+        sp: 0, skillRanks: {},
+        gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+        species: 'teleporter',
+        boss: false, summoned: false, spawnZone: -1,
+        homeX: city.cx, homeZ: city.cz,
+        returnCity: '', // N/A: player-only state
+        returnReadyAt: 0,
+        targetX: city.cx, targetZ: city.cz, repickAt: 0,
+      });
+    }
   }
 
   // Spawn boss `i` (an index into BOSS_DEFS) at its fixed point. No Rng (fixed
