@@ -126,9 +126,6 @@ describe('duel handshake (A1)', () => {
 });
 
 describe('duel PvP damage (A2)', () => {
-  // Walk a set of stacked players out of the central safe-zone, DIAGONALLY (x==z) so they cross the
-  // town edge BETWEEN the cardinal spawn packs — keeping the duel free of mob interference. They
-  // start stacked at the spawn (0,0), so identical movement keeps them adjacent (melee contact).
   // Step one player out of the central safe-zone, DIAGONALLY (between the cardinal spawn packs, to
   // dodge mob interference), until comfortably past the town edge (Chebyshev > 35).
   const walkOut = (sim: Sim, id: number): void => {
