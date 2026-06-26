@@ -113,6 +113,7 @@ const BOT_GOLD_RESERVE = 80; // keep at least this much gold for non-essential (
 // Alchemy (enhance): refine equipped gear with spare materials, always keep a reserve
 export const BOT_MATERIAL_RESERVE = 2; // never spend a material (Elixir/Pedra) below this count
 const BOT_ENHANCE_SAFE_RADIUS = 11; // only enhance during a lull (nearest enemy beyond this)
+const BOT_LOOT_RADIUS = 20; // the bot walks to ground loot within this radius to grab it (GDD v0.5 loot físico)
 // Target selection: braver as it levels up
 const BOT_CHAMPION_MIN_LEVEL = 3;
 const BOT_ELITE_MIN_LEVEL = 5;
@@ -1791,6 +1792,24 @@ export class Sim implements IWorld {
       }
     }
 
+    // === PRIORITY 1.5 — SCAVENGE (collect nearby ground loot — GDD v0.5 loot físico) ====
+    // After survival, before tending the bag / hunting: walk to the nearest dropped pile and grab it,
+    // so looted gear + materials flow back into botEquipBest / botEnhance (the LF-S4 economy fix).
+    // Skipped when the bag is full (the VENDOR phase below then sells junk to free a slot, avoiding a
+    // stuck loop). Deterministic: positions + ids only, no Rng.
+    const loot = freeBagSlots(p.bag) > 0 ? this.botNearestLoot(p) : undefined;
+    if (loot) {
+      const ldx = loot.x - p.x;
+      const ldz = loot.z - p.z;
+      if (ldx * ldx + ldz * ldz <= LOOT_PICKUP_RANGE * LOOT_PICKUP_RANGE) {
+        this.applyAction(p, { t: 'pickup-nearby' }); // in reach -> grab the whole pile at once
+        this.moveIntents.set(p.id, { t: 'stop' });
+      } else {
+        this.moveIntents.set(p.id, { t: 'move', dx: ldx, dz: ldz }); // walk to the pile
+      }
+      return; // looting takes this tick (survival already had priority); hunt/vendor resume once clear
+    }
+
     // === PRIORITY 2 — TEND THE BAG (sell junk / restock at the vendor) =====
     if (this.botWantsVendor(p)) {
       if (this.nearVendor(p)) {
@@ -1821,6 +1840,24 @@ export class Sim implements IWorld {
     const reach = this.attackRange(p) - 0.4;
     this.moveIntents.set(p.id, dx * dx + dz * dz > reach * reach ? { t: 'move', dx, dz } : { t: 'stop' });
     this.botUseAbilities(p, target);
+  }
+
+  // The nearest ground-loot pile within the bot's acquisition radius (or undefined). Deterministic:
+  // scans lootIds, keeps the closest, ties broken by lowest id. No Rng. (GDD v0.5 loot físico BR-S1.)
+  private botNearestLoot(p: Entity): Entity | undefined {
+    const r2 = BOT_LOOT_RADIUS * BOT_LOOT_RADIUS;
+    let best: Entity | undefined;
+    let bestD = 0;
+    for (const lootId of this.lootIds) {
+      const e = this.ents.get(lootId);
+      if (!e || !e.loot) continue;
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      const d = dx * dx + dz * dz;
+      if (d > r2) continue; // outside the acquisition radius
+      if (best === undefined || d < bestD || (d === bestD && e.id < best.id)) { best = e; bestD = d; }
+    }
+    return best;
   }
 
   // Força-first build: invest a little Intelligence until the MP pool can sustain a

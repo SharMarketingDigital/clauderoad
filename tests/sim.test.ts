@@ -2841,6 +2841,19 @@ describe('bot (auto-play): self-sufficiency', () => {
     expect(bagQty(sim, 'elixir_armor')).toBe(BOT_MATERIAL_RESERVE); // reserve untouched
     expect(sim.recentEvents().some((e) => e.kind === 'enhance-success' || e.kind === 'enhance-fail')).toBe(false);
   });
+
+  it('scavenge: o bot anda até o loot do chão e pega (BR-S1, pós loot físico)', () => {
+    const sim = new Sim(7);
+    // farma mobs (bot OFF) até cair loot no chão — o loot cai onde o mob morre, perto de onde o player parou
+    for (let i = 0; i < 300 && sim.entities().filter((e) => e.kind === 'loot').length === 0; i++) killNearestEnemy(sim);
+    const before = new Set(sim.entities().filter((e) => e.kind === 'loot').map((e) => e.id));
+    expect(before.size).toBeGreaterThan(0); // há loot no chão pra recolher
+    sim.sendCommand({ t: 'set-bot', on: true }); // liga o auto-play
+    for (let i = 0; i < 1500; i++) sim.step();
+    const after = new Set(sim.entities().filter((e) => e.kind === 'loot').map((e) => e.id));
+    // dentro de 1500 ticks (<< 6000 do despawn), o bot recolheu ao menos um dos loots originais (não sumiu sozinho)
+    expect([...before].some((id) => !after.has(id))).toBe(true);
+  });
 });
 
 // Approach the nearest wolf WITHOUT a target (so no auto-attack pre-damages it),
