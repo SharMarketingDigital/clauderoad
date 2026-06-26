@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { toModel, type Model } from './forest';
+import { SAFE_CITIES } from '../sim/zones';
 
 // The city sits on the central SAFE-ZONE, centered on the spawn (0,0). environment.ts flattens the
 // terrain around this point (FLAT_RADIUS covers the wall), and forest.ts keeps the safe-zone clear
@@ -136,21 +137,21 @@ function recordStall(out: Mats, parent: THREE.Matrix4, wallH: number): void {
 // each gate are torch-lit), plus the four L-corners. Pieces are centred on X/Z with their base at
 // y=0, so placement is a direct grid drop. Corner yaws map the default L (arms toward -X,+Z) onto
 // each physical corner.
-function recordWall(out: Mats): void {
+function recordWall(out: Mats, cx: number, cz: number): void {
   const centers: number[] = [];
   for (let c = -(WALL_H - 2); c <= WALL_H - 2; c += SEG) centers.push(c); // -24 .. +24, gate at 0
   const keyFor = (c: number): string => (c === 0 ? 'sgate' : Math.abs(c) === SEG ? 'storch' : 'swall');
   for (const c of centers) {
-    record(out, keyFor(c), c, 0, WALL_H, 0); // north (z=+H), runs along X
-    record(out, keyFor(c), c, 0, -WALL_H, 0); // south (z=-H)
-    record(out, keyFor(c), WALL_H, 0, c, PI / 2); // east (x=+H), rotated to run along Z
-    record(out, keyFor(c), -WALL_H, 0, c, PI / 2); // west (x=-H)
+    record(out, keyFor(c), c + cx, 0, WALL_H + cz, 0); // north (z=+H), runs along X
+    record(out, keyFor(c), c + cx, 0, -WALL_H + cz, 0); // south (z=-H)
+    record(out, keyFor(c), WALL_H + cx, 0, c + cz, PI / 2); // east (x=+H), rotated to run along Z
+    record(out, keyFor(c), -WALL_H + cx, 0, c + cz, PI / 2); // west (x=-H)
   }
   // L-corners (default arms point -X,+Z): SE=0, SW=+90°, NW=180°, NE=-90°.
-  record(out, 'scorner', WALL_H, 0, -WALL_H, 0); // SE
-  record(out, 'scorner', -WALL_H, 0, -WALL_H, PI / 2); // SW
-  record(out, 'scorner', -WALL_H, 0, WALL_H, PI); // NW
-  record(out, 'scorner', WALL_H, 0, WALL_H, -PI / 2); // NE
+  record(out, 'scorner', WALL_H + cx, 0, -WALL_H + cz, 0); // SE
+  record(out, 'scorner', -WALL_H + cx, 0, -WALL_H + cz, PI / 2); // SW
+  record(out, 'scorner', -WALL_H + cx, 0, WALL_H + cz, PI); // NW
+  record(out, 'scorner', WALL_H + cx, 0, WALL_H + cz, -PI / 2); // NE
 }
 
 // Pave an axis-aligned rectangle with brick tiles (tessellated by the measured tile size).
@@ -176,6 +177,39 @@ function sizeOf(o: THREE.Object3D | undefined): { x: number; y: number } {
   return { x: Math.max(0.1, b.max.x - b.min.x), y: Math.max(0.1, b.max.y - b.min.y) };
 }
 
+// Record one full walled town centered at (cx, cz): rampart + gates, plaza, four streets, cottages,
+// corner keeps, the vendor stall, and decoration. Coordinates are LOCAL to the town centre, then
+// offset by (cx, cz) — so buildTown(0,0,...) is the original central town pixel-identically, and any
+// other centre is a translated copy. Yaws come from the LOCAL coords (doors still aim at the centre).
+function buildTown(out: Mats, cx: number, cz: number, wallH: number, brickStep: number, lanternScale: number): void {
+  recordWall(out, cx, cz); // stone rampart + 4 cardinal gates
+  paveRect(out, cx, cz, PLAZA_HALF, PLAZA_HALF, brickStep, 0.02); // central plaza on the town centre
+  const sCen = (PLAZA_HALF + WALL_H) / 2; // street centre between plaza edge and wall
+  const sHalf = (WALL_H - PLAZA_HALF) / 2; // street half-length
+  paveRect(out, cx, cz + sCen, STREET_HALF, sHalf, brickStep, 0.02); // north
+  paveRect(out, cx, cz - sCen, STREET_HALF, sHalf, brickStep, 0.02); // south
+  paveRect(out, cx + sCen, cz, sHalf, STREET_HALF, brickStep, 0.02); // east
+  paveRect(out, cx - sCen, cz, sHalf, STREET_HALF, brickStep, 0.02); // west
+  for (const [x, z] of HOUSES) recordHouse(out, groupMatrix(x + cx, z + cz, Math.atan2(x, z)), wallH);
+  for (const [x, z] of TOWERS) recordTower(out, groupMatrix(x + cx, z + cz, 0), wallH);
+  recordStall(out, groupMatrix(10 + cx, 6 + cz, Math.atan2(10, 6)), wallH); // vendor stall toward the plaza
+  const G = WALL_H - 2; // just inside the gate
+  record(out, 'lantern', -2.5 + cx, 0, G + cz, 0, lanternScale);
+  record(out, 'lantern', 2.5 + cx, 0, G + cz, 0, lanternScale);
+  record(out, 'lantern', -2.5 + cx, 0, -G + cz, 0, lanternScale);
+  record(out, 'lantern', 2.5 + cx, 0, -G + cz, 0, lanternScale);
+  record(out, 'lantern', G + cx, 0, -2.5 + cz, 0, lanternScale);
+  record(out, 'lantern', -G + cx, 0, 2.5 + cz, 0, lanternScale);
+  for (const [x, z] of [[10, 10], [-10, 10], [10, -10], [-10, -10]] as [number, number][]) {
+    record(out, 'bush', x + cx, 0, z + cz, Math.atan2(z, x));
+  }
+  for (const [x, z] of [[22, 22], [-22, 22], [22, -22], [-22, -22]] as [number, number][]) {
+    record(out, 'tree', x + cx, 0, z + cz, 0);
+  }
+  record(out, 'wagon', -9 + cx, 0, -6 + cz, 0.6);
+  record(out, 'crate', 8 + cx, 0, -7 + cz, 0.3);
+}
+
 export async function populateVillage(scene: THREE.Scene): Promise<void> {
   const loader = new GLTFLoader();
   const keys = Object.keys(ASSETS);
@@ -197,47 +231,14 @@ export async function populateVillage(scene: THREE.Scene): Promise<void> {
   // old clone-based build — the city is laid out pixel-identically), then emit InstancedMeshes.
   const mats: Mats = new Map();
 
-  // --- stone rampart + 4 cardinal gates ---
-  recordWall(mats);
-
-  // --- central plaza on the spawn (0,0): the town square + spawn/revive point ---
-  paveRect(mats, 0, 0, PLAZA_HALF, PLAZA_HALF, brickStep, 0.02);
-
-  // --- four streets in a cross, plaza -> each gate (aligned with the gate openings) ---
-  const sCen = (PLAZA_HALF + WALL_H) / 2; // street centre between plaza edge and wall
-  const sHalf = (WALL_H - PLAZA_HALF) / 2; // street half-length
-  paveRect(mats, 0, sCen, STREET_HALF, sHalf, brickStep, 0.02); // north
-  paveRect(mats, 0, -sCen, STREET_HALF, sHalf, brickStep, 0.02); // south
-  paveRect(mats, sCen, 0, sHalf, STREET_HALF, brickStep, 0.02); // east
-  paveRect(mats, -sCen, 0, sHalf, STREET_HALF, brickStep, 0.02); // west
-
-  // --- cottages in the quadrants, doors aimed at the plaza ---
-  for (const [x, z] of HOUSES) recordHouse(mats, groupMatrix(x, z, Math.atan2(x, z)), wallH);
-
-  // --- corner keeps inside the wall corners ---
-  for (const [x, z] of TOWERS) recordTower(mats, groupMatrix(x, z, 0), wallH);
-
-  // --- vendor stall at (10,6), open side toward the spawn/plaza ---
-  recordStall(mats, groupMatrix(10, 6, Math.atan2(10, 6)), wallH);
-
-  // --- decoration: standing lanterns flanking each gate (inside), greenery + props on the plaza ---
-  const G = WALL_H - 2; // just inside the gate
-  record(mats, 'lantern', -2.5, 0, G, 0, lanternScale);
-  record(mats, 'lantern', 2.5, 0, G, 0, lanternScale);
-  record(mats, 'lantern', -2.5, 0, -G, 0, lanternScale);
-  record(mats, 'lantern', 2.5, 0, -G, 0, lanternScale);
-  record(mats, 'lantern', G, 0, -2.5, 0, lanternScale);
-  record(mats, 'lantern', -G, 0, 2.5, 0, lanternScale);
-  // bushes at the plaza corners; small trees by the inner courtyards (off the streets)
-  for (const [x, z] of [[10, 10], [-10, 10], [10, -10], [-10, -10]] as [number, number][]) {
-    record(mats, 'bush', x, 0, z, Math.atan2(z, x));
-  }
-  for (const [x, z] of [[22, 22], [-22, 22], [22, -22], [-22, -22]] as [number, number][]) {
-    record(mats, 'tree', x, 0, z, 0);
-  }
-  // a couple of intentional props off the spawn centre
-  record(mats, 'wagon', -9, 0, -6, 0.6);
-  record(mats, 'crate', 8, 0, -7, 0.3);
+  // Build a full walled town at the central safe-zone (0,0) AND at each extra safe city (Vila do
+  // Leste) — every city in zones.ts gets the same look. buildTown(0,0,...) reproduces the original
+  // central town pixel-identically; the extra centres are translated copies. Coordinates UNCHANGED.
+  const townCenters: [number, number][] = [
+    [VILLAGE_CX, VILLAGE_CZ],
+    ...SAFE_CITIES.map((c) => [c.cx, c.cz] as [number, number]),
+  ];
+  for (const [cx, cz] of townCenters) buildTown(mats, cx, cz, wallH, brickStep, lanternScale);
 
   // Emit pass: one InstancedMesh per (template, sub-mesh). Static city -> built once, never
   // touched per frame. castShadow + receiveShadow match the old per-clone flags (village kept
