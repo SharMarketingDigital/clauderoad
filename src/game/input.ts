@@ -25,6 +25,9 @@ export class Input {
   private uiSelectedPlayerId: number | null = null;
   private leftClickId: number | null = null;
   private hasLeftClick = false;
+  // TP3: one-shot — the id of a teleporter NPC just left-clicked, consumed by the teleporter HUD to
+  // open its menu (cleared on read). Pure UI state; the sim ignores npc targets.
+  private teleporterClick: number | null = null;
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
@@ -92,6 +95,14 @@ export class Input {
     return this.uiSelectedPlayerId;
   }
 
+  // One-shot: true on the frame the player left-clicked a teleporter NPC (consumed by the teleporter
+  // HUD to open its menu). Cleared on read, so one click opens the menu exactly once.
+  takeTeleporterClick(): boolean {
+    const hit = this.teleporterClick != null;
+    this.teleporterClick = null;
+    return hit;
+  }
+
   // Push queued actions + the current movement intent into the world. Called
   // once per frame.
   apply(world: IWorld): void {
@@ -100,6 +111,7 @@ export class Input {
       this.pending.length = 0;
       this.hasLeftClick = false;
       this.uiSelectedPlayerId = null;
+      this.teleporterClick = null;
       return;
     }
     // While typing in the chat, the player must NOT move/act: drop queued actions,
@@ -107,6 +119,7 @@ export class Input {
     if (isTyping()) {
       this.pending.length = 0;
       this.hasLeftClick = false;
+      this.teleporterClick = null;
       this.keys.clear();
       world.sendCommand({ t: 'stop' });
       return;
@@ -123,6 +136,8 @@ export class Input {
       const me = world.localPlayerId();
       const e = id != null ? world.entities().find((en) => en.id === id) : undefined;
       this.uiSelectedPlayerId = e && e.kind === 'player' && e.id !== me ? e.id : null;
+      // TP3: clicking a teleporter NPC opens its menu (the teleporter HUD consumes this one-shot).
+      if (e && e.kind === 'npc' && e.species === 'teleporter') this.teleporterClick = e.id;
     }
     // Keep the selection truthful so the "Duelar" button never lingers: drop it once a duel is
     // active or the selected player is no longer present.

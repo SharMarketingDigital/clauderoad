@@ -21,6 +21,7 @@ import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
 import { PartyHud } from './ui/party_hud';
 import { DuelHud } from './ui/duel_hud';
+import { TeleporterHud } from './ui/teleporter_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 import { MusicPlayer } from './ui/audio';
@@ -60,6 +61,7 @@ function startOffline(name: string): void {
   const input = new Input(canvas, renderer);
   const hud = new Hud();
   const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
+  const teleporterHud = new TeleporterHud(sim); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; never touches the sim)
   new SettingsMenu(music); // settings (abre no Backspace / via menu Esc); self-driven
   new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
@@ -106,6 +108,7 @@ function startOffline(name: string): void {
     drawCombatFeedback(sim); // after render: project with this frame's updated camera
     hud.update(sim);
     map.update(sim);
+    teleporterHud.update(sim, input); // TP3: hub menu (on teleporter-NPC click) + Return button state
     music.update(sim, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);
   }
@@ -131,6 +134,7 @@ function startOnline(url: string, name: string): void {
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const duelHud = new DuelHud(world); // PvP: active-duel banner + incoming-challenge popup (A3)
+  const teleporterHud = new TeleporterHud(world); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
   const chat = new ChatBox((text, channel) => world.sendChat(text, channel)); // text chat (/p for party)
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
@@ -156,6 +160,7 @@ function startOnline(url: string, name: string): void {
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
     duelHud.update(world, renderer, input.duelTargetId()); // PvP: banner + challenge popup + floating "Duelar" button on the left-click-selected player
+    teleporterHud.update(world, input); // TP3: opens the hub menu on a teleporter-NPC click; drives the Return button state
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     music.update(world, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);

@@ -8,7 +8,7 @@
 // spawns from, so the map can never drift out of sync with the world. Toggled with M and
 // guarded by isTyping() so the key never fires while typing in chat.
 import type { IWorld } from '../world_api';
-import { ZONES, WORLD_HALF, zoneAt } from '../sim/zones';
+import { ZONES, WORLD_HALF, SAFE_CITIES, zoneAt } from '../sim/zones';
 import { isTyping } from './typing';
 import { registerOverlay } from './overlays';
 
@@ -81,6 +81,19 @@ export class WorldMap {
       sq.appendChild(span('wm-ring-label', z.safe ? z.name : `${z.name} · Nv ${z.level}`));
       this.area.appendChild(sq);
     }
+    // Extra safe cities (off-origin, e.g. Vila do Leste) aren't concentric rings, so draw each as
+    // its own small safe-coloured square at its projected map position.
+    for (const c of SAFE_CITIES) {
+      const sq = el('wm-city');
+      const sizePx = ((c.half * 2) / (2 * WORLD_HALF)) * MAP_PX;
+      const { left, top } = worldToMapPx(c.cx, c.cz, MAP_PX, WORLD_HALF);
+      sq.style.width = `${sizePx}px`;
+      sq.style.height = `${sizePx}px`;
+      sq.style.left = `${left}px`;
+      sq.style.top = `${top}px`;
+      sq.appendChild(span('wm-ring-label', c.name));
+      this.area.appendChild(sq);
+    }
   }
 
   // Move the player dot to the live position; only touches the DOM while the map is open.
@@ -144,6 +157,8 @@ function injectStyle(): void {
       box-shadow: 0 12px 40px -10px rgba(0,0,0,0.7), 0 0 24px -10px var(--glow); }
     .wm-ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
       border: 1px solid rgba(0,0,0,0.5); border-radius: 3px; }
+    .wm-city { position: absolute; transform: translate(-50%, -50%); background: #1f3a4d;
+      border: 1px solid rgba(120,160,220,0.6); border-radius: 3px; }
     .wm-ring-label { position: absolute; top: 3px; left: 50%; transform: translateX(-50%);
       font: 700 10px/1 system-ui, sans-serif; color: rgba(255,255,255,0.92); white-space: nowrap;
       text-shadow: 0 1px 2px #000; pointer-events: none; }

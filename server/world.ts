@@ -201,6 +201,20 @@ export class ServerWorld {
       case 'duel-decline':
         this.sim.sendCommandFor(id, { t: 'duel-decline' });
         return;
+      // --- teleporte entre cidades (v0.5): viajar do NPC da cidade; a sim valida proximidade + gold + destino ---
+      case 'teleport':
+        if (typeof cmd.cityId === 'string' && cmd.cityId.length > 0 && cmd.cityId.length <= 32) {
+          this.sim.sendCommandFor(id, { t: 'teleport', cityId: cmd.cityId });
+        }
+        return;
+      // --- cadastrar cidade de retorno (v0.5 TP2): registra o hub onde o jogador está (sem args; a sim valida proximidade) ---
+      case 'register-city':
+        this.sim.sendCommandFor(id, { t: 'register-city' });
+        return;
+      // --- return/recall (v0.5 TP2): warp grátis pra cidade cadastrada de qualquer lugar; a sim valida cooldown + combate ---
+      case 'return':
+        this.sim.sendCommandFor(id, { t: 'return' });
+        return;
       default:
         return; // unknown / unsupported command — ignored
     }
@@ -351,6 +365,7 @@ export class ServerWorld {
     const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
     const storage = this.sim.storageFor(id); // K5: the player's warehouse view (inRange too)
+    const teleporter = this.sim.teleporterFor(id); // TP3: city list + register/Return state for this player
     const e = this.sim.entities().find((v) => v.id === id);
     // Party state is the same for either branch (it survives a dead/missing entity view).
     const party = this.sim.partyViewFor(id);
@@ -368,7 +383,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, abilities, inventory, shop, storage, party, invite,
+        botActive: false, abilities, inventory, shop, storage, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
@@ -380,7 +395,7 @@ export class ServerWorld {
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
-      abilities, inventory, shop, storage, party, invite,
+      abilities, inventory, shop, storage, teleporter, party, invite,
       matching, partyRequests, myRequestPartyId, duel, duelInvite,
     };
   }

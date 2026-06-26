@@ -51,10 +51,45 @@ export const ZONES: ReadonlyArray<ZoneDef> = [
   { id: 'ring10', name: 'Ermo Profundo',    level: 10, inner: 120, outer: 150, safe: false, spots: ringSpots(120, 150) },
 ];
 
-// The world half-extent = the outermost ring's outer edge (150 -> a 300x300 world). The
-// sim will clamp positions to ±WORLD_HALF and spawn within the rings once it adopts this
-// (Fatia 2). The running sim still uses its own value until then.
-export const WORLD_HALF = ZONES[ZONES.length - 1].outer;
+// Extra safe-zone cities beyond the central town (ZONES[0]). Unlike the concentric rings, a second
+// city sits at an arbitrary center — so it can't be a Chebyshev band in ZONES; it lives here as a
+// square safe region centered at (cx, cz) with Chebyshev half-extent `half`. zoneAt() checks these
+// FIRST, then falls back to the concentric rings. (v0.5 — teleporte: the world now has >1 city.)
+export interface SafeCity {
+  readonly id: string;
+  readonly name: string;
+  readonly cx: number; // center X
+  readonly cz: number; // center Z
+  readonly half: number; // Chebyshev half-extent of the safe square (same size as the central town)
+}
+
+export const SAFE_CITIES: ReadonlyArray<SafeCity> = [
+  // Vila do Leste — a frontier town out in the deep wilderness (east edge), the second teleport hub.
+  { id: 'leste', name: 'Vila do Leste', cx: 250, cz: 0, half: 30 },
+];
+
+// Every CITY in the world (the safe hubs you teleport between): the central town (ZONES[0], at the
+// origin) plus each extra safe city. The canonical city list for teleport + render — same shape as
+// a SafeCity (id / name / centre / half).
+export const CITIES: ReadonlyArray<SafeCity> = [
+  { id: ZONES[0].id, name: ZONES[0].name, cx: 0, cz: 0, half: ZONES[0].outer },
+  ...SAFE_CITIES,
+];
+
+// Each extra city as a ready ZoneDef (safe, level 0, no spawns), precomputed so zoneAt() returns a
+// stable object with no per-call allocation. inner/outer hold the city's own square half-extent (the
+// concentric-band meaning doesn't apply off-origin); consumers read safe/level/name, and the map
+// draws these separately from the concentric rings.
+const SAFE_CITY_REGIONS: ReadonlyArray<{ city: SafeCity; zone: ZoneDef }> = SAFE_CITIES.map((c) => ({
+  city: c,
+  zone: { id: c.id, name: c.name, level: 0, inner: 0, outer: c.half, safe: true, spots: [] },
+}));
+
+// The world half-extent. The concentric rings end at 150 (the central city's progression), but the
+// WORLD extends to 300 (a 600x600 map): the outer band (cheb 150–300) is the deep frontier — it
+// reads as the last ring's level via zoneAt's fallback — and holds the second city (Vila do Leste).
+// DECOUPLED from the rings on purpose: the rings no longer reach the world edge.
+export const WORLD_HALF = 300;
 
 // Only the spawnable (non-safe) regions — the sim iterates these in the spawn slice.
 export const SPAWN_ZONES: ReadonlyArray<ZoneDef> = ZONES.filter((z) => !z.safe);
@@ -64,9 +99,14 @@ export function chebyshev(x: number, z: number): number {
   return Math.max(Math.abs(x), Math.abs(z));
 }
 
-// The region a point falls in, by Chebyshev distance. A point past the last ring clamps
-// to the outermost region (the sim never lets an entity leave ±WORLD_HALF anyway). Pure.
+// The region a point falls in. Explicit safe cities (off-origin, like Vila do Leste) win FIRST —
+// they aren't concentric bands. Otherwise it's the concentric ring by Chebyshev distance from the
+// origin; a point past the last ring (the deep frontier, cheb 150–300) clamps to the outermost
+// region (the sim never lets an entity leave ±WORLD_HALF anyway). Pure.
 export function zoneAt(x: number, z: number): ZoneDef {
+  for (const { city, zone } of SAFE_CITY_REGIONS) {
+    if (Math.max(Math.abs(x - city.cx), Math.abs(z - city.cz)) <= city.half) return zone;
+  }
   const d = chebyshev(x, z);
   for (const zone of ZONES) {
     if (d <= zone.outer) return zone;

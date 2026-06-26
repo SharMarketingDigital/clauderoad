@@ -14,6 +14,7 @@ import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS } from './inventory';
 import { MAX_PLUS } from './content/enhance';
 import { SKILL_MAX_RANK } from './content/skill_ranks';
 import { MAX_DURABILITY } from './content/durability';
+import { CITIES } from './zones';
 
 // The persistent slice of a character (what defines its progression). Plain + JSON-safe.
 // Excludes derived stats (str/maxHp/… — recomputed) and transient combat/position state.
@@ -31,6 +32,7 @@ export interface PlayerSave {
   bag: (ItemStack | null)[]; // SPARSE/positional (holes = null); trailing nulls trimmed on save
   equipment: Record<EquipSlot, EquippedItem | null>;
   storage: (ItemStack | null)[]; // K5: armazém/banco da cidade (mesmo modelo esparso da bag)
+  returnCity: string; // GDD v0.5 (teleporte): the registered Return/respawn city id (a known CITIES id)
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -58,6 +60,7 @@ export function toSave(e: Entity): PlayerSave {
     bag: trimTrailingNulls(e.bag.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
     equipment,
     storage: trimTrailingNulls(e.storage.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
+    returnCity: e.returnCity, // GDD v0.5: persist the registered Return/respawn city
   };
 }
 
@@ -80,6 +83,11 @@ export function applySave(e: Entity, raw: unknown): void {
   e.storage = sanitizeBag(raw.storage, STORAGE_SLOTS); // ausente => holes (back-compat de saves antigos)
   const eq = sanitizeEquipment(raw.equipment);
   for (const slot of EQUIP_SLOTS) e.equipment[slot] = eq[slot];
+  // GDD v0.5: accept a registered city only if it's a KNOWN city id; otherwise keep the fresh-spawn
+  // default ('town'). Back-compat: old saves with no returnCity simply keep that default.
+  if (typeof raw.returnCity === 'string' && CITIES.some((c) => c.id === raw.returnCity)) {
+    e.returnCity = raw.returnCity;
+  }
 }
 
 // ---- validation helpers (pure) ----

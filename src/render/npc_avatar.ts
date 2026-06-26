@@ -14,7 +14,10 @@ export class NpcAvatar {
   ready = false;
   private mixer?: THREE.AnimationMixer;
 
-  constructor(modelUrl: string) {
+  // `label`, when given, floats a name tag above the NPC's head (TP3: the teleporter hubs get one so
+  // they read as travel points; the vendor/warehouse pass none and look as before).
+  constructor(modelUrl: string, label?: string) {
+    if (label) this.root.add(makeLabelSprite(label));
     this.load(modelUrl).catch((err) => console.error('[NpcAvatar] failed to load', err));
   }
 
@@ -47,4 +50,30 @@ export class NpcAvatar {
   update(dt: number): void {
     this.mixer?.update(dt);
   }
+}
+
+// A floating name tag (canvas -> sprite) above an NPC's head: teal text on a dark plate so it reads at
+// a distance; depthTest off so it isn't hidden by geometry. Presentation only (the render layer may use
+// DOM/Three). Sized once from the text; the sprite always faces the camera.
+function makeLabelSprite(text: string): THREE.Sprite {
+  const font = 44, padX = 20, padY = 12;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = `bold ${font}px sans-serif`;
+  canvas.width = Math.ceil(ctx.measureText(text).width) + padX * 2;
+  canvas.height = font + padY * 2;
+  ctx.font = `bold ${font}px sans-serif`; // resizing the canvas resets the context — set the font again
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(8,18,28,0.66)'; // dark plate for contrast against the world
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#9fe8ff'; // teal — the teleporter's distinct colour
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+  const h = 0.5; // world units tall; width keeps the canvas aspect
+  sprite.scale.set(h * (canvas.width / canvas.height), h, 1);
+  sprite.position.y = TARGET_HEIGHT + 0.5; // just above the head
+  sprite.renderOrder = 20; // draw over the world
+  return sprite;
 }

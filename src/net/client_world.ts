@@ -9,7 +9,7 @@
 //     later bag/shop), streamed by the server to this client only.
 // The server is authoritative for everything; this only mirrors and renders.
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, TeleporterView,
   PartyView, PartyInviteView, DuelView, DuelInviteView,
 } from '../world_api';
 import type {
@@ -94,7 +94,13 @@ export class ClientWorld implements IWorld {
     const out: EntityView[] = [];
     for (const [id, cur] of this.to) {
       const prev = this.from.get(id) ?? cur; // a brand-new entity has no "from" -> sit still
-      const view = entityView(cur, lerp(prev.x, cur.x, t), lerp(prev.z, cur.z, t), lerpAngle(prev.facing, cur.facing, t));
+      // SNAP a large one-shot jump (teleport / Return recall ~250 units) instead of sliding across the
+      // map: when prev->cur far exceeds any per-snapshot walk, render at the destination immediately.
+      const warped = (cur.x - prev.x) ** 2 + (cur.z - prev.z) ** 2 > TELEPORT_SNAP_DIST2;
+      const x = warped ? cur.x : lerp(prev.x, cur.x, t);
+      const z = warped ? cur.z : lerp(prev.z, cur.z, t);
+      const facing = warped ? cur.facing : lerpAngle(prev.facing, cur.facing, t);
+      const view = entityView(cur, x, z, facing);
       out.push(id === this.myId && this.self ? mergeSelf(view, this.self) : view);
     }
     return out;
@@ -121,6 +127,10 @@ export class ClientWorld implements IWorld {
 
   storage(): StorageView {
     return this.self ? this.self.storage : EMPTY_STORAGE;
+  }
+
+  teleporter(): TeleporterView {
+    return this.self ? this.self.teleporter : EMPTY_TELEPORTER;
   }
 
   botActive(): boolean {
@@ -263,6 +273,11 @@ const EMPTY_ABILITIES: ReadonlyArray<AbilityView> = [];
 const EMPTY_INVENTORY: InventoryView = { capacity: 0, stacks: [], slots: [], equipment: [] };
 const EMPTY_SHOP: ShopView = { name: '', stock: [], inRange: false };
 const EMPTY_STORAGE: StorageView = { name: '', capacity: 0, stacks: [], inRange: false }; // capacity 0 like EMPTY_INVENTORY; the panel reads capacity per-update
+const EMPTY_TELEPORTER: TeleporterView = { inRange: false, atCityId: null, registeredCityId: 'town', cities: [], returnReady: false, returnBlockedReason: null };
+// TP3: snap (don't lerp) an entity whose position jumped more than this between snapshots — a teleport
+// or Return recall (~250 units) reads as a one-shot warp, not a glide across the map. Squared units;
+// normal walking covers <1 unit per ~100ms snapshot, far below this, so it never trips on real movement.
+const TELEPORT_SNAP_DIST2 = 50 * 50;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;

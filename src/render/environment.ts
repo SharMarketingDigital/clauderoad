@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VILLAGE_CX, VILLAGE_CZ } from './village';
 // The world's half-extent (sim source of truth). The visual ground + scenery derive from
 // it so they ALWAYS cover the playable world — no magic size to drift out of sync.
-import { WORLD_HALF } from '../sim/zones';
+import { WORLD_HALF, SAFE_CITIES } from '../sim/zones';
 
 // ===================== TUNABLES =====================
 // -- day/night cycle --
@@ -110,12 +110,24 @@ function col(hex: number): THREE.Color {
   return new THREE.Color(hex);
 }
 
+// Town centres to flatten the terrain around: the central safe-zone (0,0) plus each extra safe city
+// (Vila do Leste). terrainHeight stays flat near ANY of them, so every walled village sits on clean
+// ground. Render-only — the sim is flat (y=0); this just shapes the visual hills.
+const TOWN_CENTERS: ReadonlyArray<readonly [number, number]> = [
+  [VILLAGE_CX, VILLAGE_CZ],
+  ...SAFE_CITIES.map((c) => [c.cx, c.cz] as const),
+];
+
 export function terrainHeight(x: number, z: number): number {
-  const rOrigin = Math.hypot(x, z);
-  const rVillage = Math.hypot(x - VILLAGE_CX, z - VILLAGE_CZ);
-  let m = smoothstep(FLAT_RADIUS, FLAT_RADIUS + FLAT_RAMP, rOrigin);
-  m *= smoothstep(VILLAGE_FLAT, VILLAGE_FLAT + 8, rVillage);
-  if (m <= 0) return 0;
+  // Flat near any town (the smallest hill-multiplier across town centres), full hills away from all.
+  // For the central town (0,0) this is byte-identical to the old single-centre formula.
+  let m = 1;
+  for (const [cx, cz] of TOWN_CENTERS) {
+    const r = Math.hypot(x - cx, z - cz);
+    const flat = smoothstep(FLAT_RADIUS, FLAT_RADIUS + FLAT_RAMP, r) * smoothstep(VILLAGE_FLAT, VILLAGE_FLAT + 8, r);
+    if (flat < m) m = flat;
+    if (m <= 0) return 0; // inside a town -> dead flat
+  }
   return (fbm(x * TERRAIN_SCALE, z * TERRAIN_SCALE) - 0.5) * 2 * TERRAIN_AMP * m;
 }
 

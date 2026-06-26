@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, TeleporterView, TeleporterCityView, EquipSlot, Rarity,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -23,7 +23,8 @@ import {
   ENEMY_TEMPLATE, ENEMY_TIERS, pickEnemyTier, speciesForLevel, SPECIES_BY_ID,
   levelHpMult, levelDamageMult, levelRewardMult,
 } from './content/enemies';
-import { SPAWN_ZONES, WORLD_HALF, zoneAt, type SpawnSpot } from './zones';
+import { SPAWN_ZONES, WORLD_HALF, zoneAt, CITIES, type SpawnSpot } from './zones';
+import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -121,6 +122,7 @@ const BOT_CLUSTER_PENALTY = 100; // when cautious, bias away from clustered targ
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
+export const RETURN_COOLDOWN_TICKS = Math.round(RETURN_COOLDOWN_SECS * TICK_RATE); // GDD v0.5: free Return recall cooldown
 
 // Progression (provisional — GDD §B4b: GENTLE, rewarding pacing; NOT Silkroad's
 // brutal grind). Per level-up: +HP/+MP max and +5 attribute points.
@@ -251,6 +253,7 @@ export class Sim implements IWorld {
     }
     this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
     this.warehouseId = this.spawnWarehouse(); // AFTER the vendor (vendor stays the first 'npc')
+    this.spawnTeleporters(); // GDD v0.5 TP3: one hub NPC per city, AFTER vendor/warehouse (reserved ids)
   }
 
   // Wire up a player's per-player intent/command state and add it to the iteration
@@ -353,6 +356,8 @@ export class Sim implements IWorld {
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: 0, homeZ: 0,
+      returnCity: 'town', // GDD v0.5: registered city (Return recall + respawn point); default = central town
+      returnReadyAt: 0,
       targetX: 0, targetZ: 0, repickAt: 0,
     });
     return id;
@@ -397,6 +402,8 @@ export class Sim implements IWorld {
       species: sp.id,
       boss: false, summoned: false, spawnZone: zoneIndex,
       homeX: x, homeZ: z,
+      returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -421,6 +428,8 @@ export class Sim implements IWorld {
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
+      returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
     });
     return id;
@@ -448,9 +457,43 @@ export class Sim implements IWorld {
       species: '',
       boss: false, summoned: false, spawnZone: -1,
       homeX: WAREHOUSE_SPAWN_X, homeZ: WAREHOUSE_SPAWN_Z,
+      returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: WAREHOUSE_SPAWN_X, targetZ: WAREHOUSE_SPAWN_Z, repickAt: 0,
     });
     return id;
+  }
+
+  // A teleporter NPC at the CENTRE of every city (GDD v0.5 TP3) — the visible, clickable travel hub.
+  // Same fixed, non-combat NPC shape as the vendor/warehouse, but one per CITIES and tagged
+  // species 'teleporter' (the renderer picks its look + the UI opens the menu on a click). RESERVED
+  // ids (teleporterEntityId, above the warehouse's) keep networked player id allocation stable.
+  // Spawned AFTER the warehouse so the town vendor stays the first 'npc'. The teleport/register/return
+  // RULES already live in the sim (TP1/TP2, proximity via cityNear); this NPC is only the anchor.
+  private spawnTeleporters(): void {
+    for (const city of CITIES) {
+      const id = teleporterEntityId(city.id); // RESERVED, stable across sessions (never from nextId)
+      this.ents.set(id, {
+        id, kind: 'npc', name: TELEPORTER_NAME,
+        x: city.cx, z: city.cz, facing: 0,
+        hp: 100, maxHp: 100,
+        targetId: null,
+        str: 0, weaponDamage: 0,
+        baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
+        basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
+        swingTicks: 0, nextSwingAt: 0,
+        mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+        level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+        sp: 0, skillRanks: {},
+        gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+        species: 'teleporter',
+        boss: false, summoned: false, spawnZone: -1,
+        homeX: city.cx, homeZ: city.cz,
+        returnCity: '', // N/A: player-only state
+        returnReadyAt: 0,
+        targetX: city.cx, targetZ: city.cz, repickAt: 0,
+      });
+    }
   }
 
   // Spawn boss `i` (an index into BOSS_DEFS) at its fixed point. No Rng (fixed
@@ -475,6 +518,8 @@ export class Sim implements IWorld {
       species: t.id, // the boss id, so kill/summon/render resolve its def
       boss: true, summoned: false, spawnZone: -1,
       homeX: def.spawnX, homeZ: def.spawnZ,
+      returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: def.spawnX, targetZ: def.spawnZ, repickAt: 0,
     });
     const s = this.bossState[i];
@@ -556,6 +601,8 @@ export class Sim implements IWorld {
       species: def.minionSpecies,
       boss: false, summoned: true, spawnZone: -1,
       homeX: x, homeZ: z,
+      returnCity: '', // N/A: player-only state
+      returnReadyAt: 0,
       targetX: x, targetZ: z, repickAt: 0,
     });
   }
@@ -709,6 +756,39 @@ export class Sim implements IWorld {
         })
       : [];
     return { name: WAREHOUSE_NAME, capacity: STORAGE_SLOTS, stacks, inRange: p ? this.nearWarehouse(p) : false };
+  }
+
+  teleporter(): TeleporterView {
+    return this.teleporterFor(this.localId);
+  }
+
+  // The teleporter menu state for a SPECIFIC player (TP3): the city list + fixed cost, the city they're
+  // standing at (for "register here"), their registered Return city, and whether Return is usable now
+  // (off cooldown AND not in combat — mirrors the returnToCity gate). The IWorld teleporter() uses the
+  // local player; the server calls this per client for the SelfSnap.
+  teleporterFor(id: number): TeleporterView {
+    const p = this.ents.get(id);
+    const at = p ? cityNear(p.x, p.z) : null;
+    const cities: TeleporterCityView[] = CITIES.map((c) => ({
+      id: c.id,
+      name: c.name,
+      cost: at && at.id === c.id ? 0 : TELEPORT_COST,
+      current: at != null && at.id === c.id,
+    }));
+    const onCooldown = p != null && this.tick < p.returnReadyAt;
+    const inFight = p != null && this.inCombat(p);
+    let blocked: string | null = null;
+    if (!p) blocked = 'Indisponível';
+    else if (inFight) blocked = 'Em combate';
+    else if (onCooldown) blocked = `Cooldown: ${Math.ceil((p.returnReadyAt - this.tick) / TICK_RATE)}s`;
+    return {
+      inRange: at != null,
+      atCityId: at?.id ?? null,
+      registeredCityId: p?.returnCity ?? 'town',
+      cities,
+      returnReady: p != null && !onCooldown && !inFight,
+      returnBlockedReason: blocked,
+    };
   }
 
   botActive(): boolean {
@@ -1398,6 +1478,58 @@ export class Sim implements IWorld {
     }
   }
 
+  // ---------- teleporte entre cidades (GDD v0.5) ----------
+  // Teleport the player to another city's centre: must be standing at a city teleport point, the
+  // destination must be a DIFFERENT known city, and the fixed gold cost must be affordable. Pure
+  // position + gold mutation (no Rng) — determinism-safe; folded into the hash via the entity.
+  private teleportTo(p: Entity, cityId: string): void {
+    const from = cityNear(p.x, p.z);
+    if (!from) return; // not at a teleport point (the NPC sits at a city centre)
+    const dest = cityById(cityId);
+    if (!dest || dest.id === from.id) return; // unknown destination, or already there
+    if (p.gold < TELEPORT_COST) return; // can't afford the trip
+    p.gold -= TELEPORT_COST;
+    p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(dest.cz, -WORLD_HALF, WORLD_HALF);
+    p.targetId = null;
+    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-teleport movement intent
+  }
+
+  // Register the city the player is STANDING at (its teleporter NPC) as their Return/respawn city
+  // (GDD v0.5 TP2). Free, no-op when not at a teleport point. Pure per-player state write — the
+  // new value is deterministic and folded into the hash, so it's desync-detectable.
+  private registerCity(p: Entity): void {
+    const c = cityNear(p.x, p.z);
+    if (c) p.returnCity = c.id; // remember this hub; Return + death respawn now route here
+  }
+
+  // Free Return recall (GDD v0.5 TP2): warp the player to their REGISTERED city centre from anywhere.
+  // BLOCKED while in combat (dueling, or a mob aggroed on them — PK joins later) and gated by a cooldown.
+  // Pure position/cooldown mutation (no Rng) — deterministic and folded into the hash.
+  private returnToCity(p: Entity): void {
+    if (this.inCombat(p)) return; // headline block: can't recall mid-fight (no escaping a duel or a hunting mob)
+    if (this.tick < p.returnReadyAt) return; // and a cooldown between recalls (checked AFTER combat, so the
+    // teleporter view's blocked-reason priority — combat first, then cooldown — matches this gate order)
+    const dest = cityById(p.returnCity) ?? cityById('town');
+    if (!dest) return; // defensive: registered city unknown and even 'town' missing
+    p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(dest.cz, -WORLD_HALF, WORLD_HALF);
+    p.targetId = null;
+    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-recall movement intent
+    p.returnReadyAt = this.tick + RETURN_COOLDOWN_TICKS;
+  }
+
+  // Is the player in COMBAT for the purpose of blocking Return? True while dueling (PK will OR in here
+  // later), or while any LIVING enemy is aggroed on them. O(entities), but only runs on a Return attempt
+  // (player-initiated, rare). Pure read, no Rng — deterministic.
+  private inCombat(p: Entity): boolean {
+    if (this.duelOf.has(p.id)) return true; // a consensual duel
+    for (const e of this.ents.values()) {
+      if (e.kind === 'enemy' && e.hp > 0 && e.targetId === p.id) return true; // a mob is hunting you
+    }
+    return false;
+  }
+
   // ---------- target selection (tab-target) ----------
   private applyAction(p: Entity, cmd: Command): void {
     // Party (social) commands work even while downed/stunned — no combat involved.
@@ -1456,6 +1588,15 @@ export class Sim implements IWorld {
         break;
       case 'select-class':
         this.selectClass(p, cmd.classId);
+        break;
+      case 'teleport':
+        this.teleportTo(p, cmd.cityId);
+        break;
+      case 'register-city':
+        this.registerCity(p);
+        break;
+      case 'return':
+        this.returnToCity(p);
         break;
       case 'deposit':
         this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
@@ -2605,8 +2746,11 @@ export class Sim implements IWorld {
   private respawnPlayer(p: Entity): void {
     if (p.deadUntil === 0 || this.tick < p.deadUntil) return;
     p.deadUntil = 0;
-    p.x = PLAYER_SPAWN_X;
-    p.z = PLAYER_SPAWN_Z;
+    // GDD v0.5: revive at the player's REGISTERED city centre (default 'town' = the original safe
+    // point). cityById falls back to 'town', and PLAYER_SPAWN if even that is somehow unknown.
+    const home = cityById(p.returnCity) ?? cityById('town');
+    p.x = home ? home.cx : PLAYER_SPAWN_X;
+    p.z = home ? home.cz : PLAYER_SPAWN_Z;
     this.recomputeStats(p); // keep effective maxHp/maxMp current, then top up
     p.hp = p.maxHp;
     p.mp = p.maxMp;
@@ -2643,7 +2787,8 @@ export class Sim implements IWorld {
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
-      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil);
+      mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil); mix(e.returnReadyAt);
+      mix(cityIndex(e.returnCity)); // GDD v0.5: registered city (per-player state; drives Return + respawn)
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       // Fingerprint a fixed slot range so it stays complete across masteries.
       for (let slot = 1; slot <= MAX_ABILITY_SLOTS; slot++) mix(e.abilityReadyAt[slot] ?? 0);

@@ -8,7 +8,7 @@
 // streams back (a) the shared world + combat events to everyone and (b) each player's
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
-  EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView, StorageView,
+  EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView, StorageView, TeleporterView,
   PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, MasteryId,
 } from '../world_api';
 
@@ -114,6 +114,7 @@ export interface SelfSnap {
   inventory: InventoryView; // the player's bag + equipped gear (loot lands here)
   shop: ShopView; // the vendor storefront + whether this player is in range to trade
   storage: StorageView; // K5: the player's warehouse (armazém) contents + whether in range
+  teleporter: TeleporterView; // TP3: city list + cost, registered city, and Return readiness for this player
   party: PartyView | null; // the player's party (members + modes), or null when solo
   invite: PartyInviteView | null; // a pending party invite to accept/refuse, or null
   // --- PvP duel (Tier 1; authoritative in the sim, delivered to the owner like party/invite) ---

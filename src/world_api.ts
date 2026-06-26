@@ -172,6 +172,27 @@ export interface StorageView {
   readonly inRange: boolean;
 }
 
+// One destination row in the teleporter menu (GDD v0.5 TP3). `cost` is the fixed gold for a one-way
+// trip (0 for the city you're standing in); `current` marks that same city (can't travel to itself).
+export interface TeleporterCityView {
+  readonly id: string;
+  readonly name: string;
+  readonly cost: number;
+  readonly current: boolean;
+}
+
+// The teleporter menu state for the local player (TP3). `inRange` = standing at a city teleporter (so
+// register/teleport are allowed); `atCityId` is that city (for "register here"). `registeredCityId` is
+// where Return + death respawn go. `returnReady`/`returnBlockedReason` drive the HUD's Return button.
+export interface TeleporterView {
+  readonly inRange: boolean;
+  readonly atCityId: string | null;
+  readonly registeredCityId: string;
+  readonly cities: ReadonlyArray<TeleporterCityView>;
+  readonly returnReady: boolean;
+  readonly returnBlockedReason: string | null;
+}
+
 // Party (co-op group), Silkroad-style. The leader picks BOTH modes at creation:
 //   exp:  'each-get'   — each member keeps the XP they earned (no range limit), +bonus
 //                        by party size; capacity 4.
@@ -263,7 +284,13 @@ export type Command =
   // --- PvP duel (Tier 1; consensual 1v1) ---
   | { t: 'duel-challenge'; name: string } // challenge an online player to a duel by name
   | { t: 'duel-accept' } // accept your pending duel challenge (forms the pair)
-  | { t: 'duel-decline' }; // decline your pending duel challenge
+  | { t: 'duel-decline' } // decline your pending duel challenge
+  // --- teleporte entre cidades (GDD v0.5): viaja entre os hubs a partir do NPC no centro da cidade ---
+  | { t: 'teleport'; cityId: string } // teleport to another city's centre (server validates proximity + gold + destination)
+  // --- cadastrar cidade de retorno (GDD v0.5 TP2): register the city you're standing at as your Return/respawn hub ---
+  | { t: 'register-city' } // no args — the sim registers whichever city teleporter you're at (free)
+  // --- return/recall (GDD v0.5 TP2): free warp to your registered city from anywhere; sim gates cooldown + combat ---
+  | { t: 'return' }; // no args — recall to the player's registered Return city
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -336,6 +363,8 @@ export interface IWorld {
   shop(): ShopView;
   // The local player's warehouse (armazém) contents + whether in range to deposit/withdraw.
   storage(): StorageView;
+  // The teleporter menu state for the local player (city list + cost, registered city, Return status).
+  teleporter(): TeleporterView;
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;

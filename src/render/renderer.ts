@@ -456,7 +456,8 @@ export class Renderer {
     if (e.kind === 'npc') {
       // One avatar per NPC id (vendor + warehouse), created on first sight.
       let av = this.npcAvatars.get(e.id);
-      if (!av) { av = new NpcAvatar('/models/Mage.glb'); this.npcAvatars.set(e.id, av); }
+      // Teleporter hubs (TP3) float a name tag so they read as travel points; vendor/warehouse pass none.
+      if (!av) { av = new NpcAvatar('/models/Mage.glb', e.species === 'teleporter' ? e.name : undefined); this.npcAvatars.set(e.id, av); }
       return av.ready ? av.root : null;
     }
     return null;
