@@ -19,13 +19,14 @@ describe('world zones (data model)', () => {
     }
   });
 
-  it('rings are contiguous from center to the world edge (no gaps/overlaps)', () => {
+  it('rings are contiguous from the center outward (no gaps/overlaps); the world extends past them', () => {
     expect(ZONES[0].inner).toBe(0); // first band starts at the center
     for (let i = 1; i < ZONES.length; i++) {
       expect(ZONES[i].inner).toBe(ZONES[i - 1].outer); // band i starts where i-1 ends
       expect(ZONES[i].outer - ZONES[i].inner).toBe(RING_WIDTH); // each ring is one width
     }
-    expect(ZONES[ZONES.length - 1].outer).toBe(WORLD_HALF); // last ring reaches the edge
+    expect(ZONES[ZONES.length - 1].outer).toBe(150); // rings end at 150 (the central city's progression)
+    expect(WORLD_HALF).toBeGreaterThan(ZONES[ZONES.length - 1].outer); // world extends past the rings (deep frontier + 2nd city)
   });
 
   it('zoneAt maps a point to its ring by Chebyshev distance (farther = stronger)', () => {
@@ -51,5 +52,16 @@ describe('world zones (data model)', () => {
   it('the safe-zone contains the player spawn and the vendor', () => {
     expect(zoneAt(0, 0).safe).toBe(true); // player spawn (PLAYER_SPAWN_X/Z)
     expect(zoneAt(10, 6).safe).toBe(true); // vendor (VENDOR_SPAWN_X/Z)
+  });
+
+  it('a second safe city (Vila do Leste) is safe; the deep frontier past the rings reads as the last ring', () => {
+    const east = zoneAt(250, 0); // the new city center
+    expect(east.safe).toBe(true);
+    expect(east.level).toBe(0);
+    expect(east.id).toBe('leste');
+    expect(zoneAt(0, 0).id).toBe('town'); // the central town still resolves normally (origin unaffected)
+    // just outside the city square is open frontier — not safe, at the last ring's level
+    expect(zoneAt(200, 0).safe).toBe(false);
+    expect(zoneAt(200, 0).level).toBe(10); // deep frontier (cheb 200, past the rings) = Ermo Profundo
   });
 });
