@@ -25,6 +25,7 @@ import {
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, zoneAt, CITIES, type SpawnSpot } from './zones';
 import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
+import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE } from './loot';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -123,6 +124,7 @@ export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for th
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
 export const RETURN_COOLDOWN_TICKS = Math.round(RETURN_COOLDOWN_SECS * TICK_RATE); // GDD v0.5: free Return recall cooldown
+export const LOOT_DESPAWN_TICKS = Math.round(LOOT_DESPAWN_SECS * TICK_RATE); // GDD v0.5: ground-loot lifetime before it vanishes
 
 // Progression (provisional — GDD §B4b: GENTLE, rewarding pacing; NOT Silkroad's
 // brutal grind). Per level-up: +HP/+MP max and +5 attribute points.
@@ -161,6 +163,9 @@ export class Sim implements IWorld {
   private tierRng: Rng; // independent substream for enemy-tier rolls (see constructor)
   private procRng: Rng; // independent substream for enemy on-hit status procs (see constructor)
   private spawnRng: Rng; // independent substream for zone spawn POSITIONS (see constructor)
+  private dropRng: Rng; // independent substream for player-death loot drops (GDD v0.5; never perturbs the main stream)
+  // GDD v0.5 (loot físico): ids of the kind 'loot' ground items in this.ents, so the despawn scan is O(loot) not O(all).
+  private lootIds = new Set<number>();
   private partyRng: Rng; // independent substream for party loot auto-share recipient picks (see constructor)
   private ents = new Map<number, Entity>();
   // O3 — entities() view cache. Built lazily on first read each tick and reused by every caller
@@ -238,6 +243,9 @@ export class Sim implements IWorld {
     // And zone spawn POSITIONS roll from their own substream, so scattering mobs across
     // the rings never perturbs the main loot/position stream (determinism stays clean).
     this.spawnRng = new Rng((seed ^ 0x165667b1) >>> 0);
+    // And player-death loot drops roll from their own substream, so dropping items on death never
+    // perturbs the main loot/position stream (the world stays comparable across the feature).
+    this.dropRng = new Rng((seed ^ 0x4f574d41) >>> 0);
     if (spawnLocal) {
       this.localId = this.spawnPlayer(localName);
       this.registerPlayer(this.localId);
@@ -1079,6 +1087,10 @@ export class Sim implements IWorld {
         // The player's class skin = its active weapon mastery (unarmed -> Sword). Only players
         // have one; enemies/NPCs report the default and the renderer ignores it for them.
         mastery: e.kind === 'player' ? this.activeMastery(e).id : DEFAULT_MASTERY,
+        loot: e.loot
+          ? { itemId: e.loot.stack.itemId, name: ITEMS[e.loot.stack.itemId]?.name ?? e.loot.stack.itemId,
+              rarity: e.loot.stack.rarity, plus: e.loot.stack.plus, qty: e.loot.stack.qty }
+          : null,
       });
     }
     return out;
@@ -1146,6 +1158,7 @@ export class Sim implements IWorld {
       if (p) this.respawnPlayer(p); // revive a downed player once its timer elapses
     }
     this.processRespawns();
+    this.despawnGroundLoot(); // GDD v0.5: remove ground loot whose lifetime elapsed
     this.updateBoss();
     this.pruneEvents();
     // A target that died or no longer exists clears the selection.
@@ -2699,6 +2712,58 @@ export class Sim implements IWorld {
     }
   }
 
+  // GDD v0.5 (loot físico): drop a stack on the GROUND as a pickup-able world object at (x, z). A plain
+  // inert entity (kind 'loot'): the combat/AI code keys on kind 'enemy'/'player', so 'loot' is ignored
+  // like 'npc'. Tracked in lootIds for the despawn scan and folded into the hash via Entity.loot.
+  private spawnGroundLoot(x: number, z: number, stack: ItemStack): void {
+    const id = this.nextId++;
+    this.ents.set(id, {
+      id, kind: 'loot', name: ITEMS[stack.itemId]?.name ?? stack.itemId,
+      x, z, facing: 0,
+      hp: 1, maxHp: 1,
+      targetId: null,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 1, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      species: '',
+      boss: false, summoned: false, spawnZone: -1,
+      homeX: x, homeZ: z,
+      returnCity: '', returnReadyAt: 0,
+      targetX: x, targetZ: z, repickAt: 0,
+      loot: { stack: { ...stack }, despawnAt: this.tick + LOOT_DESPAWN_TICKS },
+    });
+    this.lootIds.add(id);
+  }
+
+  // GDD v0.5 (loot físico): remove ground items whose despawn timer elapsed (or that vanished otherwise).
+  // Scans only lootIds. Deterministic — each removal is independent, so order doesn't matter.
+  private despawnGroundLoot(): void {
+    if (this.lootIds.size === 0) return;
+    let gone: number[] | null = null;
+    for (const id of this.lootIds) {
+      const e = this.ents.get(id);
+      if (!e || !e.loot || this.tick >= e.loot.despawnAt) (gone ??= []).push(id);
+    }
+    if (gone) for (const id of gone) { this.ents.delete(id); this.lootIds.delete(id); }
+  }
+
+  // GDD v0.5 (loot físico): on a NON-duel death, each held BAG stack has a low chance to fall to the
+  // ground at the death spot (FFA pickup). Equipped gear is spared — its durability loss is the cost.
+  // Uses the dropRng substream so drops never perturb the main loot/position stream; hash-folded.
+  private dropPhysicalLoot(p: Entity): void {
+    const held = p.bag.filter((s): s is ItemStack => s != null).map((s) => ({ ...s })); // snapshot before mutating p.bag
+    for (const s of held) {
+      if (this.dropRng.next() >= DEATH_DROP_CHANCE) continue; // kept it
+      if (!removeFromBag(p.bag, s.itemId, s.rarity, s.plus, s.qty)) continue; // safety: must still hold the stack
+      this.spawnGroundLoot(p.x, p.z, s);
+    }
+  }
+
   // Down the player: enter the "spirit" state, schedule a respawn, and announce
   // the death. Enemies drop the player as a target via their hp<=0 de-aggro.
   private killPlayer(p: Entity): void {
@@ -2729,6 +2794,7 @@ export class Sim implements IWorld {
       }
     }
     if (worn) this.recomputeStats(p); // fold the weaker (worn) bonus into effective stats now
+    this.dropPhysicalLoot(p); // GDD v0.5: a NON-duel death scatters some bag items on the ground (FFA pickup)
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
@@ -2823,6 +2889,12 @@ export class Sim implements IWorld {
       for (const s of e.effects) {
         mix(strHash(s.kind)); mix(s.expiresAt); mix(s.magnitude);
         mix(s.period); mix(s.nextAt); mix(s.source);
+      }
+      // GDD v0.5 (loot físico): a ground item's stack + despawn tick. Only kind 'loot' sets e.loot, so this
+      // branch never runs for players/enemies/NPCs — worlds without ground loot hash byte-identically.
+      if (e.loot) {
+        mix(strHash(e.loot.stack.itemId)); mix(strHash(e.loot.stack.rarity));
+        mix(e.loot.stack.plus); mix(e.loot.stack.qty); mix(e.loot.despawnAt);
       }
     }
     // Pending respawns are deterministic state too (FIFO order is stable).

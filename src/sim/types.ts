@@ -20,6 +20,14 @@ export interface ItemStack {
   qty: number;
 }
 
+// GDD v0.5 (loot físico): a stack lying on the ground as a pickup-able world object. Carried ONLY by
+// kind 'loot' entities (Entity.loot); the Sim spawns these on a player death (and later mob kills) and
+// removes them on pickup or once `despawnAt` elapses.
+export interface GroundLoot {
+  stack: ItemStack;
+  despawnAt: number; // tick at which the ground item vanishes
+}
+
 // A specific equipped item instance (id + the rarity it rolled at + its +N + its
 // current durability). Durability starts full on equip, drops on death (GDD B8), and
 // is restored by repairing at the vendor; worn gear gives less of its stat bonus.
@@ -127,4 +135,7 @@ export interface Entity {
   targetX: number;
   targetZ: number;
   repickAt: number;
+  // GDD v0.5 (loot físico): present ONLY on kind 'loot' ground items (the dropped stack + despawn tick).
+  // undefined for players/enemies/NPCs — so no existing spawn literal changes and the hash fold stays conditional.
+  loot?: GroundLoot;
 }

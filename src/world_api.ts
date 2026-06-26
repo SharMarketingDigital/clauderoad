@@ -7,7 +7,7 @@
 // concretely. To add a feature, extend IWorld first, then implement it in
 // every world (offline Sim, and later the online ClientWorld).
 
-export type EntityKind = 'player' | 'enemy' | 'npc';
+export type EntityKind = 'player' | 'enemy' | 'npc' | 'loot'; // 'loot' = a pickup-able ground item (GDD v0.5)
 
 // Equipment slots a character can fill. Defined here (the seam) so both the
 // sim's item content and the UI agree on the set.
@@ -51,6 +51,16 @@ export type EnemyTierId = 'normal' | 'champion' | 'elite';
 // agree; render shows a marker by kind.
 export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense' | 'crit';
 
+// GDD v0.5 (loot físico): the stack lying on the ground for a kind 'loot' entity, so render/UI can show
+// what it is and the pickup knows the contents. Present only on loot entities; null/absent otherwise.
+export interface GroundLootView {
+  readonly itemId: string;
+  readonly name: string;
+  readonly rarity: Rarity;
+  readonly plus: number;
+  readonly qty: number;
+}
+
 export interface EntityView {
   readonly id: number;
   readonly kind: EntityKind;
@@ -90,6 +100,8 @@ export interface EntityView {
   // renderer maps this to the per-class character model (Knight/Barbarian/Ranger/Mage). Players
   // carry their real mastery; enemies/NPCs report the default ('sword') and the renderer ignores it.
   readonly mastery: MasteryId;
+  // GDD v0.5 (loot físico): the dropped stack for a kind 'loot' ground item; null/absent for everyone else.
+  readonly loot?: GroundLootView | null;
 }
 
 // One stack in the player's bag, with the item's display name resolved.
