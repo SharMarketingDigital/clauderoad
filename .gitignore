@@ -10,6 +10,10 @@ tmp/
 # Stray non-project file that can appear in the working tree — never commit it.
 /CLAUDE-FABLE-5.md
 
+# Personal, per-developer process guide — kept in the root but intentionally NOT versioned
+# (only the rule below is shared; the file's contents never leave the author's machine).
+/WORKFLOW.md
+
 # Raw asset downloads (3D model kits, texture/particle packs, audio/music packs) — NOT
 # versioned (hundreds of source files: fbx/obj/blend/png/ogg/mp3/wav). Only the curated,
 # ready-to-use files under public/ are committed.
