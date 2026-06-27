@@ -11,6 +11,31 @@
 
 ---
 
+## ✅ STATUS FINAL — v0.5 FECHADO (auditoria 2026-06-27)
+
+Auditoria exaustiva (6 sistemas × laudo + verificação adversarial, conferindo a
+cadeia inteira: sim → IWorld → whitelist do servidor → ambos os branches do
+SelfSnap → testes → UI). A verificação **não achou nenhuma alegação de "pronto"
+falsa**. Decisão do Shar: **declarar o v0.5 fechado e entrar na lapidação** (§8) —
+o que faltava de "sistema novo" (Guildas C0/D0) fica **cortado** (ver §-resumo).
+
+| Sistema | Estado | Notas |
+|---|---|---|
+| **Teleporte (§6)** | ✅ Completo | Excede a spec: Return com cooldown + registrar cidade; 26 testes |
+| **PK Livre (§2)** | ✅ Completo | Elegibilidade (ALT) + morte/respawn + feedback visual; no hash |
+| **Pets (§4)** | ✅ Completo | Companheiro + grab + transport bag; obtenção via vendor (PET3) |
+| **Loot Físico (§3)** | ✅ Funcional | LF1/LF2/LF3 prontos. Cortado: tipos visuais caixa/moedas/saquinho + gold como drop físico (LF0) → lapidação |
+| **Stalls (§5)** | ✅ Funcional | Transfer atômica anti-dup + montar/comprar (ST0/ST1/ST2). Por design: online-only (ST3, offline = Marketplace). Cortado: render 3D da barraca (ST4) → lapidação |
+| **Guildas (§1)** | 🟡 Parcial | B0/B1/B3 prontos (chat /g, registro, Postgres). **Cortado: armazém de guilda (C0) e guerra de guildas (D0)**; painel de roster (GuildView, B2) → lapidação/futuro |
+| **Marketplace global** | ✅ Extra | Fora do escopo original do v0.5: venda assíncrona com escrow + mailbox + persistência |
+
+**Cortado do v0.5** (não vira pendência; reabre só se virar GDD próprio): armazém de
+guilda (C0), guerra de guildas (D0). **Adiado pra lapidação** (polimento, não sistema
+novo): painel de membros da guilda, render 3D da barraca, variedade visual do loot +
+gold físico, teste PK-específico de drop.
+
+---
+
 ## 0. Como ler este documento
 
 - **Os 6 sistemas do v0.5** (escolha do Shar): Guildas, PK livre, Loot físico,
@@ -292,9 +317,11 @@ No Silkroad, o jogador se teleporta entre cidades-hub (por NPC ou comando, com
 custo). É mobilidade essencial num mundo de múltiplas regiões — evita a viagem
 longa e repetitiva entre zonas distantes.
 
-**Nota:** isso estava planejado no v0.3 (G4: `feat(sim): teleporte entre cidades`)
-mas pode não ter sido concluído. Confirmar o estado atual antes de implementar —
-se já existe parcialmente, completar; se não, fazer.
+**Nota (resolvida — auditoria 2026-06-27):** ✅ **Concluído e excede a spec.** Há um
+módulo dedicado `src/sim/teleport.ts` + lógica completa no `sim.ts`, coberto por 26
+testes verdes. Além do TP1–TP3, ganhou registrar cidade-âncora e um Return (recall)
+gratuito com cooldown + bloqueio em combate; a morte também respawna na cidade
+registrada. Hubs atuais: `town` (0,0) e `leste` (250,0); custo fixo 50g.
 
 **Por que faz sentido:** com o mundo expandido (múltiplas zonas/cidades), andar a
 pé entre elas é tedioso. O teleporte conecta o mundo e respeita o tempo do jogador.
@@ -344,6 +371,11 @@ As dependências entre sistemas sugerem uma ordem (ajustável):
 
 ## 8. Depois do v0.5: LAPIDAÇÃO
 
+> **▶ INICIADA em 2026-06-27.** O v0.5 foi declarado fechado (ver o STATUS FINAL no
+> topo). A partir daqui, **nenhum sistema novo** — só polir. Os itens "adiados pra
+> lapidação" listados no topo (painel de roster, barraca 3D, variedade visual do
+> loot + gold físico, teste PK de drop) entram nesta fase, junto com:
+
 Concluído o v0.5, o projeto **para de adicionar sistemas** e entra na fase de
 lapidação:
 - **Balanceamento:** as classes, o PvP, as taxas de XP/SP/drop, a economia.
@@ -360,17 +392,19 @@ jogo que é gostoso de jogar". É o objetivo final desta etapa do ClaudeRoad.
 
 ## Resumo do escopo v0.5
 
-| # | Sistema | Toca principalmente | Sensibilidade |
-|---|---------|---------------------|---------------|
-| 1 | Guildas (B,C,D) | servidor, storage, combate | Média (storage coordenado) |
-| 2 | PK Livre | combate, input | Média (balanceamento do drop) |
-| 3 | Loot Físico | drop, mundo, render | **Alta** (refatora o drop) |
-| 4 | Pets | loot físico, storage, render | Média (depende do §3) |
-| 5 | Stalls | itens, persistência, segurança | **Alta** (descongela trade P2P) |
-| 6 | Teleporte | zonas, economia, UI | Baixa (quick win) |
+| # | Sistema | Toca principalmente | Sensibilidade | Estado final |
+|---|---------|---------------------|---------------|--------------|
+| 1 | Guildas (B,C,D) | servidor, storage, combate | Média (storage coordenado) | 🟡 B0/B1/B3 ✅ · **C0/D0 cortados** |
+| 2 | PK Livre | combate, input | Média (balanceamento do drop) | ✅ completo |
+| 3 | Loot Físico | drop, mundo, render | **Alta** (refatora o drop) | ✅ funcional (LF0 cosmético → lapidação) |
+| 4 | Pets | loot físico, storage, render | Média (depende do §3) | ✅ completo |
+| 5 | Stalls | itens, persistência, segurança | **Alta** (descongela trade P2P) | ✅ funcional (ST4 barraca 3D → lapidação) |
+| 6 | Teleporte | zonas, economia, UI | Baixa (quick win) | ✅ completo (excede a spec) |
 
 **Congelado/cortado (não entra no v0.5):** Union (raid 32), Fortress War, Job
 System (trader/hunter/thief), Magic Stones, imbues elementais. *(Se o Job System
-for desejado, vira um GDD próprio futuro — é grande.)*
+for desejado, vira um GDD próprio futuro — é grande.)* **Cortados na auditoria de
+fechamento (2026-06-27):** armazém de guilda (C0) e guerra de guildas (D0) — só
+reabrem se virarem GDD próprio.
 
 *Plano da última leva de sistemas do ClaudeRoad. Depois disto, lapidação.*
