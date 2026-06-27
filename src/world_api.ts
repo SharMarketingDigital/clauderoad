@@ -203,21 +203,24 @@ export interface StallView {
 // The item stays in the seller's bag until sold; `qty` is the seller's LIVE count. Same list for everyone.
 export interface MarketListingView {
   readonly id: number; // the listing id (buy/cancel reference it)
-  readonly sellerId: number;
-  readonly sellerName: string;
+  readonly sellerName: string; // the seller (may be OFFLINE — the item is escrowed in the listing)
   readonly itemId: string;
   readonly name: string;
   readonly rarity: Rarity;
   readonly plus: number;
   readonly price: number; // gold per unit
-  readonly qty: number; // how many the seller still holds (live; the listing self-removes at 0)
+  readonly qty: number; // units still escrowed in the listing (self-removes at 0)
   readonly own: boolean; // true if the LOCAL player owns this listing (so the UI shows Cancel, not Buy)
 }
 
-// The global marketplace board — every active listing, the same for everyone. Delivered per-client (like
-// the matching list). Browse + buy from anywhere; the sim moves item + gold atomically on a buy.
+// The global marketplace board — every active listing (same for everyone) + the VIEWER's own mailbox of
+// sale proceeds (gold) + returned items waiting to be collected. Delivered per-client (like the matching
+// list). Browse + buy from anywhere, even with the seller offline (the item is escrowed); a sale credits
+// the seller's mailbox, which they collect on return.
 export interface MarketView {
   readonly listings: ReadonlyArray<MarketListingView>;
+  readonly mailboxGold: number; // proceeds waiting for the local player to collect
+  readonly mailboxItems: number; // count of returned/unsold item units waiting in the mailbox
 }
 
 // The player's persistent warehouse (armazém/banco da cidade) — bag-like, stored at the town
@@ -382,7 +385,8 @@ export type Command =
   // or buy one. The sim re-validates ownership/gold/room + moves item + gold atomically (anti-dup). ---
   | { t: 'market-list'; itemId: string; rarity: Rarity; plus: number; price: number }
   | { t: 'market-cancel'; listingId: number }
-  | { t: 'market-buy'; listingId: number }; // buy ONE unit of a listing
+  | { t: 'market-buy'; listingId: number } // buy ONE unit of a listing
+  | { t: 'market-collect' }; // collect your mailbox: sale proceeds (gold) + unsold/returned items
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

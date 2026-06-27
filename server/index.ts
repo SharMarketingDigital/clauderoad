@@ -31,6 +31,7 @@ import { ChatModerator } from './chat';
 import { Weather } from './weather';
 import { createStore, MemoryStore, type CharacterStore } from './store';
 import { createGuildStore, MemoryGuildStore, type GuildStore } from './guild_store';
+import { createMarketStore, MemoryMarketStore, type MarketStore } from './market_store';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -71,6 +72,7 @@ const SAVE_INTERVAL_SECONDS = posNum(process.env.SAVE_INTERVAL_SECONDS, 30);
 // BEFORE we listen (see the bottom), so a returning player loads correctly.
 let store: CharacterStore = new MemoryStore();
 let guildStore: GuildStore = new MemoryGuildStore(); // durable guilds (Postgres or memory; loaded on boot)
+let marketStore: MarketStore = new MemoryMarketStore(); // async marketplace blob (listings + mailbox; loaded on boot)
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
 const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known)
 const joining = new Set<WebSocket>(); // sockets mid-join (awaiting the async DB load) — guards the gap
@@ -295,6 +297,7 @@ function dropClient(ws: WebSocket): void {
   // Persist the latest progress BEFORE the entity is removed (serialize needs it alive).
   const save = world.serializePlayer(id);
   if (name != null && save != null) void store.save(name, save);
+  void marketStore.save(world.serializeMarket()); // persist the market too (this player may have listed/sold)
   world.removePlayer(id);
   clientIds.delete(ws);
   clientNames.delete(ws);
@@ -332,6 +335,7 @@ setInterval(() => {
     const save = world.serializePlayer(id);
     if (name != null && save != null) void store.save(name, save);
   }
+  void marketStore.save(world.serializeMarket()); // persist the marketplace (async sales survive a restart)
 }, SAVE_INTERVAL_SECONDS * 1000);
 
 // Connect the database (if any) BEFORE accepting players, so a returning player loads
@@ -343,6 +347,11 @@ void (async () => {
   // so a returning member is already in their guild. Falls back to memory if there's no DB.
   guildStore = await createGuildStore(process.env.DATABASE_URL);
   world.loadGuilds(await guildStore.loadAll());
+  // Async marketplace: load the persisted listings + mailbox BEFORE accepting players, so a sale that
+  // happened while everyone was offline (and the escrowed items) survive the restart.
+  marketStore = await createMarketStore(process.env.DATABASE_URL);
+  const savedMarket = await marketStore.load();
+  if (savedMarket != null) world.restoreMarket(savedMarket);
   httpServer.listen(PORT, HOST, () => {
     const mode = ALLOWED_ORIGINS.length > 0 ? `origins=[${ALLOWED_ORIGINS.join(', ')}]` : 'dev (localhost origins)';
     const persist = store.ready ? 'persistence ON (Postgres)' : 'persistence OFF (in-memory)';

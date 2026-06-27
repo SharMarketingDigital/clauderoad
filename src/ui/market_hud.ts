@@ -37,6 +37,17 @@ export class MarketHud {
     const market = world.market();
     this.panel.replaceChildren(title('Mercado Global (J fecha)'));
 
+    // Mailbox: sale proceeds (and any returned/unsold items) waiting to be collected.
+    if (market.mailboxGold > 0 || market.mailboxItems > 0) {
+      const mb = document.createElement('div');
+      mb.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;padding:6px 8px;border-radius:6px;background:rgba(40,60,40,0.55);';
+      const lbl = document.createElement('span');
+      lbl.textContent = `📬 Proventos: ${market.mailboxGold}g${market.mailboxItems > 0 ? ` + ${market.mailboxItems} item(ns)` : ''}`;
+      lbl.style.cssText = 'color:#7ee0a0;font-weight:600;';
+      mb.append(lbl, button('Coletar', () => world.sendCommand({ t: 'market-collect' })));
+      this.panel.append(mb);
+    }
+
     if (market.listings.length === 0) {
       const empty = document.createElement('div');
       empty.textContent = 'Nenhum item à venda no momento.';

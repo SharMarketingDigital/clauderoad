@@ -306,7 +306,7 @@ const EMPTY_INVENTORY: InventoryView = { capacity: 0, stacks: [], slots: [], equ
 const EMPTY_SHOP: ShopView = { name: '', stock: [], inRange: false };
 const EMPTY_STORAGE: StorageView = { name: '', capacity: 0, stacks: [], inRange: false }; // capacity 0 like EMPTY_INVENTORY; the panel reads capacity per-update
 const EMPTY_PETBAG: PetBagView = { name: '', capacity: 0, stacks: [], available: false }; // GDD v0.5 (Pets PET2)
-const EMPTY_MARKET: MarketView = { listings: [] }; // Global Marketplace (empty until the first self snapshot)
+const EMPTY_MARKET: MarketView = { listings: [], mailboxGold: 0, mailboxItems: 0 }; // Global Marketplace (empty until the first self snapshot)
 const EMPTY_TELEPORTER: TeleporterView = { inRange: false, atCityId: null, registeredCityId: 'town', cities: [], returnReady: false, returnBlockedReason: null };
 // TP3: snap (don't lerp) an entity whose position jumped more than this between snapshots — a teleport
 // or Return recall (~250 units) reads as a one-shot warp, not a glide across the map. Squared units;

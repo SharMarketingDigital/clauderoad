@@ -242,7 +242,12 @@ export class Sim implements IWorld {
   // Global marketplace: listingId -> a reference to a seller's bag stack + per-unit price. IN the sim
   // (gold + items are hashed). Buyable from ANYWHERE; the item stays in the seller's bag until sold
   // (re-validated at buy), so nothing is escrowed and there's nothing to return on disconnect.
-  private marketListings = new Map<number, { sellerId: number; itemId: string; rarity: Rarity; plus: number; price: number }>();
+  // Global marketplace — listings hold the ESCROWED item (taken out of the seller's bag) + the seller's
+  // NAME + a per-unit price, so a sale can happen while the seller is OFFLINE. IN the sim (gold+items are
+  // hashed); anti-dup is free (single-threaded tick). Persisted as a blob (serializeMarket) — survives restart.
+  private marketListings = new Map<number, { sellerName: string; item: ItemStack; price: number }>();
+  // Sale proceeds + returned items waiting for a player to collect (keyed by LOWERCASED name). Persisted.
+  private mailbox = new Map<string, { gold: number; items: ItemStack[] }>();
   private nextMarketId = 1;
 
   // `spawnLocal` controls whether a local player is created; `localName` is its name.
@@ -324,9 +329,8 @@ export class Sim implements IWorld {
     const petId = this.petOf.get(id);
     if (petId !== undefined) { this.ents.delete(petId); this.petOf.delete(id); }
     this.stalls.delete(id); // GDD v0.5 (Stalls): a disconnecting seller closes their stall
-    // Global marketplace: drop the disconnecting seller's listings (the item lives in their bag, which
-    // serializes normally — nothing to escrow or return).
-    for (const [lid, l] of this.marketListings) if (l.sellerId === id) this.marketListings.delete(lid);
+    // Global marketplace: listings + mailbox PERSIST across disconnect (keyed by name; the item is escrowed
+    // in the listing) — that's what lets a sale happen while the seller is offline. Nothing to clean up here.
     const i = this.playerIds.indexOf(id);
     if (i >= 0) this.playerIds.splice(i, 1);
     for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
@@ -1042,62 +1046,158 @@ export class Sim implements IWorld {
     }
   }
 
-  // ---------- Global Marketplace: list / browse / buy from ANYWHERE (reuses the atomic transferItem) ----------
-  // IWorld seam: the global board for the local player (with its `own` flags).
+  // ---------- Global Marketplace: list / browse / buy from ANYWHERE, even with the seller OFFLINE ----------
+  // IWorld seam: the global board + the local player's mailbox of proceeds.
   market(): MarketView {
     return this.marketFor(this.localId);
   }
 
-  // Every active listing (the same board for everyone), built per-viewer for the `own` flag + live qty from
-  // the seller's bag. Stale lines (seller offline or no longer holding the item) are hidden.
+  // The global board (same listings for everyone) + the VIEWER's mailbox (proceeds to collect). The listed
+  // item is ESCROWED in the listing, so the seller needn't be online; `own` is per-viewer (by name).
   marketFor(viewerId: number): MarketView {
+    const vkey = (this.ents.get(viewerId)?.name ?? '').toLowerCase();
     const listings: MarketListingView[] = [];
     for (const lid of [...this.marketListings.keys()].sort((a, b) => a - b)) {
       const l = this.marketListings.get(lid)!;
-      const seller = this.ents.get(l.sellerId);
-      if (!seller || seller.kind !== 'player') continue; // seller offline -> hide
-      let qty = 0;
-      for (const s of seller.bag) if (s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus) qty += s.qty;
-      if (qty <= 0) continue; // seller no longer holds it -> hide (self-removes on the next buy)
       listings.push({
-        id: lid, sellerId: l.sellerId, sellerName: seller.name,
-        itemId: l.itemId, name: ITEMS[l.itemId]?.name ?? l.itemId, rarity: l.rarity, plus: l.plus, price: l.price,
-        qty, own: l.sellerId === viewerId,
+        id: lid, sellerName: l.sellerName,
+        itemId: l.item.itemId, name: ITEMS[l.item.itemId]?.name ?? l.item.itemId,
+        rarity: l.item.rarity, plus: l.item.plus, price: l.price, qty: l.item.qty,
+        own: l.sellerName.toLowerCase() === vkey,
       });
     }
-    return { listings };
+    const mb = this.mailbox.get(vkey);
+    const mailboxItems = mb ? mb.items.reduce((n, s) => n + s.qty, 0) : 0;
+    return { listings, mailboxGold: mb?.gold ?? 0, mailboxItems };
   }
 
-  // List a bag item for sale globally (the item STAYS in the bag; re-validated at buy). Validates a
-  // positive-int price + ownership + the per-seller cap, and dedupes an identical stack already listed.
+  // List a bag stack for sale globally: ESCROW the whole stack OUT of the bag into the listing, so it can
+  // sell while you're offline. Validates a positive-int price, ownership, and the per-seller cap.
   private marketList(p: Entity, itemId: string, rarity: Rarity, plus: number, price: number): void {
     if (!Number.isInteger(price) || price <= 0) return;
-    if (!p.bag.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus)) return; // must hold it
+    let qty = 0;
+    for (const s of p.bag) if (s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus) qty += s.qty;
+    if (qty <= 0) return; // must hold it
     let mine = 0;
-    for (const l of this.marketListings.values()) {
-      if (l.sellerId !== p.id) continue;
-      if (l.itemId === itemId && l.rarity === rarity && l.plus === plus) return; // already listed this stack
-      mine++;
-    }
+    for (const l of this.marketListings.values()) if (l.sellerName.toLowerCase() === p.name.toLowerCase()) mine++;
     if (mine >= MARKET_MAX_PER_SELLER) return; // anti-spam cap
-    this.marketListings.set(this.nextMarketId++, { sellerId: p.id, itemId, rarity, plus, price });
+    if (!removeFromBag(p.bag, itemId, rarity, plus, qty)) return; // escrow: take it out of the bag
+    this.marketListings.set(this.nextMarketId++, { sellerName: p.name, item: { itemId, rarity, plus, qty }, price });
   }
 
+  // Cancel YOUR listing: return the escrowed item to your bag (overflow -> your mailbox), drop the listing.
   private marketCancel(p: Entity, listingId: number): void {
     const l = this.marketListings.get(listingId);
-    if (l && l.sellerId === p.id) this.marketListings.delete(listingId); // only the owner cancels
+    if (!l || l.sellerName.toLowerCase() !== p.name.toLowerCase()) return; // only the owner cancels
+    this.marketListings.delete(listingId);
+    if (!addToBag(p.bag, l.item.itemId, l.item.rarity, l.item.plus, l.item.qty, BAG_SLOTS)) {
+      this.mailboxAddItem(p.name, l.item); // bag full -> hold the returned stack in the mailbox
+    }
   }
 
-  // Buy ONE unit of a listing from ANYWHERE (no proximity). Re-validates the seller is online + still holds
-  // the item, then the atomic transferItem (anti-dup); self-removes the listing when the seller runs out.
+  // Buy ONE unit from ANYWHERE (no proximity; the seller may be OFFLINE). The item comes from the listing's
+  // ESCROW; the gold goes to the seller's MAILBOX. Anti-dup is free (single-threaded tick serializes buys).
   private marketBuy(buyer: Entity, listingId: number): void {
     const l = this.marketListings.get(listingId);
     if (!l) return;
-    const seller = this.ents.get(l.sellerId);
-    if (!seller || seller.kind !== 'player') return; // seller offline
-    if (!this.transferItem(seller, buyer, l.itemId, l.rarity, l.plus, l.price)) return; // atomic; clean abort (incl. self-buy)
-    const stillHas = seller.bag.some((s) => s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus);
-    if (!stillHas) this.marketListings.delete(listingId);
+    if (l.sellerName.toLowerCase() === buyer.name.toLowerCase()) return; // can't buy your own (cancel instead)
+    if (buyer.gold < l.price) return; // can't afford it
+    if (!canAccept(buyer.bag, l.item.itemId, l.item.rarity, l.item.plus, BAG_SLOTS)) return; // no room -> abort
+    // all checks passed -> the mutations are infallible (no dup: the escrow qty decrements atomically)
+    addToBag(buyer.bag, l.item.itemId, l.item.rarity, l.item.plus, 1, BAG_SLOTS);
+    buyer.gold -= l.price;
+    this.creditMailboxGold(l.sellerName, l.price);
+    l.item.qty -= 1;
+    if (l.item.qty <= 0) this.marketListings.delete(listingId); // sold out
+  }
+
+  // Collect your mailbox: credit the proceeds gold + pull returned items into your bag (overflow stays in
+  // the mailbox for next time). Driven by the market-collect command.
+  private marketCollect(p: Entity): void {
+    const key = p.name.toLowerCase();
+    const mb = this.mailbox.get(key);
+    if (!mb) return;
+    p.gold += mb.gold;
+    mb.gold = 0;
+    const remaining: ItemStack[] = [];
+    for (const s of mb.items) {
+      if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty, BAG_SLOTS)) remaining.push(s); // bag full -> keep for later
+    }
+    mb.items = remaining;
+    if (mb.gold === 0 && mb.items.length === 0) this.mailbox.delete(key);
+  }
+
+  // ---- mailbox helpers (proceeds + returned items, keyed by lowercased name) ----
+  private creditMailboxGold(name: string, gold: number): void {
+    const key = name.toLowerCase();
+    const mb = this.mailbox.get(key) ?? { gold: 0, items: [] as ItemStack[] };
+    mb.gold += gold;
+    this.mailbox.set(key, mb);
+  }
+  private mailboxAddItem(name: string, item: ItemStack): void {
+    const key = name.toLowerCase();
+    const mb = this.mailbox.get(key) ?? { gold: 0, items: [] as ItemStack[] };
+    const existing = mb.items.find((s) => s.itemId === item.itemId && s.rarity === item.rarity && s.plus === item.plus);
+    if (existing) existing.qty += item.qty;
+    else mb.items.push({ ...item });
+    this.mailbox.set(key, mb);
+  }
+
+  // ---- Marketplace persistence (server-side blob; DATA-ONLY, no Rng/tick — like serializePlayer) ----
+  serializeMarket(): {
+    listings: { id: number; sellerName: string; item: ItemStack; price: number }[];
+    mailbox: { name: string; gold: number; items: ItemStack[] }[];
+    nextId: number;
+  } {
+    return {
+      listings: [...this.marketListings.entries()].map(([id, l]) => ({ id, sellerName: l.sellerName, item: { ...l.item }, price: l.price })),
+      mailbox: [...this.mailbox.entries()].map(([name, mb]) => ({ name, gold: mb.gold, items: mb.items.map((s) => ({ ...s })) })),
+      nextId: this.nextMarketId,
+    };
+  }
+
+  // Apply an UNTRUSTED persisted blob (Postgres JSON) back onto the marketplace, DEFENSIVELY — any
+  // malformed listing/mailbox entry is skipped, so a corrupt row can't break the sim (never throws).
+  restoreMarket(raw: unknown): void {
+    this.marketListings.clear();
+    this.mailbox.clear();
+    this.nextMarketId = 1;
+    if (!raw || typeof raw !== 'object') return;
+    const r = raw as { listings?: unknown; mailbox?: unknown; nextId?: unknown };
+    const stack = (v: unknown): ItemStack | null => {
+      if (!v || typeof v !== 'object') return null;
+      const s = v as Record<string, unknown>;
+      if (typeof s.itemId !== 'string' || !ITEMS[s.itemId]) return null;
+      if (s.rarity !== 'normal' && s.rarity !== 'sos' && s.rarity !== 'som' && s.rarity !== 'sun') return null;
+      if (!Number.isInteger(s.plus) || (s.plus as number) < 0) return null;
+      if (!Number.isInteger(s.qty) || (s.qty as number) < 1) return null;
+      return { itemId: s.itemId, rarity: s.rarity, plus: s.plus as number, qty: s.qty as number };
+    };
+    let maxId = 0;
+    if (Array.isArray(r.listings)) {
+      for (const e of r.listings) {
+        if (!e || typeof e !== 'object') continue;
+        const o = e as Record<string, unknown>;
+        const item = stack(o.item);
+        if (typeof o.id !== 'number' || !Number.isInteger(o.id) || typeof o.sellerName !== 'string' || !o.sellerName ||
+            !item || typeof o.price !== 'number' || !Number.isInteger(o.price) || o.price <= 0) continue;
+        if (this.marketListings.has(o.id)) continue;
+        this.marketListings.set(o.id, { sellerName: o.sellerName, item, price: o.price });
+        maxId = Math.max(maxId, o.id);
+      }
+    }
+    this.nextMarketId = typeof r.nextId === 'number' && Number.isInteger(r.nextId) && r.nextId > maxId ? r.nextId : maxId + 1;
+    if (Array.isArray(r.mailbox)) {
+      for (const e of r.mailbox) {
+        if (!e || typeof e !== 'object') continue;
+        const o = e as Record<string, unknown>;
+        if (typeof o.name !== 'string' || !o.name) continue;
+        const gold = typeof o.gold === 'number' && Number.isInteger(o.gold) && o.gold >= 0 ? o.gold : 0;
+        const items: ItemStack[] = [];
+        if (Array.isArray(o.items)) for (const it of o.items) { const s = stack(it); if (s) items.push(s); }
+        if (gold > 0 || items.length > 0) this.mailbox.set(o.name.toLowerCase(), { gold, items });
+      }
+    }
   }
 
   sendCommand(cmd: Command): void {
@@ -1958,6 +2058,9 @@ export class Sim implements IWorld {
         break;
       case 'market-buy':
         this.marketBuy(p, cmd.listingId);
+        break;
+      case 'market-collect':
+        this.marketCollect(p);
         break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
@@ -3416,7 +3519,15 @@ export class Sim implements IWorld {
     // by listing id; empty => 0 iterations => byte-identical to a market-less world.
     for (const lid of [...this.marketListings.keys()].sort((a, b) => a - b)) {
       const l = this.marketListings.get(lid)!;
-      mix(lid); mix(l.sellerId); mix(strHash(l.itemId)); mix(strHash(l.rarity)); mix(l.plus); mix(l.price);
+      mix(lid); mix(strHash(l.sellerName));
+      mix(strHash(l.item.itemId)); mix(strHash(l.item.rarity)); mix(l.item.plus); mix(l.item.qty); mix(l.price);
+    }
+    // Marketplace mailbox (proceeds + returned items), sorted by name. Empty => byte-identical.
+    for (const key of [...this.mailbox.keys()].sort()) {
+      const mb = this.mailbox.get(key)!;
+      mix(strHash(key)); mix(mb.gold);
+      for (const s of mb.items) { mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty); }
+      mix(-1); // item-list terminator
     }
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);

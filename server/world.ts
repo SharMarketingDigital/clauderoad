@@ -60,6 +60,14 @@ export class ServerWorld {
   restorePlayer(id: number, raw: unknown): void {
     this.sim.restorePlayer(id, raw);
   }
+  // Marketplace persistence passthrough (a global blob: listings + mailbox). Loaded on boot, saved
+  // periodically — so a sale to an offline seller survives a restart.
+  serializeMarket(): unknown {
+    return this.sim.serializeMarket();
+  }
+  restoreMarket(raw: unknown): void {
+    this.sim.restoreMarket(raw);
+  }
 
   // A movement INTENT: sanitize to a finite, unit-ish DIRECTION (never a position) and
   // hand it to the sim as a held move/stop command. The sim integrates at the fixed
@@ -224,6 +232,9 @@ export class ServerWorld {
         return;
       case 'market-buy':
         if (Number.isInteger(cmd.listingId)) this.sim.sendCommandFor(id, { t: 'market-buy', listingId: cmd.listingId });
+        return;
+      case 'market-collect':
+        this.sim.sendCommandFor(id, { t: 'market-collect' });
         return;
       // --- Party / co-op (GDD B6): the sim validates leader/capacity/membership ---
       case 'party-create':
