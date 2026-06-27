@@ -28,10 +28,16 @@ export class Input {
   // TP3: one-shot — the id of a teleporter NPC just left-clicked, consumed by the teleporter HUD to
   // open its menu (cleared on read). Pure UI state; the sim ignores npc targets.
   private teleporterClick: number | null = null;
+  // PK livre (GDD v0.5 §2): whether ALT is currently held (PK mode armed). Read from each event's
+  // authoritative modifier state (e.altKey) — robust to a dropped keyup — and mirrored to the sim
+  // edge-triggered in apply(). `pkSent` is the last value pushed, so we only send on a change.
+  private altHeld = false;
+  private pkSent = false;
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
       if (isTyping()) return; // chat (or any text field) has focus -> keys are for typing
+      this.altHeld = e.altKey; // PK livre: track the held ALT modifier from the authoritative modifier state
       if (e.key === 'Tab') {
         e.preventDefault(); // don't move focus off the canvas
         if (!e.repeat) this.pending.push({ t: 'cycle-target' });
@@ -50,9 +56,10 @@ export class Input {
       }
       this.keys.add(e.key.toLowerCase());
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    window.addEventListener('keyup', (e) => { this.altHeld = e.altKey; this.keys.delete(e.key.toLowerCase()); });
 
     canvas.addEventListener('mousedown', (e) => {
+      this.altHeld = e.altKey; // PK livre: catch ALT+click even if the ALT keydown never reached us
       this.dragging = true;
       this.downButton = e.button;
       this.downX = e.clientX;
@@ -93,12 +100,22 @@ export class Input {
     );
     // Suppress the browser context menu so a right-drag orbits the camera without the menu popping.
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    // PK livre: ALT is an OS/browser modifier (Alt-Tab, menu activation) whose keyup can be swallowed on
+    // focus loss — releasing PK on blur stops the player getting stuck flagged.
+    window.addEventListener('blur', () => { this.altHeld = false; });
   }
 
   // The OTHER player currently selected for a duel (from a left click), or null. Pure client/UI
   // state the duel HUD reads to offer the "Duelar" button; it never reaches the sim.
   duelTargetId(): number | null {
     return this.uiSelectedPlayerId;
+  }
+
+  // GDD v0.5 (PK livre): whether the local player is holding ALT (PK mode armed). The renderer reads
+  // this to recolor the cursor/target ring while PK is active — pure client feedback (the sim decides
+  // eligibility). The HOST-side held state; the sim gets the edge-triggered set-pk in apply().
+  pkHeld(): boolean {
+    return this.altHeld;
   }
 
   // One-shot: true on the frame the player left-clicked a teleporter NPC (consumed by the teleporter
@@ -112,6 +129,14 @@ export class Input {
   // Push queued actions + the current movement intent into the world. Called
   // once per frame.
   apply(world: IWorld): void {
+    // PK livre (GDD v0.5 §2): mirror the held ALT modifier to the sim, edge-triggered (only on change,
+    // so we don't spam the wire each frame). Forced OFF while botting or typing — you only PK with your
+    // hands on the controls. The sim still gates the actual eligibility (PK flag + both outside a city).
+    const wantPk = this.altHeld && !world.botActive() && !isTyping();
+    if (wantPk !== this.pkSent) {
+      world.sendCommand({ t: 'set-pk', on: wantPk });
+      this.pkSent = wantPk;
+    }
     // Auto-play drives the player from the sim; ignore (and drop) manual input.
     if (world.botActive()) {
       this.pending.length = 0;
