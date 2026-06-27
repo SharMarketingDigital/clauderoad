@@ -1,110 +1,123 @@
-// Guildas (GDD v0.5 §1) — the SOCIAL CORE registry. Like the matching lobby + ChatModerator, this is
-// SERVER/session state, deliberately NOT the deterministic sim: a guild roster + /g chat has ZERO
-// gameplay/RNG coupling in this pass (warehouse, war and Postgres persistence are deferred), so putting
-// it in the sim would needlessly grow the hashed state. PURE bookkeeping (ids + names + one-outstanding
-// invite), unit-testable, never touches the game core — exactly like MatchingRegistry. Keyed by the
-// lowercased guild name (names are unique). The owner is always members[0]'s role, tracked explicitly.
+// Guildas (GDD v0.5 §1) — the SOCIAL registry. SERVER state, NOT the deterministic sim (a roster + /g
+// chat has no gameplay/RNG coupling). Keyed BY NAME so it can PERSIST across restarts + offline members
+// (ids are per-session; the persistent identity is the join name, like the character save). PURE
+// bookkeeping (no Rng/clock/DOM), unit-testable. The ServerWorld bridges live player ids <-> names.
+//
+// Membership PERSISTS: a disconnect does NOT remove you from your guild (only an explicit /guild leave or
+// a kick does). Invites are transient + online-only (not persisted). The owner is tracked by name.
 export interface Guild {
-  name: string; // the display name (original casing)
-  ownerId: number; // the current owner (leader); promoted on owner-leave
-  members: number[]; // player ids, join order (includes the owner)
+  name: string; // display name (original casing)
+  owner: string; // owner player NAME (promoted on owner-leave)
+  members: string[]; // member NAMES, join order (includes the owner); may include OFFLINE players
 }
 
 export class GuildRegistry {
   private byKey = new Map<string, Guild>(); // lowercased name -> guild
-  private memberOf = new Map<number, string>(); // playerId -> guild key
-  private inviteOf = new Map<number, string>(); // inviteeId -> guild key (ONE outstanding invite)
+  private memberOf = new Map<string, string>(); // lowercased player name -> guild key
+  private inviteOf = new Map<string, string>(); // lowercased invitee name -> guild key (ONE outstanding, transient)
 
-  private key(name: string): string {
-    return name.trim().toLowerCase();
-  }
+  private gk(name: string): string { return name.trim().toLowerCase(); }
+  private pk(name: string): string { return name.trim().toLowerCase(); }
 
-  guildOf(id: number): Guild | null {
-    const k = this.memberOf.get(id);
+  guildOf(name: string): Guild | null {
+    const k = this.memberOf.get(this.pk(name));
     return k ? this.byKey.get(k) ?? null : null;
   }
-  inviteGuildOf(id: number): Guild | null {
-    const k = this.inviteOf.get(id);
+  inviteGuildOf(name: string): Guild | null {
+    const k = this.inviteOf.get(this.pk(name));
     return k ? this.byKey.get(k) ?? null : null;
   }
-  membersOf(id: number): number[] {
-    return this.guildOf(id)?.members ?? [];
+  membersOf(name: string): string[] {
+    return this.guildOf(name)?.members ?? [];
   }
-  isOwner(id: number): boolean {
-    const g = this.guildOf(id);
-    return g != null && g.ownerId === id;
+  isOwner(name: string): boolean {
+    const g = this.guildOf(name);
+    return g != null && this.pk(g.owner) === this.pk(name);
   }
 
-  // Create a guild owned by ownerId. Fails if the trimmed name is empty, already taken, or the owner is
-  // already in a guild. Returns the created guild (or null).
-  create(ownerId: number, rawName: string): Guild | null {
+  // Create a guild owned by ownerName. Fails on empty/duplicate name or an already-guilded owner.
+  create(ownerName: string, rawName: string): Guild | null {
     const name = rawName.trim();
-    const k = this.key(name);
-    if (!name || this.byKey.has(k) || this.memberOf.has(ownerId)) return null;
-    const g: Guild = { name, ownerId, members: [ownerId] };
-    this.byKey.set(k, g);
-    this.memberOf.set(ownerId, k);
-    this.inviteOf.delete(ownerId); // a fresh owner has no pending invite
+    const gkey = this.gk(name);
+    if (!name || this.byKey.has(gkey) || this.memberOf.has(this.pk(ownerName))) return null;
+    const g: Guild = { name, owner: ownerName, members: [ownerName] };
+    this.byKey.set(gkey, g);
+    this.memberOf.set(this.pk(ownerName), gkey);
+    this.inviteOf.delete(this.pk(ownerName));
     return g;
   }
 
-  // The OWNER invites an online player (by id) to their guild. One outstanding invite per invitee (a new
-  // invite supersedes any prior). Fails if the inviter isn't an owner, or the invitee is self / already
-  // in a guild. Returns the guild the invite is for.
-  invite(ownerId: number, inviteeId: number): Guild | null {
-    const g = this.guildOf(ownerId);
-    if (!g || g.ownerId !== ownerId || inviteeId === ownerId || this.memberOf.has(inviteeId)) return null;
-    this.inviteOf.set(inviteeId, this.memberOf.get(ownerId)!);
+  // The OWNER invites a player BY NAME. One outstanding invite per invitee. Fails if the inviter isn't the
+  // owner, or the invitee is self / already in a guild.
+  invite(ownerName: string, inviteeName: string): Guild | null {
+    const g = this.guildOf(ownerName);
+    if (!g || this.pk(g.owner) !== this.pk(ownerName)) return null;
+    if (this.pk(inviteeName) === this.pk(ownerName) || this.memberOf.has(this.pk(inviteeName))) return null;
+    this.inviteOf.set(this.pk(inviteeName), this.memberOf.get(this.pk(ownerName))!);
     return g;
   }
 
-  // Accept the pending invite -> join the guild. Returns the joined guild (or null if no invite / already
-  // grouped / the guild vanished).
-  accept(id: number): Guild | null {
-    const k = this.inviteOf.get(id);
-    this.inviteOf.delete(id); // consume the invite either way
-    if (!k || this.memberOf.has(id)) return null;
+  // Accept the pending invite -> join. Returns the joined guild (or null).
+  accept(name: string): Guild | null {
+    const k = this.inviteOf.get(this.pk(name));
+    this.inviteOf.delete(this.pk(name));
+    if (!k || this.memberOf.has(this.pk(name))) return null;
     const g = this.byKey.get(k);
     if (!g) return null;
-    g.members.push(id);
-    this.memberOf.set(id, k);
+    g.members.push(name);
+    this.memberOf.set(this.pk(name), k);
     return g;
   }
 
-  decline(id: number): void {
-    this.inviteOf.delete(id);
+  decline(name: string): void {
+    this.inviteOf.delete(this.pk(name));
   }
 
-  // Leave the guild. The owner leaving promotes the next member; the last member out dissolves it.
-  leave(id: number): Guild | null {
-    const k = this.memberOf.get(id);
+  // Leave the guild (EXPLICIT — not a disconnect). Owner-leave promotes the next member; last out dissolves.
+  // Returns the affected guild (dissolved or updated) for persistence; null if not in a guild.
+  leave(name: string): Guild | null {
+    const k = this.memberOf.get(this.pk(name));
     if (!k) return null;
     const g = this.byKey.get(k);
-    this.memberOf.delete(id);
+    this.memberOf.delete(this.pk(name));
     if (!g) return null;
-    const i = g.members.indexOf(id);
+    const i = g.members.findIndex((m) => this.pk(m) === this.pk(name));
     if (i >= 0) g.members.splice(i, 1);
     if (g.members.length === 0) {
       this.byKey.delete(k);
-      return g; // dissolved
+      return g; // dissolved (caller removes it from the store)
     }
-    if (g.ownerId === id) g.ownerId = g.members[0]; // promote the next member in join order
+    if (this.pk(g.owner) === this.pk(name)) g.owner = g.members[0]; // promote the next member
     return g;
   }
 
-  // The owner kicks a member (by id). Fails unless the kicker is the owner and the target is a DIFFERENT
+  // The owner kicks a member by name. Fails unless the kicker is the owner and the target is a DIFFERENT
   // member of the SAME guild. Returns the guild on success.
-  kick(ownerId: number, targetId: number): Guild | null {
-    const g = this.guildOf(ownerId);
-    if (!g || g.ownerId !== ownerId || targetId === ownerId) return null;
-    if (this.memberOf.get(targetId) !== this.memberOf.get(ownerId)) return null; // not in my guild
-    this.leave(targetId);
+  kick(ownerName: string, targetName: string): Guild | null {
+    const g = this.guildOf(ownerName);
+    if (!g || this.pk(g.owner) !== this.pk(ownerName) || this.pk(targetName) === this.pk(ownerName)) return null;
+    if (this.memberOf.get(this.pk(targetName)) !== this.memberOf.get(this.pk(ownerName))) return null; // not my guild
+    this.leave(targetName);
     return g;
   }
 
-  // On disconnect: drop any outbound invite AND leave the guild (promoting/dissolving as needed).
-  forgetPlayer(id: number): void {
-    this.inviteOf.delete(id);
-    this.leave(id);
+  // On disconnect: drop only the (transient) outbound invite. MEMBERSHIP PERSISTS — you stay in your guild.
+  forgetPlayer(name: string): void {
+    this.inviteOf.delete(this.pk(name));
+  }
+
+  // ---- persistence bridge ----
+  all(): Guild[] {
+    return [...this.byKey.values()];
+  }
+  // Load a persisted guild into the registry (boot). Ignores a name already present (first wins).
+  loadGuild(g: Guild): void {
+    const gkey = this.gk(g.name);
+    if (!g.name || this.byKey.has(gkey) || g.members.length === 0) return;
+    const members = g.members.slice();
+    const owner = members.some((m) => this.pk(m) === this.pk(g.owner)) ? g.owner : members[0];
+    const loaded: Guild = { name: g.name, owner, members };
+    this.byKey.set(gkey, loaded);
+    for (const m of members) if (!this.memberOf.has(this.pk(m))) this.memberOf.set(this.pk(m), gkey);
   }
 }

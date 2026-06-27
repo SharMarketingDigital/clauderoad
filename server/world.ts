@@ -46,7 +46,9 @@ export class ServerWorld {
     const pv = this.sim.partyViewFor(id);
     if (pv && this.isLeader(pv, id)) this.matching.unregister(pv.id);
     this.matching.forgetPlayer(id);
-    this.guilds.forgetPlayer(id); // Guildas: a disconnecting member leaves (owner-leave promotes/dissolves)
+    // Guildas: membership PERSISTS across a disconnect (it's name-keyed) — only drop the transient invite.
+    const gname = this.entity(id)?.name;
+    if (gname) this.guilds.forgetPlayer(gname);
     this.sim.removePlayer(id);
   }
 
@@ -534,44 +536,68 @@ export class ServerWorld {
     return this.sim.partyViewFor(id)?.members.map((m) => m.id) ?? [];
   }
 
-  // ---- Guildas (GDD v0.5 §1) — SERVER-side social registry (roster + /g chat), validated here ----
+  // ---- Guildas (GDD v0.5 §1) — SERVER-side social registry (roster + /g chat). NAME-based so it can
+  // PERSIST (members survive logout); live player ids are bridged to names via the sim entities. The
+  // caller (index.ts) persists the returned guild after each change (save, or remove when dissolved). ----
   // Create a guild owned by `id`. Returns the created guild, or null (name in use / already in a guild).
   createGuild(id: number, name: unknown): Guild | null {
-    if (typeof name !== 'string') return null;
-    return this.guilds.create(id, sanitizeGuildName(name));
+    const owner = this.nameOf(id);
+    if (owner == null || typeof name !== 'string') return null;
+    return this.guilds.create(owner, sanitizeGuildName(name));
   }
-  // Owner invites an ONLINE player BY NAME. Returns the invitee id + guild, or null (not owner / not found
-  // / target already grouped). Name resolution mirrors the party invite-by-name (first online match).
+  // Owner invites an ONLINE player BY NAME (invites are transient + online-only). Returns the invitee id +
+  // guild, or null. First online match wins (names aren't unique without auth).
   inviteToGuild(ownerId: number, name: unknown): { inviteeId: number; guild: Guild } | null {
-    if (typeof name !== 'string') return null;
+    const owner = this.nameOf(ownerId);
+    if (owner == null || typeof name !== 'string') return null;
     const inviteeId = this.playerIdByName(name);
-    if (inviteeId == null) return null;
-    const guild = this.guilds.invite(ownerId, inviteeId);
+    if (inviteeId == null) return null; // must be online to be invited
+    const guild = this.guilds.invite(owner, this.nameOf(inviteeId)!);
     return guild ? { inviteeId, guild } : null;
   }
   acceptGuildInvite(id: number): Guild | null {
-    return this.guilds.accept(id);
+    const name = this.nameOf(id);
+    return name != null ? this.guilds.accept(name) : null;
   }
   declineGuildInvite(id: number): void {
-    this.guilds.decline(id);
+    const name = this.nameOf(id);
+    if (name != null) this.guilds.decline(name);
   }
   leaveGuild(id: number): Guild | null {
-    return this.guilds.leave(id);
+    const name = this.nameOf(id);
+    return name != null ? this.guilds.leave(name) : null;
   }
-  kickFromGuild(ownerId: number, name: unknown): { targetId: number; guild: Guild } | null {
-    if (typeof name !== 'string') return null;
-    const targetId = this.playerIdByName(name);
-    if (targetId == null) return null;
-    const guild = this.guilds.kick(ownerId, targetId);
-    return guild ? { targetId, guild } : null;
+  // Owner kicks a member BY NAME (the target may be OFFLINE — membership persists). Returns the kicked
+  // player's ONLINE id (null if offline) + the name + the guild.
+  kickFromGuild(ownerId: number, name: unknown): { targetId: number | null; targetName: string; guild: Guild } | null {
+    const owner = this.nameOf(ownerId);
+    if (owner == null || typeof name !== 'string') return null;
+    const guild = this.guilds.kick(owner, name.trim());
+    return guild ? { targetId: this.playerIdByName(name), targetName: name.trim(), guild } : null;
   }
-  // The current guild of `id` (name + member ids), or null — for chat routing + feedback messages.
+  // The current guild of `id`, or null — for chat routing + feedback messages.
   guildOf(id: number): Guild | null {
-    return this.guilds.guildOf(id);
+    const name = this.nameOf(id);
+    return name != null ? this.guilds.guildOf(name) : null;
   }
-  // The player ids in `id`'s guild (empty when guildless) — routes /g chat, like partyMemberIds.
+  // The ONLINE player ids in `id`'s guild (offline members skipped) — routes /g chat, like partyMemberIds.
   guildMemberIds(id: number): number[] {
-    return this.guilds.membersOf(id);
+    const name = this.nameOf(id);
+    if (name == null) return [];
+    const ids: number[] = [];
+    for (const m of this.guilds.membersOf(name)) {
+      const mid = this.playerIdByName(m);
+      if (mid != null) ids.push(mid);
+    }
+    return ids;
+  }
+  // Load persisted guilds into the registry (boot, before accepting players).
+  loadGuilds(guilds: Guild[]): void {
+    for (const g of guilds) this.guilds.loadGuild(g);
+  }
+  // The display name of an online player by id (the bridge to the name-keyed registry), or null.
+  private nameOf(id: number): string | null {
+    return this.entity(id)?.name ?? null;
   }
   // Resolve an ONLINE player by name (first match wins — names aren't unique without auth, mirroring the
   // party/duel invite-by-name resolution). Returns its id, or null when no online player has that name.

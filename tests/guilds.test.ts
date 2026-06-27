@@ -1,107 +1,124 @@
-// Guildas (GDD v0.5 §1) — the SOCIAL CORE. Like matching/chat, guilds are SERVER state (a roster + /g
-// chat), deliberately NOT in the deterministic sim, so these are server-boundary tests: the pure
-// GuildRegistry bookkeeping + the ServerWorld formation flow (create / invite-by-name / accept / cleanup).
+// Guildas (GDD v0.5 §1) — SERVER state (roster + /g chat), now NAME-based so it persists (members survive
+// logout). Server-boundary tests: the pure GuildRegistry bookkeeping + persistence round-trip, and the
+// ServerWorld id<->name bridge + the persist-on-disconnect behavior.
 import { describe, it, expect } from 'vitest';
 import { GuildRegistry } from '../server/guilds';
 import { ServerWorld } from '../server/world';
 
-describe('GuildRegistry — pure bookkeeping (server state, not the sim)', () => {
+describe('GuildRegistry — name-based bookkeeping (persistable)', () => {
   it('create forms a guild owned by the creator; rejects duplicate names + already-in-a-guild + empty', () => {
     const r = new GuildRegistry();
-    const g = r.create(1, 'Os Bravos');
+    const g = r.create('Alice', 'Os Bravos');
     expect(g).not.toBeNull();
-    expect(g!.ownerId).toBe(1);
-    expect(g!.members).toEqual([1]);
-    expect(r.guildOf(1)).toBe(g);
-    expect(r.isOwner(1)).toBe(true);
-    expect(r.create(2, 'os bravos')).toBeNull(); // duplicate name (case-insensitive)
-    expect(r.create(1, 'Outra')).toBeNull(); // already in a guild
-    expect(r.create(3, '   ')).toBeNull(); // empty/blank name
+    expect(g!.owner).toBe('Alice');
+    expect(g!.members).toEqual(['Alice']);
+    expect(r.guildOf('Alice')).toBe(g);
+    expect(r.isOwner('Alice')).toBe(true);
+    expect(r.create('Bob', 'os bravos')).toBeNull(); // duplicate name (case-insensitive)
+    expect(r.create('Alice', 'Outra')).toBeNull(); // already in a guild
+    expect(r.create('Cara', '   ')).toBeNull(); // empty name
   });
 
-  it('invite/accept: owner-only invite, one outstanding, accept joins; decline drops it', () => {
+  it('invite/accept: owner-only, one outstanding, accept joins; decline drops it', () => {
     const r = new GuildRegistry();
-    r.create(1, 'Clã');
-    expect(r.invite(2, 3)).toBeNull(); // a non-owner can't invite
-    expect(r.invite(1, 1)).toBeNull(); // can't invite yourself
-    expect(r.invite(1, 2)).not.toBeNull(); // the owner invites 2
-    expect(r.inviteGuildOf(2)!.name).toBe('Clã');
-    expect(r.accept(2)).not.toBeNull();
-    expect(r.guildOf(2)!.name).toBe('Clã');
-    expect(r.membersOf(1)).toEqual([1, 2]);
-    expect(r.inviteGuildOf(2)).toBeNull(); // the invite was consumed
-    expect(r.accept(2)).toBeNull(); // already a member -> no second join
-    r.invite(1, 4);
-    r.decline(4);
-    expect(r.accept(4)).toBeNull(); // declined -> nothing to accept
-    expect(r.guildOf(4)).toBeNull();
+    r.create('Alice', 'Clã');
+    expect(r.invite('Bob', 'Carol')).toBeNull(); // non-owner can't invite
+    expect(r.invite('Alice', 'Alice')).toBeNull(); // can't invite self
+    expect(r.invite('Alice', 'Bob')).not.toBeNull();
+    expect(r.inviteGuildOf('Bob')!.name).toBe('Clã');
+    expect(r.accept('Bob')).not.toBeNull();
+    expect(r.membersOf('Alice')).toEqual(['Alice', 'Bob']);
+    expect(r.accept('Bob')).toBeNull(); // already a member
+    r.invite('Alice', 'Carol'); r.decline('Carol');
+    expect(r.accept('Carol')).toBeNull(); // declined -> nothing to accept
   });
 
-  it('leave: a member leaves; owner-leave promotes the next member; the last member dissolves it', () => {
+  it('leave: a member leaves; owner-leave promotes the next; the last dissolves', () => {
     const r = new GuildRegistry();
-    r.create(1, 'G'); r.invite(1, 2); r.accept(2); r.invite(1, 3); r.accept(3);
-    expect(r.membersOf(1)).toEqual([1, 2, 3]);
-    r.leave(2); // a plain member leaves
-    expect(r.membersOf(1)).toEqual([1, 3]);
-    r.leave(1); // the OWNER leaves -> promote the next member (3)
-    expect(r.guildOf(3)!.ownerId).toBe(3);
-    expect(r.guildOf(1)).toBeNull();
-    r.leave(3); // last member out -> dissolve
-    expect(r.guildOf(3)).toBeNull();
+    r.create('Alice', 'G'); r.invite('Alice', 'Bob'); r.accept('Bob'); r.invite('Alice', 'Carol'); r.accept('Carol');
+    expect(r.membersOf('Alice')).toEqual(['Alice', 'Bob', 'Carol']);
+    r.leave('Bob');
+    expect(r.membersOf('Alice')).toEqual(['Alice', 'Carol']);
+    r.leave('Alice'); // owner leaves -> Carol promoted
+    expect(r.guildOf('Carol')!.owner).toBe('Carol');
+    expect(r.guildOf('Alice')).toBeNull();
+    const dissolved = r.leave('Carol');
+    expect(dissolved!.members.length).toBe(0); // last member out -> dissolved
+    expect(r.guildOf('Carol')).toBeNull();
   });
 
-  it('kick: owner removes a member; non-owner / self / cross-guild kicks are rejected', () => {
+  it('kick: owner removes a member; non-owner / self / cross-guild rejected', () => {
     const r = new GuildRegistry();
-    r.create(1, 'G'); r.invite(1, 2); r.accept(2);
-    expect(r.kick(2, 1)).toBeNull(); // a non-owner can't kick
-    expect(r.kick(1, 1)).toBeNull(); // can't kick yourself
-    expect(r.kick(1, 99)).toBeNull(); // not a member of my guild
-    expect(r.kick(1, 2)).not.toBeNull();
-    expect(r.guildOf(2)).toBeNull();
+    r.create('Alice', 'G'); r.invite('Alice', 'Bob'); r.accept('Bob');
+    expect(r.kick('Bob', 'Alice')).toBeNull(); // non-owner
+    expect(r.kick('Alice', 'Alice')).toBeNull(); // self
+    expect(r.kick('Alice', 'Ninguém')).toBeNull(); // not a member
+    expect(r.kick('Alice', 'Bob')).not.toBeNull();
+    expect(r.guildOf('Bob')).toBeNull();
   });
 
-  it('forgetPlayer (disconnect): drops the invite + leaves, promoting/dissolving as needed', () => {
+  it('membership PERSISTS across a disconnect (forgetPlayer only drops the transient invite)', () => {
     const r = new GuildRegistry();
-    r.create(1, 'G'); r.invite(1, 2); r.accept(2);
-    r.forgetPlayer(1); // the OWNER disconnects -> 2 is promoted, the guild survives
-    expect(r.guildOf(2)!.ownerId).toBe(2);
-    expect(r.guildOf(1)).toBeNull();
+    r.create('Alice', 'G'); r.invite('Alice', 'Bob'); r.accept('Bob');
+    r.forgetPlayer('Bob'); // a disconnect
+    expect(r.guildOf('Bob')!.name).toBe('G'); // STILL a member (key insight of name-based persistence)
+    r.invite('Alice', 'Carol'); r.forgetPlayer('Carol');
+    expect(r.inviteGuildOf('Carol')).toBeNull(); // but the pending invite was dropped
+  });
+
+  it('all() + loadGuild() round-trip the registry (the persistence path)', () => {
+    const r = new GuildRegistry();
+    r.create('Alice', 'Os Bravos'); r.invite('Alice', 'Bob'); r.accept('Bob');
+    const saved = r.all();
+    expect(saved.length).toBe(1);
+    const r2 = new GuildRegistry(); // a fresh boot
+    for (const g of saved) r2.loadGuild(g);
+    expect(r2.guildOf('Alice')!.name).toBe('Os Bravos');
+    expect(r2.membersOf('Bob')).toContain('Alice');
+    expect(r2.isOwner('Alice')).toBe(true);
   });
 });
 
-describe('ServerWorld — guild formation by name + /g routing', () => {
-  it('create + invite-by-name + accept forms a guild; guildMemberIds routes /g', () => {
+describe('ServerWorld — guild by name + /g routing (id<->name bridge) + persistence', () => {
+  it('create + invite + accept forms a guild; guildMemberIds routes /g to ONLINE members', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('Alice');
     const b = w.addPlayer('Bob');
     expect(w.createGuild(a, 'Os Bravos')).not.toBeNull();
     expect(w.guildOf(a)!.name).toBe('Os Bravos');
-    const inv = w.inviteToGuild(a, 'Bob'); // invite BY NAME (resolved to the online player)
-    expect(inv).not.toBeNull();
-    expect(inv!.inviteeId).toBe(b);
+    expect(w.inviteToGuild(a, 'Bob')!.inviteeId).toBe(b);
     expect(w.acceptGuildInvite(b)).not.toBeNull();
-    expect(w.guildMemberIds(a)).toContain(a);
     expect(w.guildMemberIds(a)).toContain(b);
-    expect(w.guildMemberIds(a).length).toBe(2);
-    expect(w.guildMemberIds(b)).toContain(a); // both see the same roster (routes /g for both)
+    expect(w.guildMemberIds(b)).toContain(a);
   });
 
-  it('invite-by-name fails for an offline / unknown name', () => {
+  it('invite-by-name fails for an offline / unknown name (invites are online-only)', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('Alice');
     w.createGuild(a, 'Clã');
     expect(w.inviteToGuild(a, 'Ninguém')).toBeNull();
   });
 
-  it('a disconnecting member is removed from the guild (server cleanup in removePlayer)', () => {
+  it('membership SURVIVES a disconnect; an offline member is skipped in /g; returning re-joins', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('Alice');
     const b = w.addPlayer('Bob');
     w.createGuild(a, 'Clã');
     w.inviteToGuild(a, 'Bob');
     w.acceptGuildInvite(b);
-    expect(w.guildMemberIds(a)).toContain(b);
-    w.removePlayer(b);
-    expect(w.guildMemberIds(a)).not.toContain(b); // gone with the disconnect
+    w.removePlayer(b); // Bob logs off
+    expect(w.guildOf(a)!.members).toContain('Bob'); // STILL a member (persists by name)
+    expect(w.guildMemberIds(a)).not.toContain(b); // but offline -> not routed /g
+    const b2 = w.addPlayer('Bob'); // Bob returns (new session id)
+    expect(w.guildMemberIds(a)).toContain(b2); // back in the guild + routable
+  });
+
+  it('loadGuilds restores a persisted guild; a returning member is already in it', () => {
+    const w = new ServerWorld(1337);
+    w.loadGuilds([{ name: 'Veteranos', owner: 'Alice', members: ['Alice', 'Bob'] }]); // as if loaded from the DB
+    const a = w.addPlayer('Alice');
+    const b = w.addPlayer('Bob');
+    expect(w.guildOf(a)!.name).toBe('Veteranos');
+    expect(w.guildMemberIds(a)).toContain(b); // both online + in the loaded guild
   });
 });

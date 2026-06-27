@@ -30,6 +30,7 @@ import { ServerWorld } from './world';
 import { ChatModerator } from './chat';
 import { Weather } from './weather';
 import { createStore, MemoryStore, type CharacterStore } from './store';
+import { createGuildStore, MemoryGuildStore, type GuildStore } from './guild_store';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -69,6 +70,7 @@ const SAVE_INTERVAL_SECONDS = posNum(process.env.SAVE_INTERVAL_SECONDS, 30);
 // Character persistence. Starts as memory (no-op) and is replaced by the real store
 // BEFORE we listen (see the bottom), so a returning player loads correctly.
 let store: CharacterStore = new MemoryStore();
+let guildStore: GuildStore = new MemoryGuildStore(); // durable guilds (Postgres or memory; loaded on boot)
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
 const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known)
 const joining = new Set<WebSocket>(); // sockets mid-join (awaiting the async DB load) — guards the gap
@@ -180,6 +182,7 @@ function handleGuild(ws: WebSocket, msg: Extract<ClientMessage, { t: `guild-${st
   switch (msg.t) {
     case 'guild-create': {
       const g = world.createGuild(id, msg.name);
+      if (g) void guildStore.save(g); // durable: persist the new guild
       systemTo(id, g
         ? `Guilda "${g.name}" criada. /g pra conversar · /guild invite <nome> pra convidar.`
         : 'Não deu pra criar a guilda (nome em uso, vazio, ou você já está em uma).');
@@ -195,6 +198,7 @@ function handleGuild(ws: WebSocket, msg: Extract<ClientMessage, { t: `guild-${st
     case 'guild-accept': {
       const g = world.acceptGuildInvite(id);
       if (!g) { systemTo(id, 'Nenhum convite de guilda pendente.'); return; }
+      void guildStore.save(g); // durable: persist the new member
       for (const m of world.guildMemberIds(id)) systemTo(m, `${name} entrou na guilda "${g.name}".`);
       return;
     }
@@ -206,6 +210,8 @@ function handleGuild(ws: WebSocket, msg: Extract<ClientMessage, { t: `guild-${st
       const members = [...world.guildMemberIds(id)]; // COPY the roster BEFORE leaving (leaveGuild mutates the live array)
       const g = world.leaveGuild(id);
       if (!g) { systemTo(id, 'Você não está em uma guilda.'); return; }
+      if (g.members.length === 0) void guildStore.remove(g.name); // dissolved (last member out)
+      else void guildStore.save(g); // updated (member left / owner promoted)
       systemTo(id, `Você saiu da guilda "${g.name}".`);
       for (const m of members) if (m !== id) systemTo(m, `${name} saiu da guilda.`);
       return;
@@ -213,9 +219,10 @@ function handleGuild(ws: WebSocket, msg: Extract<ClientMessage, { t: `guild-${st
     case 'guild-kick': {
       const r = world.kickFromGuild(id, msg.name);
       if (!r) { systemTo(id, 'Não deu pra remover (você não é o dono, ou o jogador não está na sua guilda).'); return; }
-      systemTo(r.targetId, `Você foi removido da guilda "${r.guild.name}".`);
-      for (const m of world.guildMemberIds(id)) systemTo(m, `${msg.name} foi removido da guilda.`);
-      systemTo(id, `${msg.name} removido.`);
+      void guildStore.save(r.guild); // durable: persist the roster change
+      if (r.targetId != null) systemTo(r.targetId, `Você foi removido da guilda "${r.guild.name}".`); // notify if online
+      for (const m of world.guildMemberIds(id)) systemTo(m, `${r.targetName} foi removido da guilda.`);
+      systemTo(id, `${r.targetName} removido.`);
       return;
     }
   }
@@ -332,6 +339,10 @@ setInterval(() => {
 // connect — the server always starts. (Errors are handled inside createStore.)
 void (async () => {
   store = await createStore(process.env.DATABASE_URL);
+  // Durable guilds (GDD v0.5 §1): load the persisted guilds into the registry BEFORE accepting players,
+  // so a returning member is already in their guild. Falls back to memory if there's no DB.
+  guildStore = await createGuildStore(process.env.DATABASE_URL);
+  world.loadGuilds(await guildStore.loadAll());
   httpServer.listen(PORT, HOST, () => {
     const mode = ALLOWED_ORIGINS.length > 0 ? `origins=[${ALLOWED_ORIGINS.join(', ')}]` : 'dev (localhost origins)';
     const persist = store.ready ? 'persistence ON (Postgres)' : 'persistence OFF (in-memory)';
