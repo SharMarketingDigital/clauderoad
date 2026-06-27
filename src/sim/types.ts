@@ -147,4 +147,8 @@ export interface Entity {
   // undefined for players/enemies/NPCs/loot, so no existing spawn literal changes and the hash fold stays
   // conditional (mirrors `loot?`). The owner's "has a pet" state is derived from the Sim's petOf index.
   pet?: { ownerId: number };
+  // GDD v0.5 (Pets PET2): the TRANSPORT pet's portable bag — the player's items, reachable anywhere while a
+  // pet is summoned. Optional + lazily created (only players use it); persisted in save like `storage`, and
+  // folded into the hash conditionally (absent => byte-identical).
+  petBag?: (ItemStack | null)[];
 }

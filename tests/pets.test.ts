@@ -150,3 +150,49 @@ describe('Pets — grab pet auto-collect (PET1)', () => {
     expect(bagCount(sim, a)).toBe(1); // ...but with no pet, it stayed there (bag is still just the pet item)
   });
 });
+
+describe('Pets — transport pet bag (PET2)', () => {
+  const SWORD = { itemId: 'old_sword', rarity: 'normal' as const, plus: 0, qty: 1 };
+  const hasSword = (arr: ({ itemId: string } | null)[]) => arr.filter((s) => s != null && s.itemId === 'old_sword').length;
+
+  it('with a pet summoned, you can stow a bag item in the pet bag and take it back', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { bag: [PET_ITEM, SWORD] }); // owns the pet + a sword to stow
+    run(sim, a, { t: 'set-pet', on: true });
+    expect(sim.petBagFor(a).available).toBe(true);
+
+    run(sim, a, { t: 'pet-deposit', itemId: 'old_sword', rarity: 'normal', plus: 0 });
+    expect(sim.petBagFor(a).stacks.some((s) => s.itemId === 'old_sword')).toBe(true); // in the pet bag now
+    expect(hasSword(sim.serializePlayer(a)!.bag)).toBe(0); // left the main bag
+
+    run(sim, a, { t: 'pet-withdraw', itemId: 'old_sword', rarity: 'normal', plus: 0 });
+    expect(sim.petBagFor(a).stacks.length).toBe(0); // back out of the pet bag
+    expect(hasSword(sim.serializePlayer(a)!.bag)).toBe(1); // back in the main bag
+  });
+
+  it('cannot use the pet bag without a pet summoned', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { bag: [PET_ITEM, SWORD] }); // owns the pet item but does NOT summon
+    expect(sim.petBagFor(a).available).toBe(false);
+    run(sim, a, { t: 'pet-deposit', itemId: 'old_sword', rarity: 'normal', plus: 0 });
+    expect(sim.petBagFor(a).stacks.length).toBe(0); // nothing stowed (no pet out)
+    expect(hasSword(sim.serializePlayer(a)!.bag)).toBe(1); // still in the bag
+  });
+
+  it('the pet bag persists across a serialize -> restore round-trip', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { bag: [PET_ITEM, SWORD] });
+    run(sim, a, { t: 'set-pet', on: true });
+    run(sim, a, { t: 'pet-deposit', itemId: 'old_sword', rarity: 'normal', plus: 0 });
+    const save = sim.serializePlayer(a)!;
+    expect(hasSword(save.petBag)).toBe(1); // the pet bag is in the save
+
+    const sim2 = serverSim();
+    const b = sim2.addPlayer('B');
+    sim2.restorePlayer(b, save); // returning player
+    expect(sim2.petBagFor(b).stacks.some((s) => s.itemId === 'old_sword')).toBe(true); // pet bag came back
+  });
+});

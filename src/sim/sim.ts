@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, PetBagView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -49,10 +49,10 @@ export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
-import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag, freeBagSlots, moveBagSlot } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS, addToBag, removeFromBag, freeBagSlots, moveBagSlot } from './inventory';
 import {
   WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID,
-  depositStack, withdrawStack, canAccept,
+  depositStack, withdrawStack, canAccept, depositToPet, withdrawFromPet,
 } from './storage';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
@@ -780,6 +780,33 @@ export class Sim implements IWorld {
         })
       : [];
     return { name: WAREHOUSE_NAME, capacity: STORAGE_SLOTS, stacks, inRange: p ? this.nearWarehouse(p) : false };
+  }
+
+  petBag(): PetBagView {
+    return this.petBagFor(this.localId);
+  }
+
+  // GDD v0.5 (Pets PET2): the transport pet's portable bag for a SPECIFIC player. `available` = a pet is
+  // summoned (the bag rides with it; no NPC). Mirrors storageFor's stack mapping.
+  petBagFor(id: number): PetBagView {
+    const p = this.ents.get(id);
+    const stacks = p && p.petBag
+      ? p.petBag.filter((s): s is ItemStack => s != null).map((s) => {
+          const def = ITEMS[s.itemId];
+          return {
+            itemId: s.itemId,
+            name: def?.name ?? s.itemId,
+            qty: s.qty,
+            rarity: s.rarity,
+            rarityName: rarityDef(s.rarity).name,
+            plus: s.plus,
+            equipSlot: def?.slot,
+            consumable: def?.consumable != null,
+            sellValue: rarityStat(def?.value ?? 0, s.rarity),
+          };
+        })
+      : [];
+    return { name: 'Mochila do Pet', capacity: PETBAG_SLOTS, stacks, available: this.petActiveFor(id) };
   }
 
   teleporter(): TeleporterView {
@@ -1837,6 +1864,13 @@ export class Sim implements IWorld {
       case 'withdraw':
         this.withdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
         break;
+      // Pets PET2 (GDD v0.5 §4): the transport pet's portable bag (no NPC; the pet must be summoned).
+      case 'pet-deposit':
+        this.petDeposit(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
+      case 'pet-withdraw':
+        this.petWithdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
       // Stalls (GDD v0.5 §5): personal P2P shops. Economy-gated (after the downed/stunned check), like buy/sell.
       case 'stall-open':
         this.openStall(p, cmd.listings);
@@ -2469,6 +2503,18 @@ export class Sim implements IWorld {
   private withdraw(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
     if (!this.nearWarehouse(p)) return;
     withdrawStack(p.storage, p.bag, itemId, rarity, plus);
+  }
+
+  // GDD v0.5 (Pets PET2): move a whole stack bag <-> the transport pet's portable bag. Gated on a pet
+  // being SUMMONED (the bag travels with the pet) — NO NPC near-check. Lazily creates the petBag array.
+  private petDeposit(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.petActiveFor(p.id)) return; // no pet out -> no portable bag
+    const petBag = p.petBag ?? (p.petBag = []);
+    depositToPet(p.bag, petBag, itemId, rarity, plus);
+  }
+  private petWithdraw(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+    if (!this.petActiveFor(p.id) || !p.petBag) return;
+    withdrawFromPet(p.petBag, p.bag, itemId, rarity, plus);
   }
 
   // Pay the vendor to restore an equipped item's durability to full (GDD B8). Requires
@@ -3220,6 +3266,12 @@ export class Sim implements IWorld {
       // K5: armazém do jogador (mesmo fold esparso da bag). Storage vazio => 0 iterações => FNV
       // intocado => hash byte-idêntico para todos os mundos que não usam o armazém.
       for (const s of e.storage) {
+        if (s == null) continue;
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+      }
+      // GDD v0.5 (Pets PET2): the transport pet's bag — same sparse fold as storage. Absent/empty => 0
+      // iterations => byte-identical to a world that never used a pet bag.
+      if (e.petBag) for (const s of e.petBag) {
         if (s == null) continue;
         mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
       }

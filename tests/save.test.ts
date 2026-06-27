@@ -51,6 +51,7 @@ describe('character persistence — serialize/restore (data-only, defensive)', (
         ring: null,
       },
       storage: [{ itemId: 'protect_stone', rarity: 'normal', plus: 0, qty: 3 }],
+      petBag: [{ itemId: 'leather_cap', rarity: 'normal', plus: 0, qty: 1 }], // GDD v0.5 (Pets PET2): the transport pet's bag round-trips too
       returnCity: 'leste', // GDD v0.5: the registered Return/respawn city round-trips too
     };
     sim.restorePlayer(a, JSON.parse(JSON.stringify(save))); // through JSON, like the DB

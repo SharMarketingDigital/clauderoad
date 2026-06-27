@@ -7,7 +7,7 @@
 // não do NPC.
 import type { ItemStack } from './types';
 import type { Rarity } from '../world_api';
-import { BAG_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag } from './inventory';
+import { BAG_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS, addToBag, removeFromBag } from './inventory';
 
 // O NPC do armazém: um spot fixo na cidade, distinto do mercador em (10,6). (10,18) deixa as
 // duas zonas de interação (raio 4 cada) MUTUAMENTE EXCLUSIVAS — distância 12 > 4+4 — então o
@@ -51,6 +51,29 @@ export function withdrawStack(storage: (ItemStack | null)[], bag: (ItemStack | n
   if (!canAccept(bag, itemId, rarity, plus, BAG_SLOTS)) return false; // bolsa cheia
   const qty = stack.qty;
   removeFromBag(storage, itemId, rarity, plus, qty);
+  addToBag(bag, itemId, rarity, plus, qty, BAG_SLOTS);
+  return true;
+}
+
+// GDD v0.5 (Pets PET2): the TRANSPORT pet's portable bag — the SAME non-destructive two-array transfer as
+// the warehouse, but capped at PETBAG_SLOTS and with NO NPC near-check (it travels with you while the pet
+// is summoned). Pure/deterministic, like depositStack/withdrawStack.
+export function depositToPet(bag: (ItemStack | null)[], petBag: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number): boolean {
+  const stack = bag.find((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+  if (!stack) return false;
+  if (!canAccept(petBag, itemId, rarity, plus, PETBAG_SLOTS)) return false; // pet bag full
+  const qty = stack.qty;
+  removeFromBag(bag, itemId, rarity, plus, qty);
+  addToBag(petBag, itemId, rarity, plus, qty, PETBAG_SLOTS);
+  return true;
+}
+
+export function withdrawFromPet(petBag: (ItemStack | null)[], bag: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number): boolean {
+  const stack = petBag.find((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+  if (!stack) return false;
+  if (!canAccept(bag, itemId, rarity, plus, BAG_SLOTS)) return false; // bag full
+  const qty = stack.qty;
+  removeFromBag(petBag, itemId, rarity, plus, qty);
   addToBag(bag, itemId, rarity, plus, qty, BAG_SLOTS);
   return true;
 }

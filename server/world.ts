@@ -167,6 +167,17 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
         }
         return;
+      // Pets PET2 (GDD v0.5 §4): bag <-> transport pet's bag (the sim re-checks ownership + that a pet is out).
+      case 'pet-deposit':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'pet-deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
+      case 'pet-withdraw':
+        if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'pet-withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
       // --- Layer 4: auto-play (each player toggles ITS OWN bot) ---
       case 'set-bot':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-bot', on: cmd.on });
@@ -410,6 +421,7 @@ export class ServerWorld {
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
     const storage = this.sim.storageFor(id); // K5: the player's warehouse view (inRange too)
     const stall = this.sim.stallFor(id); // GDD v0.5 (Stalls): the open stall this player is near, or null
+    const petBag = this.sim.petBagFor(id); // GDD v0.5 (Pets PET2): the transport pet's portable bag view
     const teleporter = this.sim.teleporterFor(id); // TP3: city list + register/Return state for this player
     const e = this.sim.entities().find((v) => v.id === id);
     // Party state is the same for either branch (it survives a dead/missing entity view).
@@ -428,7 +440,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, petActive: false, abilities, inventory, shop, storage, stall, teleporter, party, invite,
+        botActive: false, petActive: false, abilities, inventory, shop, storage, petBag, stall, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
@@ -441,7 +453,7 @@ export class ServerWorld {
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
       petActive: this.sim.petActiveFor(id), // GDD v0.5 (Pets): summon/dismiss state for the HUD toggle
-      abilities, inventory, shop, storage, stall, teleporter, party, invite,
+      abilities, inventory, shop, storage, petBag, stall, teleporter, party, invite,
       matching, partyRequests, myRequestPartyId, duel, duelInvite,
     };
   }

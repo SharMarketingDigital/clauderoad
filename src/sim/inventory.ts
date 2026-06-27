@@ -7,6 +7,7 @@ import type { Rarity, EquipSlot } from '../world_api';
 
 export const BAG_SLOTS = 20; // provisional grid size (GDD §D1: limited slots)
 export const STORAGE_SLOTS = 40; // K5: armazém/banco da cidade — maior que a bolsa (Silkroad ~36-48)
+export const PETBAG_SLOTS = 12; // GDD v0.5 (Pets PET2): transport pet's portable bag — a moderate extra (< the town bank), to carry more loot before a town run
 
 // Equipment slots a character can fill (the full Silkroad set). The single typed
 // source the sim and the save layer iterate. It lives in this leaf (which imports

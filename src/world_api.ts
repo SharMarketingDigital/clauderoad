@@ -209,6 +209,15 @@ export interface StorageView {
   readonly inRange: boolean;
 }
 
+// GDD v0.5 (Pets PET2): the transport pet's portable bag — bag-like, carried by the pet. `available` is
+// whether a pet is currently summoned (no NPC anchor — it travels with you).
+export interface PetBagView {
+  readonly name: string;
+  readonly capacity: number;
+  readonly stacks: ReadonlyArray<ItemStackView>;
+  readonly available: boolean;
+}
+
 // One destination row in the teleporter menu (GDD v0.5 TP3). `cost` is the fixed gold for a one-way
 // trip (0 for the city you're standing in); `current` marks that same city (can't travel to itself).
 export interface TeleporterCityView {
@@ -308,6 +317,10 @@ export type Command =
   | { t: 'select-class'; classId: string } // pick a starter class on entry — equips its weapon/kit when unarmed (GDD G1)
   | { t: 'deposit'; itemId: string; rarity: Rarity; plus: number } // K5: bank a whole bag stack (near the warehouse)
   | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number } // K5: take a whole stack back from the warehouse
+  // --- Pets PET2 (GDD v0.5 §4): move whole stacks bag <-> the transport pet's portable bag (no NPC; the
+  // pet must be summoned). The sim re-validates ownership + that a pet is out. ---
+  | { t: 'pet-deposit'; itemId: string; rarity: Rarity; plus: number } // bag -> pet bag
+  | { t: 'pet-withdraw'; itemId: string; rarity: Rarity; plus: number } // pet bag -> bag
   | { t: 'set-bot'; on: boolean } // toggle auto-play (the sim drives the player; manual input ignored)
   // --- party / co-op (GDD B6) ---
   | { t: 'party-create'; exp: PartyExpMode; loot: PartyLootMode } // form a party; you become leader
@@ -418,6 +431,8 @@ export interface IWorld {
   shop(): ShopView;
   // The local player's warehouse (armazém) contents + whether in range to deposit/withdraw.
   storage(): StorageView;
+  // GDD v0.5 (Pets PET2): the transport pet's portable bag (contents + whether a pet is summoned).
+  petBag(): PetBagView;
   // The teleporter menu state for the local player (city list + cost, registered city, Return status).
   teleporter(): TeleporterView;
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads

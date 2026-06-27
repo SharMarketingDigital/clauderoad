@@ -10,7 +10,7 @@
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type { EquipSlot, Rarity } from '../world_api';
 import { ITEMS } from './content/items';
-import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS } from './inventory';
 import { MAX_PLUS } from './content/enhance';
 import { SKILL_MAX_RANK } from './content/skill_ranks';
 import { MAX_DURABILITY } from './content/durability';
@@ -32,6 +32,7 @@ export interface PlayerSave {
   bag: (ItemStack | null)[]; // SPARSE/positional (holes = null); trailing nulls trimmed on save
   equipment: Record<EquipSlot, EquippedItem | null>;
   storage: (ItemStack | null)[]; // K5: armazém/banco da cidade (mesmo modelo esparso da bag)
+  petBag: (ItemStack | null)[]; // GDD v0.5 (Pets PET2): the transport pet's portable bag (same sparse model)
   returnCity: string; // GDD v0.5 (teleporte): the registered Return/respawn city id (a known CITIES id)
 }
 
@@ -60,6 +61,8 @@ export function toSave(e: Entity): PlayerSave {
     bag: trimTrailingNulls(e.bag.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
     equipment,
     storage: trimTrailingNulls(e.storage.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
+    // GDD v0.5 (Pets PET2): persist the transport pet's bag (may be undefined for a player who never used one)
+    petBag: trimTrailingNulls((e.petBag ?? []).map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
     returnCity: e.returnCity, // GDD v0.5: persist the registered Return/respawn city
   };
 }
@@ -81,6 +84,7 @@ export function applySave(e: Entity, raw: unknown): void {
   e.skillRanks = sanitizeRanks(raw.skillRanks);
   e.bag = sanitizeBag(raw.bag, BAG_SLOTS);
   e.storage = sanitizeBag(raw.storage, STORAGE_SLOTS); // ausente => holes (back-compat de saves antigos)
+  e.petBag = sanitizeBag(raw.petBag, PETBAG_SLOTS); // GDD v0.5 (Pets PET2); ausente => holes (back-compat)
   const eq = sanitizeEquipment(raw.equipment);
   for (const slot of EQUIP_SLOTS) e.equipment[slot] = eq[slot];
   // GDD v0.5: accept a registered city only if it's a KNOWN city id; otherwise keep the fresh-spawn

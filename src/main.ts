@@ -23,6 +23,7 @@ import { PartyHud } from './ui/party_hud';
 import { DuelHud } from './ui/duel_hud';
 import { PkHud } from './ui/pk_hud';
 import { StallHud } from './ui/stall_hud';
+import { PetBagHud } from './ui/pet_bag_hud';
 import { TeleporterHud } from './ui/teleporter_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
@@ -64,6 +65,7 @@ function startOffline(name: string): void {
   const hud = new Hud();
   const map = new WorldMap(); // world map (tecla M) — zones + player position, SP and MP
   const teleporterHud = new TeleporterHud(sim); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
+  const petBagHud = new PetBagHud(); // GDD v0.5 (Pets PET2): O opens the transport pet's bag (when a pet is out)
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; never touches the sim)
   new SettingsMenu(music); // settings (abre no Backspace / via menu Esc); self-driven
   new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
@@ -111,6 +113,7 @@ function startOffline(name: string): void {
     hud.update(sim);
     map.update(sim);
     teleporterHud.update(sim, input); // TP3: hub menu (on teleporter-NPC click) + Return button state
+    petBagHud.update(sim); // PET2: the transport pet's bag panel (O)
     music.update(sim, dt); // crossfade city/combat/exploration by the player's context
     requestAnimationFrame(frame);
   }
@@ -137,7 +140,8 @@ function startOnline(url: string, name: string): void {
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const duelHud = new DuelHud(world); // PvP: active-duel banner + incoming-challenge popup (A3)
   const pkHud = new PkHud(); // PvP: free-PK warning (GDD v0.5 §2) — "zona PvP" / "PK armado" near the top
-  const stallHud = new StallHud(); // Stalls (GDD v0.5 §5): B opens "Minha Barraca"; buy panel auto-shows near a stall
+  const stallHud = new StallHud(); // Stalls (GDD v0.5 §5): N opens "Minha Barraca"; buy panel auto-shows near a stall
+  const petBagHud = new PetBagHud(); // GDD v0.5 (Pets PET2): O opens the transport pet's bag (when a pet is out)
   const teleporterHud = new TeleporterHud(world); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
   const chat = new ChatBox(
@@ -169,6 +173,7 @@ function startOnline(url: string, name: string): void {
     duelHud.update(world, renderer, input.duelTargetId()); // PvP: banner + challenge popup + floating "Duelar" button on the left-click-selected player
     pkHud.update(world, input.pkHeld()); // PvP: free-PK "zona PvP" / "PK armado" warning (GDD v0.5 §2)
     stallHud.update(world); // Stalls (GDD v0.5 §5): refresh the buy panel (near a stall) + your own stall panel
+    petBagHud.update(world); // PET2: the transport pet's bag panel (O)
     teleporterHud.update(world, input); // TP3: opens the hub menu on a teleporter-NPC click; drives the Return button state
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     music.update(world, dt); // crossfade city/combat/exploration by the player's context
