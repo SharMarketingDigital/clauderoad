@@ -59,6 +59,9 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
         announcer.announce(ev.text ?? 'Um chefe foi derrotado!');
       } else if (ev.kind === 'boss-summon') {
         announcer.announce(`${ev.text ?? 'O chefe'} chama a matilha!`);
+      } else if (ev.kind === 'pk-kill') {
+        // PK livre: the sim composes the full kill-feed line ("X derrotou Y"); show it to everyone.
+        announcer.announce(ev.text ?? 'Um jogador foi morto em PK!');
       } else if (ev.kind === 'death') {
         const me = ev.targetId === world.localPlayerId();
         announcer.announce(me ? 'Você morreu! Renascendo...' : `${ev.text ?? 'Um jogador'} morreu.`);

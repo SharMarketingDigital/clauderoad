@@ -1509,7 +1509,7 @@ export class Sim implements IWorld {
   }
 
   // Free Return recall (GDD v0.5 TP2): warp the player to their REGISTERED city centre from anywhere.
-  // BLOCKED while in combat (dueling, or a mob aggroed on them — PK joins later) and gated by a cooldown.
+  // BLOCKED while in combat (dueling, in a PK fight, or a mob aggroed on them) and gated by a cooldown.
   // Pure position/cooldown mutation (no Rng) — deterministic and folded into the hash.
   private returnToCity(p: Entity): void {
     if (this.inCombat(p)) return; // headline block: can't recall mid-fight (no escaping a duel or a hunting mob)
@@ -1524,13 +1524,22 @@ export class Sim implements IWorld {
     p.returnReadyAt = this.tick + RETURN_COOLDOWN_TICKS;
   }
 
-  // Is the player in COMBAT for the purpose of blocking Return? True while dueling (PK will OR in here
-  // later), or while any LIVING enemy is aggroed on them. O(entities), but only runs on a Return attempt
-  // (player-initiated, rare). Pure read, no Rng — deterministic.
+  // Is the player in COMBAT for the purpose of blocking Return? True while dueling, while engaged in free
+  // PK (as aggressor or victim), or while any LIVING enemy is aggroed on them. O(entities), but only runs
+  // on a Return attempt (player-initiated, rare). Pure read, no Rng — deterministic.
   private inCombat(p: Entity): boolean {
     if (this.duelOf.has(p.id)) return true; // a consensual duel
+    // PK livre (GDD v0.5 §2): as the AGGRESSOR you can't flag PK and instantly recall to safety while
+    // locked on a living player — no hit-and-run escape.
+    if (p.pkActive && p.targetId != null) {
+      const t = this.ents.get(p.targetId);
+      if (t && t.kind === 'player' && t.hp > 0) return true;
+    }
     for (const e of this.ents.values()) {
-      if (e.kind === 'enemy' && e.hp > 0 && e.targetId === p.id) return true; // a mob is hunting you
+      if (e.hp <= 0) continue;
+      if (e.kind === 'enemy' && e.targetId === p.id) return true; // a mob is hunting you
+      // ...and as the VICTIM you can't recall-escape while a PK-flagged player is locked on you.
+      if (e.kind === 'player' && e.pkActive && e.targetId === p.id) return true;
     }
     return false;
   }
@@ -2684,7 +2693,7 @@ export class Sim implements IWorld {
       x: p.x,
       z: p.z,
     });
-    if (p.hp <= 0) this.killPlayer(p);
+    if (p.hp <= 0) this.killPlayer(p, attacker);
   }
 
   // ---------- status effects ----------
@@ -2870,9 +2879,10 @@ export class Sim implements IWorld {
     for (const lootId of [...this.lootIds]) this.pickupLoot(p, lootId);
   }
 
-  // Down the player: enter the "spirit" state, schedule a respawn, and announce
-  // the death. Enemies drop the player as a target via their hp<=0 de-aggro.
-  private killPlayer(p: Entity): void {
+  // Down the player: enter the "spirit" state, schedule a respawn, and announce the death. Enemies drop
+  // the player as a target via their hp<=0 de-aggro. `attacker` (when a player) is the killer — for a
+  // NON-duel death that means a free-PK kill, which gets a public kill-feed credit (GDD v0.5 §2).
+  private killPlayer(p: Entity, attacker?: Entity): void {
     p.deadUntil = this.tick + DEATH_RESPAWN_TICKS;
     p.targetId = null;
     p.effects.length = 0; // death clears debuffs (no DoT/stun carrying into the spirit/respawn)
@@ -2911,6 +2921,15 @@ export class Sim implements IWorld {
       z: p.z,
       text: p.name,
     });
+    // PK livre (GDD v0.5 §2): a PLAYER killer on a NON-duel death = a free-PK kill. Credit it with a
+    // public kill-feed announce ("X derrotou Y"), shown to everyone like a boss defeat. The penalty is
+    // the SAME as any PvE death (durability + drop above) — no extra punishment for the killer (Shar).
+    if (attacker?.kind === 'player') {
+      this.events.push({
+        seq: this.nextEventSeq++, tick: this.tick, kind: 'pk-kill',
+        targetId: p.id, amount: 0, x: p.x, z: p.z, text: `${attacker.name} derrotou ${p.name}`,
+      });
+    }
   }
 
   // Once the respawn delay elapses, revive the player at the safe point with

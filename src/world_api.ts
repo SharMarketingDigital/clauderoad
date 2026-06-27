@@ -344,6 +344,7 @@ export type SimEvent = {
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
   // 'death'/'respawn': the player went down / came back; `text` = the player name.
   // 'boss-spawn'/'boss-defeat'/'boss-summon': `text` = the boss name, for the announcement.
+  // 'pk-kill': a player killed another in free PK; `text` = the full kill-feed line ("X derrotou Y").
   // targetId is the affected entity; x/z anchors the on-screen effect.
   readonly kind:
     | 'damage'
@@ -356,7 +357,8 @@ export type SimEvent = {
     | 'respawn'
     | 'boss-spawn'
     | 'boss-defeat'
-    | 'boss-summon';
+    | 'boss-summon'
+    | 'pk-kill';
   readonly targetId: number;
   readonly amount: number;
   readonly x: number;

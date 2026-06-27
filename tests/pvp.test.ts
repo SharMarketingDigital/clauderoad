@@ -335,6 +335,48 @@ describe('duel PvP damage (A2)', () => {
     expect(on.sim.hash()).not.toBe(off.sim.hash());
   });
 
+  it('PK2 — uma morte por PK anuncia o kill-feed ("X derrotou Y") e a vítima renasce na cidade', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    sim.restorePlayer(a, { baseStr: 400 }); // derruba rápido e deterministico
+    walkOut(sim, b);
+    sim.sendCommandFor(a, { t: 'set-pk', on: true });
+    let killFeed: string | undefined;
+    for (let i = 0; i < 1500 && !ent(sim, b).dead; i++) {
+      const ea = ent(sim, a); const eb = ent(sim, b);
+      sim.sendCommandFor(a, { t: 'move', dx: eb.x - ea.x, dz: eb.z - ea.z });
+      sim.sendCommandFor(a, { t: 'set-target', id: b });
+      sim.step();
+      const pk = sim.recentEvents().find((e) => e.kind === 'pk-kill');
+      if (pk) killFeed = pk.text; // captura o evento no tick da morte
+    }
+    expect(ent(sim, b).dead).toBe(true);
+    expect(killFeed).toBe('A derrotou B'); // crédito PÚBLICO do PK (anunciado a todos, como um boss-defeat)
+    for (let i = 0; i < DEATH_RESPAWN_TICKS + 5; i++) sim.step();
+    const br = ent(sim, b);
+    expect(br.dead).toBe(false); // renasceu...
+    expect(chebyshev(br.x, br.z)).toBeLessThanOrEqual(30); // ...na cidade cadastrada (mesmo caminho da morte PvE)
+  });
+
+  it('PK2 — não dá pra dar Return no meio de uma briga de PK (a vítima não escapa pela recall)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    walkOut(sim, b);
+    sim.sendCommandFor(a, { t: 'set-pk', on: true });
+    for (let i = 0; i < 800 && sim.targetOf(a) !== b; i++) {
+      const ea = ent(sim, a); const eb = ent(sim, b);
+      sim.sendCommandFor(a, { t: 'move', dx: eb.x - ea.x, dz: eb.z - ea.z });
+      sim.sendCommandFor(a, { t: 'set-target', id: b }); // A trava B no PK (str default -> não mata, só engaja)
+      sim.step();
+    }
+    expect(sim.targetOf(a)).toBe(b); // A está em PK travado em B...
+    expect(chebyshev(ent(sim, b).x, ent(sim, b).z)).toBeGreaterThan(30); // ...e B está fora da cidade
+    run(sim, b, { t: 'return' }); // B tenta recall pra cidade...
+    expect(chebyshev(ent(sim, b).x, ent(sim, b).z)).toBeGreaterThan(30); // ...BLOQUEADO: segue fora (não voltou pra (0,0))
+  });
+
   it('a SINGLE set-target keeps landing auto-attacks on the opponent over many ticks (the client clicks once)', () => {
     // Regression guard. The real client sends set-target only on a CLICK — never re-sending it each
     // tick. So the duel target must PERSIST in the sim (validateTarget must not treat the live
