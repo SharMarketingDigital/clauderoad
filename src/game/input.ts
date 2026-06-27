@@ -52,8 +52,9 @@ export class Input {
         if (!e.repeat) this.pending.push({ t: 'pickup-nearby' });
         return;
       }
-      // P — summon/dismiss the pet (GDD v0.5 Pets). One-shot; apply() toggles vs world.petActive().
-      if (e.key.toLowerCase() === 'p') {
+      // F — summon/dismiss the pet (GDD v0.5 Pets). One-shot; apply() toggles vs world.petActive().
+      // (F, not P: P is the party panel — ui/party_hud.ts.)
+      if (e.key.toLowerCase() === 'f') {
         if (!e.repeat) this.pendingPetToggle = true;
         return;
       }

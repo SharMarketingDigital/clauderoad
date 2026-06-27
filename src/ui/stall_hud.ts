@@ -37,9 +37,9 @@ export class StallHud {
     this.own.style.left = '16px';
     this.buy.style.right = '16px';
 
-    // B toggles your own stall panel (ignored while typing in chat).
+    // N toggles your own stall panel (ignored while typing). (N, not B: B is the bot toggle — ui/hud.ts.)
     window.addEventListener('keydown', (e) => {
-      if (e.key.toLowerCase() === 'b' && !isTyping() && !e.repeat) {
+      if (e.key.toLowerCase() === 'n' && !isTyping() && !e.repeat) {
         this.ownOpen = !this.ownOpen;
         if (!this.ownOpen) this.own.style.display = 'none';
       }
@@ -75,7 +75,7 @@ export class StallHud {
     if (!this.ownOpen) { this.own.style.display = 'none'; return; }
     this.own.style.display = 'block';
     const mySent = this.isMyStallOpen(world);
-    this.own.replaceChildren(title('Minha Barraca (B fecha)'));
+    this.own.replaceChildren(title('Minha Barraca (N fecha)'));
     const hint = document.createElement('div');
     hint.style.cssText = 'color:#9fb0c8;font-size:12px;margin-bottom:6px;';
     hint.textContent = mySent ? 'Barraca ABERTA. Fique perto de outro jogador pra vender.'
