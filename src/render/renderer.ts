@@ -1,7 +1,7 @@
 // Three.js renderer. It READS the world (via IWorld) and draws it.
 // It must NEVER mutate the world or decide gameplay outcomes.
 import * as THREE from 'three';
-import type { IWorld, EntityKind, EntityView, MasteryId } from '../world_api';
+import type { IWorld, EntityKind, EntityView, MasteryId, Rarity, GroundLootView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
 import { PlayerAvatars } from './player_avatars';
 import { EnemyAvatars } from './enemy_avatars';
@@ -527,7 +527,7 @@ export class Renderer {
           this.meshes.set(e.id, m);
         }
       } else if (!m) {
-        m = makeActor(e.kind, e.boss);
+        m = makeActor(e.kind, e.boss, e.loot ?? null); // loot carries its contents -> rarity label/tint/glow (built once)
         // Champion/Elite wolves are drawn larger so the tier reads at a glance.
         if (e.kind === 'enemy' && !e.boss) m.scale.setScalar(TIER_SCALE[e.tier] ?? 1);
         m.userData.entityId = e.id; // so pick() can map a hit back to the entity
@@ -618,25 +618,94 @@ export class Renderer {
   }
 }
 
+// Rarity accent colors. The vivid hex (RARITY_COLOR) matches the inventory's CSS border colors
+// (style.css [data-rarity]) and drives the 3D chest tint + glow; the lighter CSS strings (RARITY_TEXT)
+// match the inventory's TEXT color and read better on the label's dark plate. Presentation only.
+const RARITY_COLOR: Record<Rarity, number> = {
+  normal: 0x8a93a3, // grey
+  sos: 0x4aa3ff, // blue
+  som: 0xb06cff, // purple
+  sun: 0xf2c44a, // gold
+};
+const RARITY_TEXT: Record<Rarity, string> = {
+  normal: '#cdd5e0', sos: '#bfe0ff', som: '#e6ccff', sun: '#ffe9a8',
+};
+// A faint per-rarity floor for the loot glow, so a rare drop pops even at +0 (then "+N" ramps it up).
+const RARITY_GLOW_BASE: Record<Rarity, number> = { normal: 0.06, sos: 0.1, som: 0.14, sun: 0.2 };
+
 // A pickup-able ground item (GDD v0.5 loot físico): a small gold chest resting on the ground. Distinct
 // from the humanoid actors so loot reads at a glance; sync() tags it with the entity id so pick() (and
-// thus a click -> pickup) resolves to it.
-function makeLootMarker(): THREE.Object3D {
+// thus a click -> pickup) resolves to it. When the drop's CONTENTS are known (`loot`), the chest is
+// tinted + glows by rarity/+N and floats a rarity-colored name label — so you SEE what dropped and run
+// for it (GDD: "você vê o loot cair, corre pra pegar"). `loot` null -> the plain gold chest fallback.
+function makeLootMarker(loot: GroundLootView | null): THREE.Object3D {
   const g = new THREE.Group();
+  const accent = loot ? RARITY_COLOR[loot.rarity] : 0x3a2600;
   const box = new THREE.Mesh(
     new THREE.BoxGeometry(0.5, 0.34, 0.5),
-    new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0x3a2600, roughness: 0.5, metalness: 0.3 }),
+    new THREE.MeshStandardMaterial({
+      color: 0xffcc44, // gold chest
+      emissive: accent, // tinted by rarity so the drop's grade reads at a glance
+      emissiveIntensity: loot ? 0.45 : 1, // subtle rarity tint vs. the original warm-dark default
+      roughness: 0.5,
+      metalness: 0.3,
+    }),
   );
   box.position.y = 0.17; // resting on the ground
   box.castShadow = true;
   g.add(box);
+  if (loot) {
+    // a soft additive halo, rarity-colored, brighter with the item's "+N" (the GDD's +N glow, on the ground)
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.45, 16, 12),
+      new THREE.MeshBasicMaterial({
+        color: accent,
+        transparent: true,
+        opacity: Math.min(0.7, RARITY_GLOW_BASE[loot.rarity] + 0.045 * Math.min(loot.plus, 10)),
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    glow.position.y = 0.22;
+    g.add(glow);
+    g.add(makeLootLabel(loot)); // the floating rarity-colored name (built once; contents never change)
+  }
   return g;
+}
+
+// A floating loot label (canvas -> camera-facing sprite): the item name in its rarity color, with the
+// "+N" and "xQty" when relevant, on a dark plate (depthTest off so it isn't hidden by the chest). Built
+// ONCE per drop — a loot entity's stack is immutable (pickup deletes it), so there is no per-frame cost.
+function makeLootLabel(loot: GroundLootView): THREE.Sprite {
+  const plusTag = loot.plus > 0 ? ` +${loot.plus}` : '';
+  const qtyTag = loot.qty > 1 ? ` x${loot.qty}` : '';
+  const text = `${loot.name}${plusTag}${qtyTag}`;
+  const font = 40, padX = 18, padY = 10;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  ctx.font = `bold ${font}px sans-serif`;
+  canvas.width = Math.ceil(ctx.measureText(text).width) + padX * 2;
+  canvas.height = font + padY * 2;
+  ctx.font = `bold ${font}px sans-serif`; // resizing the canvas resets the context — set the font again
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(8,18,28,0.66)'; // dark plate for contrast against the world
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = RARITY_TEXT[loot.rarity]; // the item's rarity color (matches the inventory text)
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+  const h = 0.4; // world units tall; width keeps the canvas aspect
+  sprite.scale.set(h * (canvas.width / canvas.height), h, 1);
+  sprite.position.y = 0.95; // float just above the chest
+  sprite.renderOrder = 20; // draw over the world
+  return sprite;
 }
 
 // A simple capsule-ish humanoid with a "nose" so facing is visible. A boss is
 // drawn bigger and in a distinct menacing color so it reads as a boss.
-function makeActor(kind: EntityKind, boss = false): THREE.Object3D {
-  if (kind === 'loot') return makeLootMarker(); // GDD v0.5 loot físico: a chest on the ground, not a humanoid
+function makeActor(kind: EntityKind, boss = false, loot: GroundLootView | null = null): THREE.Object3D {
+  if (kind === 'loot') return makeLootMarker(loot); // GDD v0.5 loot físico: a chest on the ground, not a humanoid
   const bodyColor =
     boss ? 0xa030d0 : kind === 'player' ? 0x3b82f6 : kind === 'npc' ? 0xe0b030 : 0xb23b3b;
   const g = new THREE.Group();
