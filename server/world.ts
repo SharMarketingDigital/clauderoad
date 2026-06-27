@@ -15,6 +15,7 @@ import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequest
 import type { PlayerSave } from '../src/sim/save';
 import { Weather } from './weather';
 import { MatchingRegistry } from './matching';
+import { GuildRegistry, type Guild } from './guilds';
 
 export class ServerWorld {
   private sim: Sim;
@@ -23,6 +24,9 @@ export class ServerWorld {
   // requests; a listing self-expires after ~1h. The actual join is a sim command issued
   // on approval (party-admit), so the sim stays authoritative over membership.
   private matching = new MatchingRegistry(MATCHING_TTL_MS);
+  // Guildas (GDD v0.5 §1): the social registry (roster + /g chat). SERVER state like matching — never
+  // touches the deterministic sim (no gameplay coupling in this pass; warehouse/war/persistence deferred).
+  private guilds = new GuildRegistry();
 
   // Time-of-day + rain are authoritative here too (presentation state, not the sim), so
   // every client renders the SAME sky/weather. Advanced on the tick, sent in the snapshot.
@@ -42,6 +46,7 @@ export class ServerWorld {
     const pv = this.sim.partyViewFor(id);
     if (pv && this.isLeader(pv, id)) this.matching.unregister(pv.id);
     this.matching.forgetPlayer(id);
+    this.guilds.forgetPlayer(id); // Guildas: a disconnecting member leaves (owner-leave promotes/dissolves)
     this.sim.removePlayer(id);
   }
 
@@ -482,6 +487,56 @@ export class ServerWorld {
   partyMemberIds(id: number): number[] {
     return this.sim.partyViewFor(id)?.members.map((m) => m.id) ?? [];
   }
+
+  // ---- Guildas (GDD v0.5 §1) — SERVER-side social registry (roster + /g chat), validated here ----
+  // Create a guild owned by `id`. Returns the created guild, or null (name in use / already in a guild).
+  createGuild(id: number, name: unknown): Guild | null {
+    if (typeof name !== 'string') return null;
+    return this.guilds.create(id, sanitizeGuildName(name));
+  }
+  // Owner invites an ONLINE player BY NAME. Returns the invitee id + guild, or null (not owner / not found
+  // / target already grouped). Name resolution mirrors the party invite-by-name (first online match).
+  inviteToGuild(ownerId: number, name: unknown): { inviteeId: number; guild: Guild } | null {
+    if (typeof name !== 'string') return null;
+    const inviteeId = this.playerIdByName(name);
+    if (inviteeId == null) return null;
+    const guild = this.guilds.invite(ownerId, inviteeId);
+    return guild ? { inviteeId, guild } : null;
+  }
+  acceptGuildInvite(id: number): Guild | null {
+    return this.guilds.accept(id);
+  }
+  declineGuildInvite(id: number): void {
+    this.guilds.decline(id);
+  }
+  leaveGuild(id: number): Guild | null {
+    return this.guilds.leave(id);
+  }
+  kickFromGuild(ownerId: number, name: unknown): { targetId: number; guild: Guild } | null {
+    if (typeof name !== 'string') return null;
+    const targetId = this.playerIdByName(name);
+    if (targetId == null) return null;
+    const guild = this.guilds.kick(ownerId, targetId);
+    return guild ? { targetId, guild } : null;
+  }
+  // The current guild of `id` (name + member ids), or null — for chat routing + feedback messages.
+  guildOf(id: number): Guild | null {
+    return this.guilds.guildOf(id);
+  }
+  // The player ids in `id`'s guild (empty when guildless) — routes /g chat, like partyMemberIds.
+  guildMemberIds(id: number): number[] {
+    return this.guilds.membersOf(id);
+  }
+  // Resolve an ONLINE player by name (first match wins — names aren't unique without auth, mirroring the
+  // party/duel invite-by-name resolution). Returns its id, or null when no online player has that name.
+  private playerIdByName(name: string): number | null {
+    const n = name.trim();
+    if (!n) return null;
+    for (const e of this.sim.entities()) {
+      if (e.kind === 'player' && e.name === n) return e.id;
+    }
+    return null;
+  }
 }
 
 // Derived from the single EQUIP_SLOTS source (the full Silkroad set), so the server's
@@ -501,6 +556,11 @@ const MATCHING_TITLE_MAX = 40;
 function sanitizeTitle(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   return raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, MATCHING_TITLE_MAX);
+}
+// A guild name from a client: a short, single-line, trimmed string (never trusted). Empty names are
+// rejected by the registry (create returns null), so a blank/garbage name simply can't form a guild.
+function sanitizeGuildName(raw: string): string {
+  return raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 24);
 }
 // A level restriction from a client: a non-negative integer (0 = no bound), capped sane.
 function clampLevel(raw: unknown): number {

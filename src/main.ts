@@ -138,7 +138,10 @@ function startOnline(url: string, name: string): void {
   const pkHud = new PkHud(); // PvP: free-PK warning (GDD v0.5 §2) — "zona PvP" / "PK armado" near the top
   const teleporterHud = new TeleporterHud(world); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
-  const chat = new ChatBox((text, channel) => world.sendChat(text, channel)); // text chat (/p for party)
+  const chat = new ChatBox(
+    (text, channel) => world.sendChat(text, channel), // text chat (/p party · /g guild)
+    (sub, arg) => world.guildCommand(sub, arg), // GDD v0.5 §1: /guild create|invite|accept|decline|leave|kick
+  );
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,

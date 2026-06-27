@@ -209,6 +209,19 @@ export class ClientWorld implements IWorld {
     this.send({ t: 'chat', text, channel });
   }
 
+  // Guildas (GDD v0.5 §1): the /guild formation commands, translated to server intents (server-validated;
+  // the GuildRegistry decides owner/duplicate-name/membership and replies via system chat).
+  guildCommand(sub: string, arg: string): void {
+    switch (sub) {
+      case 'create': this.send({ t: 'guild-create', name: arg }); return;
+      case 'invite': this.send({ t: 'guild-invite', name: arg }); return;
+      case 'accept': this.send({ t: 'guild-accept' }); return;
+      case 'decline': this.send({ t: 'guild-decline' }); return;
+      case 'leave': this.send({ t: 'guild-leave' }); return;
+      case 'kick': this.send({ t: 'guild-kick', name: arg }); return;
+    }
+  }
+
   // ---- internals ----
   private onMessage(data: unknown): void {
     if (typeof data !== 'string') return;

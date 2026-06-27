@@ -141,6 +141,11 @@ async function handleMessage(ws: WebSocket, data: RawData): Promise<void> {
     msg.t === 'matching-cancel' || msg.t === 'matching-approve' || msg.t === 'matching-deny'
   ) {
     handleMatching(ws, msg);
+  } else if (
+    msg.t === 'guild-create' || msg.t === 'guild-invite' || msg.t === 'guild-accept' ||
+    msg.t === 'guild-decline' || msg.t === 'guild-leave' || msg.t === 'guild-kick'
+  ) {
+    handleGuild(ws, msg);
   }
 }
 
@@ -161,6 +166,68 @@ function handleMatching(
     case 'matching-cancel': world.cancelJoinRequest(id); return;
     case 'matching-approve': world.approveJoin(id, msg.playerId); return;
     case 'matching-deny': world.denyJoin(id, msg.playerId); return;
+  }
+}
+
+// Guild formation intents (GDD v0.5 §1). The server validates everything in the GuildRegistry (owner,
+// duplicate name, membership); here we resolve the connection to its id + server-known name and reply
+// with system-chat feedback. There is no dedicated guild HUD — the social core is driven entirely by
+// the /guild commands (parsed client-side into these messages) + /g chat.
+function handleGuild(ws: WebSocket, msg: Extract<ClientMessage, { t: `guild-${string}` }>): void {
+  const id = clientIds.get(ws);
+  const name = clientNames.get(ws);
+  if (id == null || name == null) return; // not joined yet
+  switch (msg.t) {
+    case 'guild-create': {
+      const g = world.createGuild(id, msg.name);
+      systemTo(id, g
+        ? `Guilda "${g.name}" criada. /g pra conversar · /guild invite <nome> pra convidar.`
+        : 'Não deu pra criar a guilda (nome em uso, vazio, ou você já está em uma).');
+      return;
+    }
+    case 'guild-invite': {
+      const r = world.inviteToGuild(id, msg.name);
+      if (!r) { systemTo(id, 'Convite falhou (você não é o dono, ou o jogador não está online / já tem guilda).'); return; }
+      systemTo(id, `Convite enviado para ${msg.name}.`);
+      systemTo(r.inviteeId, `${name} te convidou para a guilda "${r.guild.name}". /guild accept pra entrar · /guild decline pra recusar.`);
+      return;
+    }
+    case 'guild-accept': {
+      const g = world.acceptGuildInvite(id);
+      if (!g) { systemTo(id, 'Nenhum convite de guilda pendente.'); return; }
+      for (const m of world.guildMemberIds(id)) systemTo(m, `${name} entrou na guilda "${g.name}".`);
+      return;
+    }
+    case 'guild-decline':
+      world.declineGuildInvite(id);
+      systemTo(id, 'Convite de guilda recusado.');
+      return;
+    case 'guild-leave': {
+      const members = world.guildMemberIds(id); // capture BEFORE leaving, to notify them
+      const g = world.leaveGuild(id);
+      if (!g) { systemTo(id, 'Você não está em uma guilda.'); return; }
+      systemTo(id, `Você saiu da guilda "${g.name}".`);
+      for (const m of members) if (m !== id) systemTo(m, `${name} saiu da guilda.`);
+      return;
+    }
+    case 'guild-kick': {
+      const r = world.kickFromGuild(id, msg.name);
+      if (!r) { systemTo(id, 'Não deu pra remover (você não é o dono, ou o jogador não está na sua guilda).'); return; }
+      systemTo(r.targetId, `Você foi removido da guilda "${r.guild.name}".`);
+      for (const m of world.guildMemberIds(id)) systemTo(m, `${msg.name} foi removido da guilda.`);
+      systemTo(id, `${msg.name} removido.`);
+      return;
+    }
+  }
+}
+
+// Send a PRIVATE system chat line to one player by id (guild feedback). Resolves id -> socket.
+function systemTo(id: number, text: string): void {
+  for (const [ws, pid] of clientIds) {
+    if (pid === id) {
+      send(ws, { t: 'chat', line: { from: '', text, ts: Date.now(), system: true } });
+      return;
+    }
   }
 }
 
@@ -185,6 +252,20 @@ function handleChat(ws: WebSocket, rawText: unknown, channel: ChatChannel | unde
     const payload = JSON.stringify({ t: 'chat', line } satisfies ServerMessage);
     for (const [sock, sid] of clientIds) {
       if (members.has(sid) && sock.readyState === WebSocket.OPEN) sock.send(payload); // only group members
+    }
+    return;
+  }
+  if (channel === 'guild') {
+    // Guildas (GDD v0.5 §1): /g routes ONLY to the sender's guild members (like /p for the party).
+    const members = new Set(world.guildMemberIds(id));
+    if (members.size === 0) {
+      send(ws, { t: 'chat', line: { from: '', text: 'Você não está em uma guilda.', ts: Date.now(), system: true } });
+      return;
+    }
+    const line: ChatLine = { from: name, text, ts: Date.now(), channel: 'guild' };
+    const payload = JSON.stringify({ t: 'chat', line } satisfies ServerMessage);
+    for (const [sock, sid] of clientIds) {
+      if (members.has(sid) && sock.readyState === WebSocket.OPEN) sock.send(payload); // guild members only
     }
     return;
   }

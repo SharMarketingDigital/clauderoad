@@ -17,8 +17,12 @@ export class ChatBox {
   private logEl: HTMLDivElement;
   private input: HTMLInputElement;
 
-  // `send` forwards the typed text + its channel to the network (ClientWorld.sendChat).
-  constructor(private readonly send: (text: string, channel: ChatChannel) => void) {
+  // `send` forwards the typed text + its channel to the network (ClientWorld.sendChat). `onGuild`
+  // handles the /guild formation commands (create/invite/accept/decline/leave/kick) — GDD v0.5 §1.
+  constructor(
+    private readonly send: (text: string, channel: ChatChannel) => void,
+    private readonly onGuild?: (sub: string, arg: string) => void,
+  ) {
     injectStyle();
     this.root = el('chat');
     this.logEl = el('chat-log'); // the permanent history panel
@@ -26,7 +30,7 @@ export class ChatBox {
     this.input.className = 'chat-input';
     this.input.type = 'text';
     this.input.maxLength = 200; // mirrors the server cap (the server still enforces it)
-    this.input.placeholder = 'mensagem… (/p p/ grupo · Enter envia · Esc cancela)';
+    this.input.placeholder = 'mensagem… (/p grupo · /g guilda · /guild … · Enter envia · Esc cancela)';
     this.input.style.display = 'none'; // discreet: only shows while you're typing
     this.root.append(this.logEl, this.input);
     document.body.appendChild(this.root);
@@ -57,9 +61,21 @@ export class ChatBox {
         e.preventDefault();
         const raw = this.input.value.trim();
         if (raw) {
-          // "/p <msg>" -> party channel; plain text -> say; any other "/command" is ignored.
+          // "/guild <sub> [arg]" -> formation; "/g <msg>" -> guild chat; "/p <msg>" -> party; plain text
+          // -> say; any other "/command" is ignored. Check /guild BEFORE /g (\b keeps them distinct).
+          const guildCmd = /^\/guild\b\s*/i.exec(raw);
+          const g = /^\/g\b\s*/i.exec(raw);
           const p = /^\/p\b\s*/i.exec(raw);
-          if (p) {
+          if (guildCmd) {
+            const rest = raw.slice(guildCmd[0].length).trim();
+            const sp = rest.indexOf(' ');
+            const sub = (sp >= 0 ? rest.slice(0, sp) : rest).toLowerCase();
+            const arg = sp >= 0 ? rest.slice(sp + 1).trim() : '';
+            this.onGuild?.(sub, arg);
+          } else if (g) {
+            const msg = raw.slice(g[0].length).trim();
+            if (msg) this.send(msg, 'guild');
+          } else if (p) {
             const msg = raw.slice(p[0].length).trim();
             if (msg) this.send(msg, 'party');
           } else if (!raw.startsWith('/')) {
@@ -84,6 +100,9 @@ export class ChatBox {
     } else if (line.channel === 'party') {
       row.classList.add('party');
       row.append(span('chat-tag', '[Grupo] '), span('chat-from', `${line.from}: `), span('chat-text', line.text));
+    } else if (line.channel === 'guild') {
+      row.classList.add('guild');
+      row.append(span('chat-tag', '[Guilda] '), span('chat-from', `${line.from}: `), span('chat-text', line.text));
     } else {
       row.append(span('chat-from', `${line.from}: `), span('chat-text', line.text));
     }
@@ -132,6 +151,8 @@ function injectStyle(): void {
       text-shadow: 0 1px 2px #000; word-break: break-word; animation: chat-in 0.18s ease-out; }
     .chat-line.system { color: #b8c4d8; font-style: italic; background: rgba(10,14,20,0.5); }
     .chat-line.party { background: rgba(18,30,22,0.72); border-left: 2px solid #6fcf7f; }
+    .chat-line.guild { background: rgba(30,24,12,0.72); border-left: 2px solid #e0b030; }
+    .chat-line.guild .chat-tag { color: #e0b030; }
     .chat-tag { color: #6fcf7f; font-weight: 700; }
     .chat-from { color: #ffe9a8; font-weight: 700; }
     .chat-input { pointer-events: auto; width: 100%; box-sizing: border-box; padding: 6px 10px;

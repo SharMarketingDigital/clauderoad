@@ -29,7 +29,14 @@ export type ClientMessage =
   | { t: 'matching-request'; partyId: number } // ask to join a listed party (the leader then approves/denies)
   | { t: 'matching-cancel' } // withdraw your own pending join request
   | { t: 'matching-approve'; playerId: number } // leader: accept a pending join request (admits them to the sim party)
-  | { t: 'matching-deny'; playerId: number }; // leader: decline a pending join request
+  | { t: 'matching-deny'; playerId: number } // leader: decline a pending join request
+  // --- guildas (GDD v0.5 §1; SERVER state like matching — a roster + /g chat, NOT in the sim) ---
+  | { t: 'guild-create'; name: string } // create a guild you own (name must be free; you must be guildless)
+  | { t: 'guild-invite'; name: string } // owner: invite an online player BY NAME to the guild
+  | { t: 'guild-accept' } // accept your pending guild invite
+  | { t: 'guild-decline' } // decline your pending guild invite
+  | { t: 'guild-leave' } // leave your guild (owner-leave promotes the next member, or it dissolves)
+  | { t: 'guild-kick'; name: string }; // owner: remove a member BY NAME
 
 // One entity's public state in a snapshot — players AND mobs AND the town NPC. The
 // server owns all of it; the client only mirrors + interpolates. Kept compact (rounded
@@ -134,8 +141,8 @@ export interface SelfSnap {
   myRequestPartyId: number | null; // the party I've asked to join (awaiting approval), or null
 }
 
-// Which chat channel a message belongs to: 'say' (everyone) or 'party' (group only).
-export type ChatChannel = 'say' | 'party';
+// Which chat channel a message belongs to: 'say' (everyone), 'party' (group only), or 'guild' (GDD v0.5).
+export type ChatChannel = 'say' | 'party' | 'guild';
 
 // One chat line the server sends out. `from` is the sender's name AS THE SERVER KNOWS IT
 // (never trusted from the client). `system` marks a server notice (e.g. join/leave),
