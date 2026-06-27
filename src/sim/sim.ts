@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, TeleporterView, TeleporterCityView, EquipSlot, Rarity,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -52,7 +52,7 @@ import {
 import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, addToBag, removeFromBag, freeBagSlots, moveBagSlot } from './inventory';
 import {
   WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID,
-  depositStack, withdrawStack,
+  depositStack, withdrawStack, canAccept,
 } from './storage';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
@@ -80,6 +80,9 @@ export const PLAYER_SPEED = 6; // units/sec (also reused by the authoritative se
 const PET_FOLLOW_SPEED = PLAYER_SPEED * 1.25;
 const PET_FOLLOW_DEADBAND = 1.6; // world units: closer than this, the pet stands still
 const PET_SPAWN_OFFSET = 1.4; // spawn just behind the owner so it doesn't pop on top of them
+// GDD v0.5 (Stalls): a buyer must be within this of a stall's owner to trade; a stall offers at most N items.
+const STALL_INTERACT_RANGE = 5; // world units
+const STALL_MAX_LISTINGS = 12;
 // City wall (Jangan): a square stone rampart at this Chebyshev half-extent — MUST match render's
 // WALL_H in village.ts. The player can't cross it except through a gate gap of ±GATE_HALF at each
 // cardinal mid-point (slightly wider than the visual ~2 opening, for comfortable passage).
@@ -230,6 +233,10 @@ export class Sim implements IWorld {
   // this.ents (so it hashes + snapshots like any entity); this is the lookup that drives follow/grab and
   // the petActive HUD flag. Rebuilt deterministically from the set-pet command stream on every host.
   private petOf = new Map<number, number>();
+  // GDD v0.5 (Stalls): per-player personal shops — sellerId -> the items offered (with prices). IN the sim
+  // (unlike the guild registry) because gold + items are HASHED gameplay state both hosts must agree on;
+  // the prices are deterministic and fold into the hash. A seller has at most one open stall.
+  private stalls = new Map<number, { itemId: string; rarity: Rarity; plus: number; price: number }[]>();
 
   // `spawnLocal` controls whether a local player is created; `localName` is its name.
   // The default 'Hero' keeps offline + tests bit-identical to before; the name-entry
@@ -309,6 +316,7 @@ export class Sim implements IWorld {
     // GDD v0.5 (Pets): a disconnecting owner takes its pet with it (despawn the follower + drop the index).
     const petId = this.petOf.get(id);
     if (petId !== undefined) { this.ents.delete(petId); this.petOf.delete(id); }
+    this.stalls.delete(id); // GDD v0.5 (Stalls): a disconnecting seller closes their stall
     const i = this.playerIds.indexOf(id);
     if (i >= 0) this.playerIds.splice(i, 1);
     for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
@@ -903,6 +911,100 @@ export class Sim implements IWorld {
     }
   }
 
+  // ---------- Stalls (GDD v0.5 §5): personal P2P shops + the atomic transfer ----------
+  // IWorld seam: the open stall the LOCAL player is in range of (to browse + buy), or null.
+  stall(): StallView | null {
+    return this.stallFor(this.localId);
+  }
+
+  // The open stall a buyer is within range of (the nearest seller with a stall), or null. Built per-buyer
+  // like shopFor; `qty` is read LIVE from the seller's bag, and sold-out lines are hidden.
+  stallFor(buyerId: number): StallView | null {
+    const buyer = this.ents.get(buyerId);
+    if (!buyer) return null;
+    let best: Entity | null = null;
+    let bestD = STALL_INTERACT_RANGE * STALL_INTERACT_RANGE;
+    for (const [sellerId, listings] of this.stalls) {
+      if (sellerId === buyerId || listings.length === 0) continue;
+      const seller = this.ents.get(sellerId);
+      if (!seller) continue;
+      const dx = buyer.x - seller.x, dz = buyer.z - seller.z;
+      const d = dx * dx + dz * dz;
+      if (d <= bestD) { bestD = d; best = seller; }
+    }
+    if (!best) return null;
+    const entries: StallEntryView[] = [];
+    for (const l of this.stalls.get(best.id)!) {
+      let qty = 0;
+      for (const s of best.bag) if (s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus) qty += s.qty;
+      if (qty <= 0) continue; // hide a sold-out line
+      entries.push({ itemId: l.itemId, name: ITEMS[l.itemId]?.name ?? l.itemId, rarity: l.rarity, plus: l.plus, price: l.price, qty });
+    }
+    return { sellerId: best.id, sellerName: best.name, entries, inRange: true };
+  }
+
+  // GDD v0.5 (Stalls) ST0 — the ATOMIC, dup-proof P2P transfer of ONE unit + gold. Validates EVERYTHING
+  // (seller still holds it, buyer can afford it, buyer has room so addToBag CANNOT fail) BEFORE any
+  // mutation; every early return leaves BOTH players byte-identical, so no item is removed-without-added
+  // (destroy) or added-without-removed (dup). Pure (no Rng); both bags + golds already fold into the hash.
+  // Single-threaded tick = no races: two buyers of one stack serialize, the second aborts (stack gone).
+  private transferItem(seller: Entity, buyer: Entity, itemId: string, rarity: Rarity, plus: number, price: number): boolean {
+    if (seller.id === buyer.id) return false; // no self-trade
+    let have = 0;
+    for (const s of seller.bag) if (s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus) have += s.qty;
+    if (have < 1) return false; // seller no longer holds it
+    if (buyer.gold < price) return false; // buyer can't afford it
+    if (!canAccept(buyer.bag, itemId, rarity, plus, BAG_SLOTS)) return false; // buyer has no room -> abort (addToBag would fail)
+    // all checks passed -> the four mutations below are infallible
+    removeFromBag(seller.bag, itemId, rarity, plus, 1);
+    addToBag(buyer.bag, itemId, rarity, plus, 1, BAG_SLOTS);
+    buyer.gold -= price;
+    seller.gold += price;
+    return true;
+  }
+
+  // ST1 — open a personal stall offering bag items at owner-set prices. A listing is kept only if the
+  // player holds the item and the price is a positive integer; re-opening replaces the prior stall.
+  private openStall(p: Entity, requested: ReadonlyArray<{ itemId: string; rarity: Rarity; plus: number; price: number }>): void {
+    if (!Array.isArray(requested)) return;
+    const listings: { itemId: string; rarity: Rarity; plus: number; price: number }[] = [];
+    for (const r of requested) {
+      if (listings.length >= STALL_MAX_LISTINGS) break;
+      if (!r || !Number.isInteger(r.price) || r.price <= 0) continue; // free/garbage price rejected
+      const holds = p.bag.some((s) => s != null && s.itemId === r.itemId && s.rarity === r.rarity && s.plus === r.plus);
+      if (!holds) continue; // can only list what you carry
+      if (listings.some((l) => l.itemId === r.itemId && l.rarity === r.rarity && l.plus === r.plus)) continue; // dedupe
+      listings.push({ itemId: r.itemId, rarity: r.rarity, plus: r.plus, price: r.price });
+    }
+    if (listings.length === 0) this.stalls.delete(p.id);
+    else this.stalls.set(p.id, listings);
+  }
+
+  private closeStall(p: Entity): void {
+    this.stalls.delete(p.id);
+  }
+
+  // ST2 — buy ONE unit of a listed item from a seller's stall. Gated on proximity to the seller + the
+  // listing existing, then runs the atomic transferItem; re-validates at apply time (a stale/absent seller
+  // is a no-op). Drops the listing once the seller runs out.
+  private stallBuy(buyer: Entity, sellerId: number, itemId: string, rarity: Rarity, plus: number): void {
+    const seller = this.ents.get(sellerId);
+    if (!seller || seller.kind !== 'player') return;
+    const listings = this.stalls.get(sellerId);
+    if (!listings) return; // no open stall
+    const listing = listings.find((l) => l.itemId === itemId && l.rarity === rarity && l.plus === plus);
+    if (!listing) return; // not offered
+    const dx = buyer.x - seller.x, dz = buyer.z - seller.z;
+    if (dx * dx + dz * dz > STALL_INTERACT_RANGE * STALL_INTERACT_RANGE) return; // too far from the stall
+    if (!this.transferItem(seller, buyer, itemId, rarity, plus, listing.price)) return; // atomic; clean abort on any failure
+    const stillHas = seller.bag.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+    if (!stillHas) {
+      const i = listings.indexOf(listing);
+      if (i >= 0) listings.splice(i, 1);
+      if (listings.length === 0) this.stalls.delete(sellerId);
+    }
+  }
+
   sendCommand(cmd: Command): void {
     // The local (offline) player. Networked players use sendCommandFor(id, …).
     this.routeCommand(this.localId, cmd);
@@ -1186,6 +1288,7 @@ export class Sim implements IWorld {
               rarity: e.loot.stack.rarity, plus: e.loot.stack.plus, qty: e.loot.stack.qty }
           : null,
         pkActive: e.pkActive === true, // GDD v0.5 (PK livre): public PK flag -> drives the "dangerous player" marker
+        stallOpen: this.stalls.has(e.id), // GDD v0.5 (Stalls): public flag -> buyers/renderer see who has a stall
       });
     }
     return out;
@@ -1728,6 +1831,16 @@ export class Sim implements IWorld {
         break;
       case 'withdraw':
         this.withdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
+      // Stalls (GDD v0.5 §5): personal P2P shops. Economy-gated (after the downed/stunned check), like buy/sell.
+      case 'stall-open':
+        this.openStall(p, cmd.listings);
+        break;
+      case 'stall-close':
+        this.closeStall(p);
+        break;
+      case 'stall-buy':
+        this.stallBuy(p, cmd.sellerId, cmd.itemId, cmd.rarity, cmd.plus);
         break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
@@ -3156,6 +3269,13 @@ export class Sim implements IWorld {
     }
     for (const iid of [...this.duelInvites.keys()].sort((a, b) => a - b)) {
       mix(iid); mix(this.duelInvites.get(iid)!);
+    }
+    // GDD v0.5 (Stalls): open stall LISTINGS are deterministic gameplay state (prices both hosts must agree
+    // on). Fold by seller id (sorted); empty => 0 iterations => byte-identical to a stall-less world.
+    for (const sid of [...this.stalls.keys()].sort((a, b) => a - b)) {
+      mix(sid);
+      for (const l of this.stalls.get(sid)!) { mix(strHash(l.itemId)); mix(strHash(l.rarity)); mix(l.plus); mix(l.price); }
+      mix(-1); // listing-list terminator
     }
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);

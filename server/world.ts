@@ -181,6 +181,25 @@ export class ServerWorld {
       case 'set-pet':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-pet', on: cmd.on });
         return;
+      // Stalls (GDD v0.5 §5): rebuild a CLEAN listings array from validated fields; the sim re-checks
+      // ownership + a positive-int price. stall-buy validates the seller id + the item ref.
+      case 'stall-open': {
+        if (!Array.isArray(cmd.listings)) return;
+        const listings = cmd.listings
+          .filter((l) => l != null && validItemRef(l.itemId, l.rarity, l.plus) && Number.isInteger(l.price) && l.price > 0)
+          .slice(0, 24)
+          .map((l) => ({ itemId: l.itemId, rarity: l.rarity, plus: l.plus, price: l.price }));
+        this.sim.sendCommandFor(id, { t: 'stall-open', listings });
+        return;
+      }
+      case 'stall-close':
+        this.sim.sendCommandFor(id, { t: 'stall-close' });
+        return;
+      case 'stall-buy':
+        if (Number.isInteger(cmd.sellerId) && validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
+          this.sim.sendCommandFor(id, { t: 'stall-buy', sellerId: cmd.sellerId, itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+        }
+        return;
       // --- Party / co-op (GDD B6): the sim validates leader/capacity/membership ---
       case 'party-create':
         if (PARTY_EXP.has(cmd.exp) && PARTY_LOOT.has(cmd.loot)) {
@@ -390,6 +409,7 @@ export class ServerWorld {
     const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
     const storage = this.sim.storageFor(id); // K5: the player's warehouse view (inRange too)
+    const stall = this.sim.stallFor(id); // GDD v0.5 (Stalls): the open stall this player is near, or null
     const teleporter = this.sim.teleporterFor(id); // TP3: city list + register/Return state for this player
     const e = this.sim.entities().find((v) => v.id === id);
     // Party state is the same for either branch (it survives a dead/missing entity view).
@@ -408,7 +428,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, petActive: false, abilities, inventory, shop, storage, teleporter, party, invite,
+        botActive: false, petActive: false, abilities, inventory, shop, storage, stall, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
@@ -421,7 +441,7 @@ export class ServerWorld {
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
       petActive: this.sim.petActiveFor(id), // GDD v0.5 (Pets): summon/dismiss state for the HUD toggle
-      abilities, inventory, shop, storage, teleporter, party, invite,
+      abilities, inventory, shop, storage, stall, teleporter, party, invite,
       matching, partyRequests, myRequestPartyId, duel, duelInvite,
     };
   }
@@ -457,6 +477,7 @@ export class ServerWorld {
       // GDD v0.5 (PK livre): only PK-armed players carry the public flag (snapshot stays lean), so remote
       // clients can mark the dangerous player. e.pkActive is the EntityView's boolean.
       if (e.pkActive) snap.pk = true;
+      if (e.stallOpen) snap.stallOpen = true; // GDD v0.5 (Stalls): only sellers carry the public flag
       entities.push(snap);
     }
     const events: NetEvent[] = [];

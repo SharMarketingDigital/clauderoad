@@ -10,7 +10,7 @@
 // The server is authoritative for everything; this only mirrors and renders.
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, TeleporterView,
-  PartyView, PartyInviteView, DuelView, DuelInviteView,
+  PartyView, PartyInviteView, DuelView, DuelInviteView, StallView,
 } from '../world_api';
 import type {
   ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine, ChatChannel,
@@ -139,6 +139,10 @@ export class ClientWorld implements IWorld {
 
   petActive(): boolean {
     return this.self ? this.self.petActive : false;
+  }
+
+  stall(): StallView | null {
+    return this.self ? this.self.stall : null; // GDD v0.5 (Stalls): the open stall this player is near
   }
 
   // The local player's party + pending invite — mirrored from the server's `self` state.
@@ -272,6 +276,7 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
     mastery: s.mastery, // the remote player's class skin selector (from the snapshot)
     loot: s.loot ?? null, // GDD v0.5 (loot físico): the dropped stack, so remote ground loot shows its contents (offline parity)
     pkActive: s.pk ?? false, // GDD v0.5 (PK livre): mirror the public PK flag -> the red marker on a dangerous player
+    stallOpen: s.stallOpen ?? false, // GDD v0.5 (Stalls): mirror the public stall flag -> buyers can find the seller
   };
 }
 

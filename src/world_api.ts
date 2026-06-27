@@ -105,6 +105,9 @@ export interface EntityView {
   // GDD v0.5 (PK livre §2): true while this PLAYER has PK mode armed (holding ALT). PUBLIC — every client
   // sees it, so the renderer can mark a dangerous (PK) player for everyone. Absent/false for non-players.
   readonly pkActive?: boolean;
+  // GDD v0.5 (Stalls §5): true while this player has a personal shop (barraca) open — public, so buyers
+  // can find/target them. Absent/false for everyone else.
+  readonly stallOpen?: boolean;
 }
 
 // One stack in the player's bag, with the item's display name resolved.
@@ -174,6 +177,25 @@ export interface ShopEntryView {
 export interface ShopView {
   readonly name: string;
   readonly stock: ReadonlyArray<ShopEntryView>;
+  readonly inRange: boolean;
+}
+
+// GDD v0.5 (Stalls §5): one item a player's personal stall offers. `qty` is the seller's LIVE count.
+export interface StallEntryView {
+  readonly itemId: string;
+  readonly name: string;
+  readonly rarity: Rarity;
+  readonly plus: number;
+  readonly price: number; // gold the buyer pays for ONE
+  readonly qty: number; // how many the seller currently holds
+}
+
+// GDD v0.5 (Stalls §5): the open stall the local buyer is in range of (or null). Delivered per-buyer like
+// ShopView. The buyer clicks a line to buy; the sim moves the item + gold atomically (ST0).
+export interface StallView {
+  readonly sellerId: number;
+  readonly sellerName: string;
+  readonly entries: ReadonlyArray<StallEntryView>;
   readonly inRange: boolean;
 }
 
@@ -316,7 +338,12 @@ export type Command =
   | { t: 'set-pk'; on: boolean } // ALT held/released -> PK mode on/off
   // --- Pets (GDD v0.5 §4): summon/dismiss the owned grab pet (a held-or-toggle companion). The sim
   // validates that the player actually OWNS a pet item before spawning the follower. ---
-  | { t: 'set-pet'; on: boolean }; // summon (true) / dismiss (false) the player's pet
+  | { t: 'set-pet'; on: boolean } // summon (true) / dismiss (false) the player's pet
+  // --- Stalls (GDD v0.5 §5): personal P2P shops. open lists bag items at owner-set prices; buy moves the
+  // item + gold ATOMICALLY (the sim validates ownership/gold/room/proximity + anti-duplication). ---
+  | { t: 'stall-open'; listings: ReadonlyArray<{ itemId: string; rarity: Rarity; plus: number; price: number }> }
+  | { t: 'stall-close' }
+  | { t: 'stall-buy'; sellerId: number; itemId: string; rarity: Rarity; plus: number }; // buy ONE of a listed stack
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -399,6 +426,8 @@ export interface IWorld {
   // GDD v0.5 (Pets): whether the local player currently has a pet summoned. UI reads it for the
   // summon/dismiss toggle state; input reads it to send the opposite on the toggle key.
   petActive(): boolean;
+  // GDD v0.5 (Stalls): the open stall the local player is in range of (to browse + buy), or null.
+  stall(): StallView | null;
   // The local player's party (members + modes), or null when solo. UI draws the
   // party frames + window from this; online it mirrors the server's authoritative state.
   localParty(): PartyView | null;

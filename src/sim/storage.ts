@@ -24,7 +24,7 @@ export const WAREHOUSE_ENTITY_ID = 1_000_000_000;
 // `arr` aceitaria (itemId,rarity,plus)? true se já há um stack CASÁVEL (cresce a qty) OU se há
 // slot livre. ESPELHA exatamente addToBag (inventory.ts): um stack casável cresce mesmo com o
 // array cheio, então checar-antes nunca rejeita um movimento que addToBag aceitaria.
-function canAccept(arr: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number, maxSlots: number): boolean {
+export function canAccept(arr: (ItemStack | null)[], itemId: string, rarity: Rarity, plus: number, maxSlots: number): boolean {
   const matchable = arr.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
   // Há espaço se a lista ainda pode crescer (armazém compacto) OU se existe um hole (bag esparsa).
   const hasRoom = arr.length < maxSlots || arr.some((s) => s == null);
