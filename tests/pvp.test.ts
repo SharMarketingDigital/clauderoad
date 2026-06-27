@@ -377,6 +377,15 @@ describe('duel PvP damage (A2)', () => {
     expect(chebyshev(ent(sim, b).x, ent(sim, b).z)).toBeGreaterThan(30); // ...BLOQUEADO: segue fora (não voltou pra (0,0))
   });
 
+  it('PK0 — ligar o auto-play (bot) limpa o flag de PK (não fica preso marcado/no anel vermelho)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    run(sim, a, { t: 'set-pk', on: true });
+    expect(ent(sim, a).pkActive).toBe(true); // PK armado
+    run(sim, a, { t: 'set-bot', on: true }); // liga o auto-play...
+    expect(ent(sim, a).pkActive).toBe(false); // ...e o PK é limpo (o bot AFK não fica "perigoso" pra todos)
+  });
+
   it('a SINGLE set-target keeps landing auto-attacks on the opponent over many ticks (the client clicks once)', () => {
     // Regression guard. The real client sends set-target only on a CLICK — never re-sending it each
     // tick. So the duel target must PERSIST in the sim (validateTarget must not treat the live

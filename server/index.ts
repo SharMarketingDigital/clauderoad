@@ -203,7 +203,7 @@ function handleGuild(ws: WebSocket, msg: Extract<ClientMessage, { t: `guild-${st
       systemTo(id, 'Convite de guilda recusado.');
       return;
     case 'guild-leave': {
-      const members = world.guildMemberIds(id); // capture BEFORE leaving, to notify them
+      const members = [...world.guildMemberIds(id)]; // COPY the roster BEFORE leaving (leaveGuild mutates the live array)
       const g = world.leaveGuild(id);
       if (!g) { systemTo(id, 'Você não está em uma guilda.'); return; }
       systemTo(id, `Você saiu da guilda "${g.name}".`);

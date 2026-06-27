@@ -1322,6 +1322,11 @@ export class Sim implements IWorld {
         if (cmd.t === 'set-bot') {
           if (cmd.on) {
             this.botPlayers.add(id);
+            // PK livre: auto-play has no "hands on the controls", so it can't hold the ALT/PK modifier.
+            // Clear it here — the client's corrective set-pk would be dropped (non-social input is ignored
+            // while botting), so without this an armed-then-botted player stays flagged PK (a stuck red
+            // ring + a stuck hash bit). Mirrors how the OFF branch below clears targetId.
+            p.pkActive = false;
           } else {
             this.botPlayers.delete(id);
             this.moveIntents.set(id, { t: 'stop' }); // hand control back to the human
