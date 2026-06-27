@@ -166,6 +166,11 @@ export class ServerWorld {
       case 'set-bot':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-bot', on: cmd.on });
         return;
+      // PK livre (GDD v0.5 §2): the held ALT/PK modifier. Validate the boolean and forward; the sim
+      // gates the actual PvP eligibility (canAttack: PK flag + both outside a city safe-zone).
+      case 'set-pk':
+        if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-pk', on: cmd.on });
+        return;
       // --- Party / co-op (GDD B6): the sim validates leader/capacity/membership ---
       case 'party-create':
         if (PARTY_EXP.has(cmd.exp) && PARTY_LOOT.has(cmd.loot)) {

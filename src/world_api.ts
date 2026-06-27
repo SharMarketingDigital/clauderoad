@@ -306,7 +306,11 @@ export type Command =
   // --- pegar loot do chão (GDD v0.5 loot físico LF-S2): pick up a ground item by id (FFA; sim validates range) ---
   | { t: 'pickup'; lootId: number } // the ground-loot entity id to pick up into the bag
   // --- pegar TODO o loot no alcance de uma vez (tecla G; o "pegar sozinho" sem pet) ---
-  | { t: 'pickup-nearby' }; // no args — picks up every ground item within reach (FFA; sim validates range/bag)
+  | { t: 'pickup-nearby' } // no args — picks up every ground item within reach (FFA; sim validates range/bag)
+  // --- PK livre (GDD v0.5 §2): hold ALT to flag free PvP. A HELD modifier (not a one-shot): the sim
+  // stores it per-player and canAttack reads it every tick, so the continuous auto-swing keeps releasing
+  // against players outside cities. Sent edge-triggered (on ALT down/up) — no consent/handshake. ---
+  | { t: 'set-pk'; on: boolean }; // ALT held/released -> PK mode on/off
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.

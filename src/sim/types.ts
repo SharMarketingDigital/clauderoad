@@ -138,4 +138,9 @@ export interface Entity {
   // GDD v0.5 (loot físico): present ONLY on kind 'loot' ground items (the dropped stack + despawn tick).
   // undefined for players/enemies/NPCs — so no existing spawn literal changes and the hash fold stays conditional.
   loot?: GroundLoot;
+  // GDD v0.5 (PK livre): PvP mode is ON while this player holds ALT — a held modifier the sim reads in
+  // canAttack so the continuous auto-swing releases against players outside cities. Transient combat
+  // state (like targetId): folded into the hash, but NOT persisted (resets to off on reload). Undefined
+  // = off, so no existing spawn literal changes. Non-players never set it.
+  pkActive?: boolean;
 }

@@ -243,6 +243,98 @@ describe('duel PvP damage (A2)', () => {
     expect(play()).toBe(play());
   });
 
+  it('PK0 — sem o flag de PK, um jogador NÃO pode mirar outro (nem fora da cidade)', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    walkOut(sim, a); walkOut(sim, b); // ambos fora da safe-zone, perto um do outro
+    sim.sendCommandFor(a, { t: 'set-target', id: b });
+    sim.step();
+    expect(sim.targetOf(a)).toBeNull(); // sem ALT/PK e sem duelo, outro jogador não é alvo válido (PvE-only)
+  });
+
+  it('PK0 — com PK ligado e FORA da cidade, A mira, causa dano e derruba B', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    sim.restorePlayer(a, { baseStr: 400 }); // derruba rápido e deterministico
+    walkOut(sim, b); // B sai da cidade
+    sim.sendCommandFor(a, { t: 'set-pk', on: true }); // segura ALT (modificador persistente)
+    const hp0 = ent(sim, b).hp;
+    for (let i = 0; i < 1500 && !ent(sim, b).dead; i++) {
+      const ea = ent(sim, a); const eb = ent(sim, b);
+      sim.sendCommandFor(a, { t: 'move', dx: eb.x - ea.x, dz: eb.z - ea.z }); // persegue B (A sai da cidade no caminho)
+      sim.sendCommandFor(a, { t: 'set-target', id: b }); // re-mira até A estar fora da cidade (aí cola)
+      sim.step();
+    }
+    expect(ent(sim, b).hp).toBeLessThan(hp0); // o dano de PK landou...
+    expect(ent(sim, b).dead).toBe(true);      // ...e derrubou B
+    expect(chebyshev(ent(sim, b).x, ent(sim, b).z)).toBeGreaterThan(30); // B caiu FORA da cidade
+  });
+
+  it('PK0 — dentro da cidade (safe-zone) o PK é inelegível: nem mira, mesmo com ALT', () => {
+    const sim = serverSim();
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    expect(chebyshev(ent(sim, a).x, ent(sim, a).z)).toBeLessThanOrEqual(30); // ambos nascem na cidade
+    run(sim, a, { t: 'set-pk', on: true });
+    sim.sendCommandFor(a, { t: 'set-target', id: b });
+    sim.step();
+    expect(sim.targetOf(a)).toBeNull(); // cidade é santuário: PK inelegível dentro dela, sem mira
+  });
+
+  it('PK0 — um combate de PK é deterministico (mesma seed + comandos => hash idêntico)', () => {
+    const play = (): string => {
+      const sim = serverSim(7);
+      const a = sim.addPlayer('A');
+      const b = sim.addPlayer('B');
+      sim.restorePlayer(a, { baseStr: 400 });
+      walkOut(sim, b);
+      sim.sendCommandFor(a, { t: 'set-pk', on: true });
+      for (let i = 0; i < 1500 && !ent(sim, b).dead; i++) {
+        const ea = ent(sim, a); const eb = ent(sim, b);
+        sim.sendCommandFor(a, { t: 'move', dx: eb.x - ea.x, dz: eb.z - ea.z });
+        sim.sendCommandFor(a, { t: 'set-target', id: b });
+        sim.step();
+      }
+      for (let i = 0; i < DEATH_RESPAWN_TICKS + 5; i++) sim.step(); // fold o respawn de B também
+      return sim.hash();
+    };
+    expect(play()).toBe(play());
+  });
+
+  it('PK0 — o flag de PK é inerte quando desligado: ligar+desligar hasheia igual a 2 ticks ociosos', () => {
+    const mk = (): { sim: Sim; a: number } => {
+      const sim = serverSim(7);
+      const a = sim.addPlayer('A');
+      sim.addPlayer('B');
+      return { sim, a };
+    };
+    const toggled = mk();
+    run(toggled.sim, toggled.a, { t: 'set-pk', on: true });
+    run(toggled.sim, toggled.a, { t: 'set-pk', on: false }); // volta a false
+    const plain = mk();
+    plain.sim.step();
+    plain.sim.step();
+    // mesma seed/jogadores/2 ticks e pkActive termina false dos dois lados -> hash byte-idêntico.
+    expect(toggled.sim.hash()).toBe(plain.sim.hash());
+  });
+
+  it('PK0 — ligar o PK MUDA o hash (o fold observa o flag ativo; anti-desync online)', () => {
+    const mk = (): { sim: Sim; a: number } => {
+      const sim = serverSim(7);
+      const a = sim.addPlayer('A');
+      sim.addPlayer('B');
+      return { sim, a };
+    };
+    const off = mk();
+    off.sim.step(); // 1 tick ocioso, PK nunca ligado
+    const on = mk();
+    run(on.sim, on.a, { t: 'set-pk', on: true }); // 1 tick, A com PK ligado
+    // idênticos exceto pelo pkActive de A -> os hashes DEVEM diferir (o flag é gameplay state hasheado).
+    expect(on.sim.hash()).not.toBe(off.sim.hash());
+  });
+
   it('a SINGLE set-target keeps landing auto-attacks on the opponent over many ticks (the client clicks once)', () => {
     // Regression guard. The real client sends set-target only on a CLICK — never re-sending it each
     // tick. So the duel target must PERSIST in the sim (validateTarget must not treat the live

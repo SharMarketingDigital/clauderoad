@@ -1175,10 +1175,21 @@ export class Sim implements IWorld {
   private canAttack(attacker: Entity, target: Entity): boolean {
     if (target.hp <= 0 || target.id === attacker.id) return false;
     if (target.kind === 'enemy') return true; // PvE (unchanged): any living enemy
-    // PvP (Tier 1 A2): the ONLY attackable player is the one you're in an ACTIVE duel with —
-    // consensual 1v1. The safe-zone is enforced at the DAMAGE step (hitPlayer), not here, so you
-    // can still target/approach the opponent across the town edge; only the blow is withheld inside.
-    return target.kind === 'player' && attacker.kind === 'player' && this.areDueling(attacker.id, target.id);
+    if (target.kind !== 'player' || attacker.kind !== 'player') return false; // only player-vs-player past here
+    // PvP path 1 — consensual DUEL: always eligible vs your pair. The safe-zone is enforced at the DAMAGE
+    // step (hitPlayer), not here, so you can target/approach across the town edge; the blow is withheld inside.
+    if (this.areDueling(attacker.id, target.id)) return true;
+    // PvP path 2 — free PK (GDD v0.5 §2): eligible only when the attacker has PK mode ON (ALT held) AND
+    // BOTH players stand OUTSIDE any city safe-zone. With PK off, players are never eligible — so a normal
+    // attack / Tab cycle only ever finds mobs (PK is click-targeted, like Silkroad).
+    return attacker.pkActive === true && !this.inSafeZone(attacker) && !this.inSafeZone(target);
+  }
+
+  // Whether the entity stands inside a city safe-zone (no PvP, no aggro). The canonical "in a city" test
+  // (zoneAt covers town + Vila do Leste); shared by the PK eligibility check above and mirrored by the
+  // damage-step withhold in hitPlayer, so PK targeting and PK damage agree at the city edge.
+  private inSafeZone(e: Entity): boolean {
+    return zoneAt(e.x, e.z).safe;
   }
 
   // Whether two players are in the SAME active duel (consensual PvP). Both ids map to the same
@@ -1538,6 +1549,9 @@ export class Sim implements IWorld {
       case 'duel-challenge': this.challengeDuel(p, cmd.name); return;
       case 'duel-accept': this.acceptDuel(p); return;
       case 'duel-decline': this.declineDuel(p); return;
+      // PK livre (GDD v0.5): toggle the held PK modifier. Pre-gate (like the social commands) so
+      // RELEASING ALT clears it even while downed/stunned — a player never respawns stuck in PK mode.
+      case 'set-pk': p.pkActive = cmd.on; return;
     }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {
@@ -2942,6 +2956,7 @@ export class Sim implements IWorld {
       const e = this.ents.get(id)!;
       mix(id); mix(e.x); mix(e.z); mix(e.facing); mix(e.hp);
       mix(e.targetId == null ? 0 : e.targetId);
+      mix(e.pkActive ? 1 : 0); // PK livre (GDD v0.5): PvP-eligibility flag — gameplay state, so two hosts must agree
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
