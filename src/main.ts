@@ -21,6 +21,7 @@ import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
 import { PartyHud } from './ui/party_hud';
 import { DuelHud } from './ui/duel_hud';
+import { PkHud } from './ui/pk_hud';
 import { TeleporterHud } from './ui/teleporter_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
@@ -134,6 +135,7 @@ function startOnline(url: string, name: string): void {
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
   const duelHud = new DuelHud(world); // PvP: active-duel banner + incoming-challenge popup (A3)
+  const pkHud = new PkHud(); // PvP: free-PK warning (GDD v0.5 §2) — "zona PvP" / "PK armado" near the top
   const teleporterHud = new TeleporterHud(world); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
   const chat = new ChatBox((text, channel) => world.sendChat(text, channel)); // text chat (/p for party)
@@ -160,6 +162,7 @@ function startOnline(url: string, name: string): void {
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
     duelHud.update(world, renderer, input.duelTargetId()); // PvP: banner + challenge popup + floating "Duelar" button on the left-click-selected player
+    pkHud.update(world, input.pkHeld()); // PvP: free-PK "zona PvP" / "PK armado" warning (GDD v0.5 §2)
     teleporterHud.update(world, input); // TP3: opens the hub menu on a teleporter-NPC click; drives the Return button state
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     music.update(world, dt); // crossfade city/combat/exploration by the player's context

@@ -1087,6 +1087,7 @@ export class Sim implements IWorld {
           ? { itemId: e.loot.stack.itemId, name: ITEMS[e.loot.stack.itemId]?.name ?? e.loot.stack.itemId,
               rarity: e.loot.stack.rarity, plus: e.loot.stack.plus, qty: e.loot.stack.qty }
           : null,
+        pkActive: e.pkActive === true, // GDD v0.5 (PK livre): public PK flag -> drives the "dangerous player" marker
       });
     }
     return out;

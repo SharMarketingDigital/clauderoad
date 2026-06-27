@@ -99,6 +99,9 @@ export class Renderer {
   // per npc id, created lazily — so each NPC has its OWN model/root and renders at its OWN
   // position (a single shared avatar can't be in two places). Loads async; capsule fallback.
   private npcAvatars = new Map<number, NpcAvatar>();
+  // GDD v0.5 (PK livre): a red ground ring under each PK-armed player (public — every client sees the
+  // dangerous player). Keyed by entity id; created lazily, hidden/removed when they un-flag or leave.
+  private pkRings = new Map<number, THREE.Mesh>();
 
   // sky / sun+shadows / undulating ground / grass / fog (all tunable in environment.ts)
   private env: Environment;
@@ -541,6 +544,7 @@ export class Renderer {
       updateHostileTint(m, e);
       updateDeadFade(m, e);
       updateStatusMarker(m, e);
+      this.updatePkRing(e); // GDD v0.5 (PK livre): red ring under a PK-armed player, visible to everyone
       if (e.id === targetId) targetView = e;
     }
     for (const [id, m] of this.meshes) {
@@ -549,6 +553,8 @@ export class Renderer {
         this.meshes.delete(id);
         this.enemyAvatars.release(id); // dispose a skeleton avatar if this id was one
         this.playerAvatars.release(id); // dispose a remote Knight if this id was one
+        const ring = this.pkRings.get(id); // and its PK ring, if it had one
+        if (ring) { this.scene.remove(ring); this.pkRings.delete(id); }
       }
     }
     // Park the selection ring under the CURRENT target (ANY kind). localTargetId can be a player in
@@ -558,6 +564,11 @@ export class Renderer {
       this.selectionRing.position.set(tp.x, terrainHeight(tp.x, tp.z) + 0.06, tp.z);
       // Size: boss/tier for enemies; a player (duel opponent) gets the standard ring.
       const onPlayer = targetView.kind === 'player';
+      // GDD v0.5 (PK livre): the ring turns RED when the target is a PK-armed player (you're locked on a
+      // dangerous target), otherwise the classic gold.
+      (this.selectionRing.material as THREE.MeshBasicMaterial).color.setHex(
+        onPlayer && targetView.pkActive ? 0xff3b3b : 0xffe14d,
+      );
       this.selectionRing.scale.setScalar(targetView.boss ? 1.9 : onPlayer ? 1 : (TIER_SCALE[targetView.tier] ?? 1));
       // A player's ground ring is easily hidden in a face-to-face melee duel — your own avatar and the
       // opponent's body sandwich the small disc — so draw the PLAYER ring ON TOP (no depth test) for
@@ -567,6 +578,21 @@ export class Renderer {
       this.selectionRing.visible = true;
     } else {
       this.selectionRing.visible = false;
+    }
+  }
+
+  // GDD v0.5 (PK livre): show/position a red ground ring under a PK-armed player (the public danger cue),
+  // hide it when they un-flag. Driven purely by EntityView.pkActive (works offline AND online), so it
+  // needs no input/sim coupling — just IWorld state. The local player sees its OWN ring while ALT is held.
+  private updatePkRing(e: EntityView): void {
+    const want = e.kind === 'player' && e.pkActive === true;
+    let ring = this.pkRings.get(e.id);
+    if (want && !ring) { ring = makePkRing(); this.scene.add(ring); this.pkRings.set(e.id, ring); }
+    if (!ring) return;
+    ring.visible = want;
+    if (want) {
+      const ip = this.interpPos(e.id, e); // sit under the smoothed position (O1)
+      ring.position.set(ip.x, terrainHeight(ip.x, ip.z) + 0.05, ip.z);
     }
   }
 
@@ -844,6 +870,25 @@ function updateDeadFade(actor: THREE.Object3D, e: EntityView): void {
       mat.opacity = e.dead ? 0.3 : 1;
     }
   });
+}
+
+// GDD v0.5 (PK livre): a red ground ring marking a PK-armed (dangerous) player, shown to EVERYONE under
+// any player whose pkActive is set. Distinct from the gold selection ring (bigger, always red, additive-
+// ish glow via transparency). Decorative only — never affects the sim.
+function makePkRing(): THREE.Mesh {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.78, 1.12, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0xff3b3b,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    }),
+  );
+  ring.rotation.x = -Math.PI / 2; // lay flat on the ground
+  ring.renderOrder = 1;
+  return ring;
 }
 
 // Flat ground ring used as the "selected target" marker (classic WoW/Silkroad

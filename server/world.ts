@@ -443,6 +443,9 @@ export class ServerWorld {
       // what's on the ground (name/rarity/+N/qty). Everyone else omits it to keep the snapshot lean.
       // e.loot is already the GroundLootView built by the sim's entity projection — copy it verbatim.
       if (e.loot) snap.loot = e.loot;
+      // GDD v0.5 (PK livre): only PK-armed players carry the public flag (snapshot stays lean), so remote
+      // clients can mark the dangerous player. e.pkActive is the EntityView's boolean.
+      if (e.pkActive) snap.pk = true;
       entities.push(snap);
     }
     const events: NetEvent[] = [];

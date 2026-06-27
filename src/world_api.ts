@@ -102,6 +102,9 @@ export interface EntityView {
   readonly mastery: MasteryId;
   // GDD v0.5 (loot físico): the dropped stack for a kind 'loot' ground item; null/absent for everyone else.
   readonly loot?: GroundLootView | null;
+  // GDD v0.5 (PK livre §2): true while this PLAYER has PK mode armed (holding ALT). PUBLIC — every client
+  // sees it, so the renderer can mark a dangerous (PK) player for everyone. Absent/false for non-players.
+  readonly pkActive?: boolean;
 }
 
 // One stack in the player's bag, with the item's display name resolved.

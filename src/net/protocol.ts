@@ -55,6 +55,9 @@ export interface EntitySnap {
   // what's on the ground (name/rarity/+N/qty) just like offline. Present ONLY on loot entities — the
   // snapshot stays lean (players/mobs/NPCs omit it). Mirrors EntityView.loot.
   loot?: GroundLootView | null;
+  // GDD v0.5 (PK livre §2): true while this player has PK mode armed — PUBLIC, so every client can mark a
+  // dangerous (PK) player. Present ONLY on flagged players (the snapshot stays lean); absent = not in PK.
+  pk?: boolean;
 }
 
 // A presentation event forwarded from the server's sim (floating damage numbers, hit
