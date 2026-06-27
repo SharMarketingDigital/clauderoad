@@ -25,7 +25,7 @@ import {
 } from './content/enemies';
 import { SPAWN_ZONES, WORLD_HALF, RING_WIDTH, zoneAt, CITIES, type SpawnSpot } from './zones';
 import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
-import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE } from './loot';
+import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE, PET_GRAB_RADIUS } from './loot';
 import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
@@ -875,10 +875,31 @@ export class Sim implements IWorld {
       const pet = this.ents.get(this.petOf.get(ownerId)!);
       const owner = this.ents.get(ownerId);
       if (!pet || !owner) continue;
+      // follow: trail the owner, idling inside the deadband so it doesn't jitter on top of them
       const dx = owner.x - pet.x, dz = owner.z - pet.z;
-      if (Math.hypot(dx, dz) <= PET_FOLLOW_DEADBAND) continue; // close enough — idle (no jitter)
-      const m = applyMove(pet.x, pet.z, dx, dz, PET_FOLLOW_SPEED, DT, WORLD_HALF);
-      if (m) { pet.x = m.x; pet.z = m.z; pet.facing = m.facing; }
+      if (Math.hypot(dx, dz) > PET_FOLLOW_DEADBAND) {
+        const m = applyMove(pet.x, pet.z, dx, dz, PET_FOLLOW_SPEED, DT, WORLD_HALF);
+        if (m) { pet.x = m.x; pet.z = m.z; pet.facing = m.facing; }
+      }
+      this.petGrabNearby(owner, pet); // GDD v0.5 (Pets) PET1: vacuum ground loot near the pet into the owner's bag
+    }
+  }
+
+  // GDD v0.5 (Pets) PET1: the summoned pet auto-collects ground loot within PET_GRAB_RADIUS of the PET into
+  // the OWNER's bag — FFA, like the manual pickup, just automated (the loot-físico work made the drops; the
+  // pet gathers them). Deterministic: snapshots lootIds (insertion order, stable across hosts since loot
+  // spawns deterministically); reuses addToBag, and a full bag simply leaves the loot on the ground.
+  private petGrabNearby(owner: Entity, pet: Entity): void {
+    if (this.lootIds.size === 0) return;
+    for (const lootId of [...this.lootIds]) {
+      const e = this.ents.get(lootId);
+      if (!e || !e.loot) continue;
+      const dx = pet.x - e.x, dz = pet.z - e.z;
+      if (dx * dx + dz * dz > PET_GRAB_RADIUS * PET_GRAB_RADIUS) continue; // out of the pet's reach
+      const s = e.loot.stack;
+      if (!addToBag(owner.bag, s.itemId, s.rarity, s.plus, s.qty)) continue; // bag full -> leave it on the ground
+      this.ents.delete(lootId);
+      this.lootIds.delete(lootId);
     }
   }
 

@@ -104,3 +104,49 @@ describe('Pets — summon / dismiss / acquisition (PET0 + PET3)', () => {
     expect(toggled.sim.hash()).toBe(plain.sim.hash());
   });
 });
+
+describe('Pets — grab pet auto-collect (PET1)', () => {
+  // Farm the nearest mob (walk onto it + auto-attack) for N ticks, like a real player. Mob kills drop
+  // loot on the GROUND (LF-S4), near where the player stands — exactly where a trailing pet can reach.
+  const farm = (sim: Sim, a: number, steps: number, stopWhen: () => boolean): void => {
+    for (let i = 0; i < steps && !stopWhen(); i++) {
+      const me = ent(sim, a);
+      let mob: { id: number; x: number; z: number } | null = null;
+      let bd = Infinity;
+      for (const e of sim.entities()) {
+        if (e.kind !== 'enemy') continue;
+        const d = (e.x - me.x) ** 2 + (e.z - me.z) ** 2;
+        if (d < bd) { bd = d; mob = e; }
+      }
+      if (mob) {
+        sim.sendCommandFor(a, { t: 'move', dx: mob.x - me.x, dz: mob.z - me.z });
+        sim.sendCommandFor(a, { t: 'set-target', id: mob.id });
+      }
+      sim.step();
+    }
+  };
+  const bagCount = (sim: Sim, a: number) => (sim.serializePlayer(a)?.bag ?? []).filter((s) => s != null).length;
+
+  it('the summoned grab pet vacuums nearby ground loot into the owner bag', () => {
+    const sim = serverSim(1337);
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { bag: [PET_ITEM], baseStr: 400 }); // owns the pet + hits hard (fast kills -> ground loot)
+    run(sim, a, { t: 'set-pet', on: true });
+    expect(bagCount(sim, a)).toBe(1); // only the pet item to start
+    // A never sends a pickup, so ANY bag growth is the trailing pet auto-grabbing a ground drop.
+    farm(sim, a, 3000, () => bagCount(sim, a) > 1);
+    expect(bagCount(sim, a)).toBeGreaterThan(1); // the pet collected at least one drop
+  });
+
+  it('without a summoned pet, ground loot is NOT auto-collected (the pet is what does it)', () => {
+    const sim = serverSim(1337);
+    const a = sim.addPlayer('A');
+    sim.restorePlayer(a, { bag: [PET_ITEM], baseStr: 400 }); // owns the item but does NOT summon a pet
+    let groundLootSeen = false;
+    farm(sim, a, 3000, () => false);
+    // (re-check after the farm: loot is still on the ground, untouched)
+    if (sim.entities().some((e) => e.kind === 'loot')) groundLootSeen = true;
+    expect(groundLootSeen).toBe(true); // loot DID drop on the ground...
+    expect(bagCount(sim, a)).toBe(1); // ...but with no pet, it stayed there (bag is still just the pet item)
+  });
+});
