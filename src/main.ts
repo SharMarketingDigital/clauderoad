@@ -24,6 +24,7 @@ import { DuelHud } from './ui/duel_hud';
 import { PkHud } from './ui/pk_hud';
 import { StallHud } from './ui/stall_hud';
 import { PetBagHud } from './ui/pet_bag_hud';
+import { MarketHud } from './ui/market_hud';
 import { TeleporterHud } from './ui/teleporter_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
@@ -142,6 +143,7 @@ function startOnline(url: string, name: string): void {
   const pkHud = new PkHud(); // PvP: free-PK warning (GDD v0.5 §2) — "zona PvP" / "PK armado" near the top
   const stallHud = new StallHud(); // Stalls (GDD v0.5 §5): N opens "Minha Barraca"; buy panel auto-shows near a stall
   const petBagHud = new PetBagHud(); // GDD v0.5 (Pets PET2): O opens the transport pet's bag (when a pet is out)
+  const marketHud = new MarketHud(); // Global Marketplace: J opens the central buy/sell board
   const teleporterHud = new TeleporterHud(world); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const partyMatching = new PartyMatching(world); // co-op: the E window — find/register groups (matching)
   const chat = new ChatBox(
@@ -174,6 +176,7 @@ function startOnline(url: string, name: string): void {
     pkHud.update(world, input.pkHeld()); // PvP: free-PK "zona PvP" / "PK armado" warning (GDD v0.5 §2)
     stallHud.update(world); // Stalls (GDD v0.5 §5): refresh the buy panel (near a stall) + your own stall panel
     petBagHud.update(world); // PET2: the transport pet's bag panel (O)
+    marketHud.update(world); // Global Marketplace: the central buy/sell board (J)
     teleporterHud.update(world, input); // TP3: opens the hub menu on a teleporter-NPC click; drives the Return button state
     partyMatching.update(); // the E window — LFM list + register + pending requests (reads the world directly)
     music.update(world, dt); // crossfade city/combat/exploration by the player's context

@@ -199,6 +199,27 @@ export interface StallView {
   readonly inRange: boolean;
 }
 
+// Global Marketplace — one item listed for sale, buyable from ANYWHERE (no proximity, unlike a stall).
+// The item stays in the seller's bag until sold; `qty` is the seller's LIVE count. Same list for everyone.
+export interface MarketListingView {
+  readonly id: number; // the listing id (buy/cancel reference it)
+  readonly sellerId: number;
+  readonly sellerName: string;
+  readonly itemId: string;
+  readonly name: string;
+  readonly rarity: Rarity;
+  readonly plus: number;
+  readonly price: number; // gold per unit
+  readonly qty: number; // how many the seller still holds (live; the listing self-removes at 0)
+  readonly own: boolean; // true if the LOCAL player owns this listing (so the UI shows Cancel, not Buy)
+}
+
+// The global marketplace board — every active listing, the same for everyone. Delivered per-client (like
+// the matching list). Browse + buy from anywhere; the sim moves item + gold atomically on a buy.
+export interface MarketView {
+  readonly listings: ReadonlyArray<MarketListingView>;
+}
+
 // The player's persistent warehouse (armazém/banco da cidade) — bag-like, stored at the town
 // warehouse and saved with the character (K5). `inRange` is whether the local player is close
 // enough to the warehouse NPC to deposit/withdraw (the sim enforces this too).
@@ -356,7 +377,12 @@ export type Command =
   // item + gold ATOMICALLY (the sim validates ownership/gold/room/proximity + anti-duplication). ---
   | { t: 'stall-open'; listings: ReadonlyArray<{ itemId: string; rarity: Rarity; plus: number; price: number }> }
   | { t: 'stall-close' }
-  | { t: 'stall-buy'; sellerId: number; itemId: string; rarity: Rarity; plus: number }; // buy ONE of a listed stack
+  | { t: 'stall-buy'; sellerId: number; itemId: string; rarity: Rarity; plus: number } // buy ONE of a listed stack
+  // --- Global Marketplace: list a bag item for sale GLOBALLY (buyable from anywhere), cancel a listing,
+  // or buy one. The sim re-validates ownership/gold/room + moves item + gold atomically (anti-dup). ---
+  | { t: 'market-list'; itemId: string; rarity: Rarity; plus: number; price: number }
+  | { t: 'market-cancel'; listingId: number }
+  | { t: 'market-buy'; listingId: number }; // buy ONE unit of a listing
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -443,6 +469,8 @@ export interface IWorld {
   petActive(): boolean;
   // GDD v0.5 (Stalls): the open stall the local player is in range of (to browse + buy), or null.
   stall(): StallView | null;
+  // Global Marketplace: every active listing (the same board for everyone), to browse + buy from anywhere.
+  market(): MarketView;
   // The local player's party (members + modes), or null when solo. UI draws the
   // party frames + window from this; online it mirrors the server's authoritative state.
   localParty(): PartyView | null;

@@ -15,7 +15,7 @@ import { type Party, maxPartySize, eachGetBonus, PARTY_SHARE_RANGE } from './par
 import type { Duel } from './pvp';
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
-  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, PetBagView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView,
+  IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, PetBagView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView, MarketView, MarketListingView,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
@@ -83,6 +83,8 @@ const PET_SPAWN_OFFSET = 1.4; // spawn just behind the owner so it doesn't pop o
 // GDD v0.5 (Stalls): a buyer must be within this of a stall's owner to trade; a stall offers at most N items.
 const STALL_INTERACT_RANGE = 5; // world units
 const STALL_MAX_LISTINGS = 12;
+// Global marketplace: at most N listings per seller (anti-spam). Buys move ONE unit, from anywhere.
+const MARKET_MAX_PER_SELLER = 12;
 // City wall (Jangan): a square stone rampart at this Chebyshev half-extent — MUST match render's
 // WALL_H in village.ts. The player can't cross it except through a gate gap of ±GATE_HALF at each
 // cardinal mid-point (slightly wider than the visual ~2 opening, for comfortable passage).
@@ -237,6 +239,11 @@ export class Sim implements IWorld {
   // (unlike the guild registry) because gold + items are HASHED gameplay state both hosts must agree on;
   // the prices are deterministic and fold into the hash. A seller has at most one open stall.
   private stalls = new Map<number, { itemId: string; rarity: Rarity; plus: number; price: number }[]>();
+  // Global marketplace: listingId -> a reference to a seller's bag stack + per-unit price. IN the sim
+  // (gold + items are hashed). Buyable from ANYWHERE; the item stays in the seller's bag until sold
+  // (re-validated at buy), so nothing is escrowed and there's nothing to return on disconnect.
+  private marketListings = new Map<number, { sellerId: number; itemId: string; rarity: Rarity; plus: number; price: number }>();
+  private nextMarketId = 1;
 
   // `spawnLocal` controls whether a local player is created; `localName` is its name.
   // The default 'Hero' keeps offline + tests bit-identical to before; the name-entry
@@ -317,6 +324,9 @@ export class Sim implements IWorld {
     const petId = this.petOf.get(id);
     if (petId !== undefined) { this.ents.delete(petId); this.petOf.delete(id); }
     this.stalls.delete(id); // GDD v0.5 (Stalls): a disconnecting seller closes their stall
+    // Global marketplace: drop the disconnecting seller's listings (the item lives in their bag, which
+    // serializes normally — nothing to escrow or return).
+    for (const [lid, l] of this.marketListings) if (l.sellerId === id) this.marketListings.delete(lid);
     const i = this.playerIds.indexOf(id);
     if (i >= 0) this.playerIds.splice(i, 1);
     for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
@@ -1030,6 +1040,64 @@ export class Sim implements IWorld {
       if (i >= 0) listings.splice(i, 1);
       if (listings.length === 0) this.stalls.delete(sellerId);
     }
+  }
+
+  // ---------- Global Marketplace: list / browse / buy from ANYWHERE (reuses the atomic transferItem) ----------
+  // IWorld seam: the global board for the local player (with its `own` flags).
+  market(): MarketView {
+    return this.marketFor(this.localId);
+  }
+
+  // Every active listing (the same board for everyone), built per-viewer for the `own` flag + live qty from
+  // the seller's bag. Stale lines (seller offline or no longer holding the item) are hidden.
+  marketFor(viewerId: number): MarketView {
+    const listings: MarketListingView[] = [];
+    for (const lid of [...this.marketListings.keys()].sort((a, b) => a - b)) {
+      const l = this.marketListings.get(lid)!;
+      const seller = this.ents.get(l.sellerId);
+      if (!seller || seller.kind !== 'player') continue; // seller offline -> hide
+      let qty = 0;
+      for (const s of seller.bag) if (s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus) qty += s.qty;
+      if (qty <= 0) continue; // seller no longer holds it -> hide (self-removes on the next buy)
+      listings.push({
+        id: lid, sellerId: l.sellerId, sellerName: seller.name,
+        itemId: l.itemId, name: ITEMS[l.itemId]?.name ?? l.itemId, rarity: l.rarity, plus: l.plus, price: l.price,
+        qty, own: l.sellerId === viewerId,
+      });
+    }
+    return { listings };
+  }
+
+  // List a bag item for sale globally (the item STAYS in the bag; re-validated at buy). Validates a
+  // positive-int price + ownership + the per-seller cap, and dedupes an identical stack already listed.
+  private marketList(p: Entity, itemId: string, rarity: Rarity, plus: number, price: number): void {
+    if (!Number.isInteger(price) || price <= 0) return;
+    if (!p.bag.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus)) return; // must hold it
+    let mine = 0;
+    for (const l of this.marketListings.values()) {
+      if (l.sellerId !== p.id) continue;
+      if (l.itemId === itemId && l.rarity === rarity && l.plus === plus) return; // already listed this stack
+      mine++;
+    }
+    if (mine >= MARKET_MAX_PER_SELLER) return; // anti-spam cap
+    this.marketListings.set(this.nextMarketId++, { sellerId: p.id, itemId, rarity, plus, price });
+  }
+
+  private marketCancel(p: Entity, listingId: number): void {
+    const l = this.marketListings.get(listingId);
+    if (l && l.sellerId === p.id) this.marketListings.delete(listingId); // only the owner cancels
+  }
+
+  // Buy ONE unit of a listing from ANYWHERE (no proximity). Re-validates the seller is online + still holds
+  // the item, then the atomic transferItem (anti-dup); self-removes the listing when the seller runs out.
+  private marketBuy(buyer: Entity, listingId: number): void {
+    const l = this.marketListings.get(listingId);
+    if (!l) return;
+    const seller = this.ents.get(l.sellerId);
+    if (!seller || seller.kind !== 'player') return; // seller offline
+    if (!this.transferItem(seller, buyer, l.itemId, l.rarity, l.plus, l.price)) return; // atomic; clean abort (incl. self-buy)
+    const stillHas = seller.bag.some((s) => s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus);
+    if (!stillHas) this.marketListings.delete(listingId);
   }
 
   sendCommand(cmd: Command): void {
@@ -1880,6 +1948,16 @@ export class Sim implements IWorld {
         break;
       case 'stall-buy':
         this.stallBuy(p, cmd.sellerId, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
+      // Global Marketplace: list/cancel/buy a global listing (economy-gated like buy/sell; no proximity).
+      case 'market-list':
+        this.marketList(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.price);
+        break;
+      case 'market-cancel':
+        this.marketCancel(p, cmd.listingId);
+        break;
+      case 'market-buy':
+        this.marketBuy(p, cmd.listingId);
         break;
       // 'move'/'stop' never reach here — they are stored as moveIntent.
       default:
@@ -3333,6 +3411,12 @@ export class Sim implements IWorld {
       mix(sid);
       for (const l of this.stalls.get(sid)!) { mix(strHash(l.itemId)); mix(strHash(l.rarity)); mix(l.plus); mix(l.price); }
       mix(-1); // listing-list terminator
+    }
+    // Global marketplace listings (deterministic gameplay state — prices both hosts must agree on). Sorted
+    // by listing id; empty => 0 iterations => byte-identical to a market-less world.
+    for (const lid of [...this.marketListings.keys()].sort((a, b) => a - b)) {
+      const l = this.marketListings.get(lid)!;
+      mix(lid); mix(l.sellerId); mix(strHash(l.itemId)); mix(strHash(l.rarity)); mix(l.plus); mix(l.price);
     }
     // The monotonic event counter fingerprints "how much combat has happened".
     mix(this.nextEventSeq);

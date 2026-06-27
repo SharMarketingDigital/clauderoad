@@ -9,7 +9,7 @@
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
   EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView, StorageView, TeleporterView,
-  PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, MasteryId, GroundLootView, StallView, PetBagView,
+  PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, MasteryId, GroundLootView, StallView, PetBagView, MarketView,
 } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
@@ -134,6 +134,7 @@ export interface SelfSnap {
   storage: StorageView; // K5: the player's warehouse (armazém) contents + whether in range
   petBag: PetBagView; // GDD v0.5 (Pets PET2): the transport pet's portable bag (contents + whether a pet is out)
   stall: StallView | null; // GDD v0.5 (Stalls): the open stall this player is near (to browse + buy), or null
+  market: MarketView; // Global Marketplace: the full board of active listings (same for everyone; `own` per-viewer)
   teleporter: TeleporterView; // TP3: city list + cost, registered city, and Return readiness for this player
   party: PartyView | null; // the player's party (members + modes), or null when solo
   invite: PartyInviteView | null; // a pending party invite to accept/refuse, or null
