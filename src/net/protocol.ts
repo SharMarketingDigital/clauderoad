@@ -9,7 +9,7 @@
 // PERSONAL state (HUD, bag) to ITS OWNER ONLY. Nothing is ever trusted from a client.
 import type {
   EntityKind, EnemyTierId, StatusKind, SimEvent, Command, AbilityView, InventoryView, ShopView, StorageView, TeleporterView,
-  PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, MasteryId,
+  PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, MasteryId, GroundLootView,
 } from '../world_api';
 
 // ---- client -> server (INTENT only) ----
@@ -51,6 +51,10 @@ export interface EntitySnap {
   weaponPlus: number; // enhancement level of the equipped weapon (0 if none) — drives the +N glow on EVERY entity
   statuses: StatusKind[]; // active status-effect kinds (stun/slow/root/bleed…) — for the on-entity indicator
   mastery: MasteryId; // the player's weapon mastery ('sword' for unarmed/enemies/NPCs) — picks the class skin
+  // GDD v0.5 (loot físico): the dropped stack for a kind 'loot' ground entity, so remote clients can SEE
+  // what's on the ground (name/rarity/+N/qty) just like offline. Present ONLY on loot entities — the
+  // snapshot stays lean (players/mobs/NPCs omit it). Mirrors EntityView.loot.
+  loot?: GroundLootView | null;
 }
 
 // A presentation event forwarded from the server's sim (floating damage numbers, hit

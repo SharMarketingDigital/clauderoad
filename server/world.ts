@@ -416,7 +416,7 @@ export class ServerWorld {
   snapshot(): { entities: EntitySnap[]; events: NetEvent[]; time: number; rain: number } {
     const entities: EntitySnap[] = [];
     for (const e of this.sim.entities()) {
-      entities.push({
+      const snap: EntitySnap = {
         id: e.id,
         kind: e.kind,
         name: e.name,
@@ -433,7 +433,12 @@ export class ServerWorld {
         weaponPlus: e.weaponPlus, // so OTHER players' weapon glow renders (not just the local one)
         statuses: [...e.statuses], // so stun/slow/bleed indicators show on every entity in MP
         mastery: e.mastery, // so each remote player renders with their class skin
-      });
+      };
+      // GDD v0.5 (loot físico): only loot entities carry their dropped contents, so a remote client sees
+      // what's on the ground (name/rarity/+N/qty). Everyone else omits it to keep the snapshot lean.
+      // e.loot is already the GroundLootView built by the sim's entity projection — copy it verbatim.
+      if (e.loot) snap.loot = e.loot;
+      entities.push(snap);
     }
     const events: NetEvent[] = [];
     for (const ev of this.sim.recentEvents()) {

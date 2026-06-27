@@ -253,6 +253,7 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
     phyDef: 0, magDef: 0, // K6: placeholders (defesa de jogadores remotos não é exibida, igual str/int)
     boss: s.boss, tier: s.tier, species: s.species, hostile: s.hostile, dead: s.dead, statuses: s.statuses,
     mastery: s.mastery, // the remote player's class skin selector (from the snapshot)
+    loot: s.loot ?? null, // GDD v0.5 (loot físico): the dropped stack, so remote ground loot shows its contents (offline parity)
   };
 }
 

@@ -194,6 +194,29 @@ describe('ServerWorld — Layer 3: inventory, loot, equip + vendor economy', () 
     expect(sb.gold).toBe(0);
   });
 
+  it('the snapshot carries the loot CONTENTS for ground-loot entities (and ONLY those) — remote clients see the drop', () => {
+    // The MP gap this closes: the chest (kind 'loot') crossed the wire, but its contents did not, so a
+    // remote player saw an anonymous box. Now EntitySnap.loot carries name/rarity/+N/qty for loot only.
+    const w = new ServerWorld(1337);
+    const a = w.addPlayer('A');
+    farm(w, a, 3000); // mob kills drop loot on the GROUND (LF-S4), exactly like a real player
+    const snap = w.snapshot();
+    const loot = snap.entities.find((e) => e.kind === 'loot');
+    expect(loot).toBeDefined(); // a chest is on the ground after farming
+    // its CONTENTS now cross the wire, so a remote client can render what dropped
+    expect(loot!.loot).toBeTruthy();
+    expect(typeof loot!.loot!.itemId).toBe('string');
+    expect(loot!.loot!.itemId.length).toBeGreaterThan(0);
+    expect(loot!.loot!.name.length).toBeGreaterThan(0);
+    expect(['normal', 'sos', 'som', 'sun']).toContain(loot!.loot!.rarity);
+    expect(loot!.loot!.qty).toBeGreaterThan(0);
+    expect(Number.isInteger(loot!.loot!.plus)).toBe(true);
+    // and NON-loot entities (players/mobs/NPC) stay lean — no loot field, so the snapshot isn't bloated
+    const nonLoot = snap.entities.filter((e) => e.kind !== 'loot');
+    expect(nonLoot.length).toBeGreaterThan(0);
+    expect(nonLoot.every((e) => e.loot === undefined)).toBe(true);
+  });
+
   it('accepts equip — a looted item goes onto the character (server applies it)', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
