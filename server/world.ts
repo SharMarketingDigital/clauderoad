@@ -171,6 +171,11 @@ export class ServerWorld {
       case 'set-pk':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-pk', on: cmd.on });
         return;
+      // Pets (GDD v0.5 §4): summon/dismiss the owned pet. Validate the boolean and forward; the sim
+      // checks the player actually owns a pet item before spawning the follower.
+      case 'set-pet':
+        if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-pet', on: cmd.on });
+        return;
       // --- Party / co-op (GDD B6): the sim validates leader/capacity/membership ---
       case 'party-create':
         if (PARTY_EXP.has(cmd.exp) && PARTY_LOOT.has(cmd.loot)) {
@@ -398,7 +403,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, abilities, inventory, shop, storage, teleporter, party, invite,
+        botActive: false, petActive: false, abilities, inventory, shop, storage, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
@@ -410,6 +415,7 @@ export class ServerWorld {
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
+      petActive: this.sim.petActiveFor(id), // GDD v0.5 (Pets): summon/dismiss state for the HUD toggle
       abilities, inventory, shop, storage, teleporter, party, invite,
       matching, partyRequests, myRequestPartyId, duel, duelInvite,
     };

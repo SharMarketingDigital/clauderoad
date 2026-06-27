@@ -117,6 +117,7 @@ export interface SelfSnap {
   phyDef: number; // K6: defesa física efetiva (base+gear) do jogador local
   magDef: number; // K6: defesa mágica efetiva (base+gear) do jogador local
   botActive: boolean; // whether this player's auto-play is on
+  petActive: boolean; // GDD v0.5 (Pets): whether this player currently has a pet summoned
   abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
   inventory: InventoryView; // the player's bag + equipped gear (loot lands here)
   shop: ShopView; // the vendor storefront + whether this player is in range to trade

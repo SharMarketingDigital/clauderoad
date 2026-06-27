@@ -143,4 +143,8 @@ export interface Entity {
   // state (like targetId): folded into the hash, but NOT persisted (resets to off on reload). Undefined
   // = off, so no existing spawn literal changes. Non-players never set it.
   pkActive?: boolean;
+  // GDD v0.5 (Pets): present ONLY on a kind 'pet' entity — links the companion to the player it follows.
+  // undefined for players/enemies/NPCs/loot, so no existing spawn literal changes and the hash fold stays
+  // conditional (mirrors `loot?`). The owner's "has a pet" state is derived from the Sim's petOf index.
+  pet?: { ownerId: number };
 }

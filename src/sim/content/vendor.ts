@@ -44,4 +44,7 @@ export const VENDOR_STOCK: VendorStockEntry[] = [
   { itemId: 'composite_bow', price: 470 },
   { itemId: 'adept_staff', price: 300 },
   { itemId: 'sorcerer_staff', price: 510 },
+  // GDD v0.5 (Pets): the grab pet — buy once (permanent), then summon/dismiss at will (tecla P). The bot
+  // never buys it (botTrade buys fixed ids only), so adding it here is inert for autoplay + determinism.
+  { itemId: 'pet_grab', price: 250 },
 ];

@@ -137,6 +137,10 @@ export class ClientWorld implements IWorld {
     return this.self ? this.self.botActive : false;
   }
 
+  petActive(): boolean {
+    return this.self ? this.self.petActive : false;
+  }
+
   // The local player's party + pending invite — mirrored from the server's `self` state.
   localParty(): PartyView | null {
     return this.self ? this.self.party : null;

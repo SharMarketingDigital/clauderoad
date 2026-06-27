@@ -7,7 +7,7 @@
 // concretely. To add a feature, extend IWorld first, then implement it in
 // every world (offline Sim, and later the online ClientWorld).
 
-export type EntityKind = 'player' | 'enemy' | 'npc' | 'loot'; // 'loot' = a pickup-able ground item (GDD v0.5)
+export type EntityKind = 'player' | 'enemy' | 'npc' | 'loot' | 'pet'; // 'loot' = pickup-able ground item; 'pet' = a player's companion (GDD v0.5)
 
 // Equipment slots a character can fill. Defined here (the seam) so both the
 // sim's item content and the UI agree on the set.
@@ -313,7 +313,10 @@ export type Command =
   // --- PK livre (GDD v0.5 §2): hold ALT to flag free PvP. A HELD modifier (not a one-shot): the sim
   // stores it per-player and canAttack reads it every tick, so the continuous auto-swing keeps releasing
   // against players outside cities. Sent edge-triggered (on ALT down/up) — no consent/handshake. ---
-  | { t: 'set-pk'; on: boolean }; // ALT held/released -> PK mode on/off
+  | { t: 'set-pk'; on: boolean } // ALT held/released -> PK mode on/off
+  // --- Pets (GDD v0.5 §4): summon/dismiss the owned grab pet (a held-or-toggle companion). The sim
+  // validates that the player actually OWNS a pet item before spawning the follower. ---
+  | { t: 'set-pet'; on: boolean }; // summon (true) / dismiss (false) the player's pet
 
 // One action-bar slot, as the HUD sees it. The sim owns cooldown/MP gating; the
 // bar just draws icon + the sweeping cooldown and dims when not castable.
@@ -393,6 +396,9 @@ export interface IWorld {
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;
+  // GDD v0.5 (Pets): whether the local player currently has a pet summoned. UI reads it for the
+  // summon/dismiss toggle state; input reads it to send the opposite on the toggle key.
+  petActive(): boolean;
   // The local player's party (members + modes), or null when solo. UI draws the
   // party frames + window from this; online it mirrors the server's authoritative state.
   localParty(): PartyView | null;

@@ -89,6 +89,10 @@ export const ITEMS: Record<string, ItemDef> = {
   // caps the drop to the floor. A plain material (the flag drives it, not an item field), à
   // la the elixirs (no consumable effect).
   protect_stone: { id: 'protect_stone', name: 'Pedra de Proteção', value: 30 },
+  // GDD v0.5 (Pets): the grab pet — a PERMANENT companion bought from the vendor. Holding the item IS
+  // owning the pet; summoning it (tecla P) spawns a follower that auto-collects ground loot. Not
+  // equippable/consumable — a plain ownership token kept in the bag (like a Silkroad pet card).
+  pet_grab: { id: 'pet_grab', name: 'Coletor (Pet)', value: 60 },
 };
 
 // Shared cooldown between consumable uses (seconds) — classic "potion sickness",

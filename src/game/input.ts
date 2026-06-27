@@ -33,6 +33,9 @@ export class Input {
   // edge-triggered in apply(). `pkSent` is the last value pushed, so we only send on a change.
   private altHeld = false;
   private pkSent = false;
+  // GDD v0.5 (Pets): one-shot — the P key was pressed; apply() resolves it into a summon/dismiss against
+  // the current pet state (world.petActive()), since the toggle's value depends on the world.
+  private pendingPetToggle = false;
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
@@ -47,6 +50,11 @@ export class Input {
       // there's no collection pet yet). One-shot; the sim validates range + bag-full per item.
       if (e.key.toLowerCase() === 'g') {
         if (!e.repeat) this.pending.push({ t: 'pickup-nearby' });
+        return;
+      }
+      // P — summon/dismiss the pet (GDD v0.5 Pets). One-shot; apply() toggles vs world.petActive().
+      if (e.key.toLowerCase() === 'p') {
+        if (!e.repeat) this.pendingPetToggle = true;
         return;
       }
       // Action-bar slots 1..9 (top-row digits). The sim no-ops empty slots.
@@ -143,6 +151,7 @@ export class Input {
       this.hasLeftClick = false;
       this.uiSelectedPlayerId = null;
       this.teleporterClick = null;
+      this.pendingPetToggle = false;
       return;
     }
     // While typing in the chat, the player must NOT move/act: drop queued actions,
@@ -151,12 +160,20 @@ export class Input {
       this.pending.length = 0;
       this.hasLeftClick = false;
       this.teleporterClick = null;
+      this.pendingPetToggle = false;
       this.keys.clear();
       world.sendCommand({ t: 'stop' });
       return;
     }
     for (const cmd of this.pending) world.sendCommand(cmd);
     this.pending.length = 0;
+
+    // Pets (GDD v0.5): the P key toggles summon/dismiss against the CURRENT state (read from the world),
+    // so one key both summons and dismisses.
+    if (this.pendingPetToggle) {
+      this.pendingPetToggle = false;
+      world.sendCommand({ t: 'set-pet', on: !world.petActive() });
+    }
 
     // Resolve the duel SELECTION from the last clean left click — render/UI state only (the sim
     // won't hold a player as its target). Clicking another player selects them (the duel HUD then

@@ -75,6 +75,11 @@ export const DT = 1 / TICK_RATE; // seconds per tick
 export { WORLD_HALF };
 
 export const PLAYER_SPEED = 6; // units/sec (also reused by the authoritative server)
+// GDD v0.5 (Pets): a summoned pet trails its owner. Slightly faster than the player so it catches up,
+// then idles within a deadband so it doesn't jitter on top of them. Pure follow (applyMove), no Rng.
+const PET_FOLLOW_SPEED = PLAYER_SPEED * 1.25;
+const PET_FOLLOW_DEADBAND = 1.6; // world units: closer than this, the pet stands still
+const PET_SPAWN_OFFSET = 1.4; // spawn just behind the owner so it doesn't pop on top of them
 // City wall (Jangan): a square stone rampart at this Chebyshev half-extent — MUST match render's
 // WALL_H in village.ts. The player can't cross it except through a gate gap of ±GATE_HALF at each
 // cardinal mid-point (slightly wider than the visual ~2 opening, for comfortable passage).
@@ -221,6 +226,10 @@ export class Sim implements IWorld {
   // and manual input from a bot-driven player is ignored. Per-player so the server can
   // run a bot for each client independently; single-player just has the one local id.
   private botPlayers = new Set<number>();
+  // GDD v0.5 (Pets): the summoned pet per owner (ownerId -> pet entity id). The pet itself lives in
+  // this.ents (so it hashes + snapshots like any entity); this is the lookup that drives follow/grab and
+  // the petActive HUD flag. Rebuilt deterministically from the set-pet command stream on every host.
+  private petOf = new Map<number, number>();
 
   // `spawnLocal` controls whether a local player is created; `localName` is its name.
   // The default 'Hero' keeps offline + tests bit-identical to before; the name-entry
@@ -297,6 +306,9 @@ export class Sim implements IWorld {
     this.moveIntents.delete(id);
     this.pendings.delete(id);
     this.botPlayers.delete(id);
+    // GDD v0.5 (Pets): a disconnecting owner takes its pet with it (despawn the follower + drop the index).
+    const petId = this.petOf.get(id);
+    if (petId !== undefined) { this.ents.delete(petId); this.petOf.delete(id); }
     const i = this.playerIds.indexOf(id);
     if (i >= 0) this.playerIds.splice(i, 1);
     for (const e of this.ents.values()) if (e.targetId === id) e.targetId = null;
@@ -805,6 +817,71 @@ export class Sim implements IWorld {
     return this.botPlayers.has(id);
   }
 
+  // GDD v0.5 (Pets): whether THIS player has a pet summoned (IWorld petActive() uses the local player).
+  petActive(): boolean {
+    return this.petActiveFor(this.localId);
+  }
+  petActiveFor(id: number): boolean {
+    return this.petOf.has(id);
+  }
+
+  // Owning the pet = holding the pet item (bought from the vendor). Permanent — summoning never consumes it.
+  private ownsPet(p: Entity): boolean {
+    return p.bag.some((s) => s != null && s.itemId === 'pet_grab');
+  }
+
+  // Summon the owned pet: spawn an inert kind 'pet' follower just behind the owner (no-op if one is
+  // already out or the player doesn't own one). The pet lives in this.ents so it draws/snapshots/hashes
+  // like any entity; combat/AI ignore kind 'pet' exactly as they ignore 'loot'/'npc'.
+  private summonPet(owner: Entity): void {
+    if (this.petOf.has(owner.id) || !this.ownsPet(owner)) return;
+    const id = this.nextId++;
+    this.ents.set(id, {
+      id, kind: 'pet', name: 'Coletor',
+      x: owner.x - PET_SPAWN_OFFSET, z: owner.z - PET_SPAWN_OFFSET, facing: owner.facing,
+      hp: 1, maxHp: 1,
+      targetId: null,
+      str: 0, weaponDamage: 0,
+      baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 1, baseMaxMp: 0,
+      basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
+      swingTicks: 0, nextSwingAt: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      level: 1, xp: 0, attrPoints: 0, baseInt: 0,
+      sp: 0, skillRanks: {},
+      gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
+      species: 'pet_grab',
+      boss: false, summoned: false, spawnZone: -1,
+      homeX: owner.x, homeZ: owner.z,
+      returnCity: '', returnReadyAt: 0,
+      targetX: owner.x, targetZ: owner.z, repickAt: 0,
+      pet: { ownerId: owner.id },
+    });
+    this.petOf.set(owner.id, id);
+  }
+
+  // Dismiss the pet: remove the follower entity + the index. No-op if none is out.
+  private dismissPet(owner: Entity): void {
+    const petId = this.petOf.get(owner.id);
+    if (petId === undefined) return;
+    this.ents.delete(petId);
+    this.petOf.delete(owner.id);
+  }
+
+  // GDD v0.5 (Pets): each summoned pet trails its owner. Pure follow via applyMove (deterministic, no
+  // Rng); a deadband stops it jittering on top of the owner. Sorted by owner id for a stable order.
+  private stepPets(): void {
+    if (this.petOf.size === 0) return;
+    for (const ownerId of [...this.petOf.keys()].sort((a, b) => a - b)) {
+      const pet = this.ents.get(this.petOf.get(ownerId)!);
+      const owner = this.ents.get(ownerId);
+      if (!pet || !owner) continue;
+      const dx = owner.x - pet.x, dz = owner.z - pet.z;
+      if (Math.hypot(dx, dz) <= PET_FOLLOW_DEADBAND) continue; // close enough — idle (no jitter)
+      const m = applyMove(pet.x, pet.z, dx, dz, PET_FOLLOW_SPEED, DT, WORLD_HALF);
+      if (m) { pet.x = m.x; pet.z = m.z; pet.facing = m.facing; }
+    }
+  }
+
   sendCommand(cmd: Command): void {
     // The local (offline) player. Networked players use sendCommandFor(id, …).
     this.routeCommand(this.localId, cmd);
@@ -1139,6 +1216,7 @@ export class Sim implements IWorld {
       if (this.botPlayers.has(id)) this.botStep(p);
       this.stepPlayer(p);
     }
+    this.stepPets(); // GDD v0.5 (Pets): each summoned pet trails its owner, after the owners moved
 
     // --- enemies act on the post-move positions (aggro the NEAREST living player) ---
     for (const e of this.ents.values()) {
@@ -1562,6 +1640,8 @@ export class Sim implements IWorld {
       // PK livre (GDD v0.5): toggle the held PK modifier. Pre-gate (like the social commands) so
       // RELEASING ALT clears it even while downed/stunned — a player never respawns stuck in PK mode.
       case 'set-pk': p.pkActive = cmd.on; return;
+      // Pets (GDD v0.5): summon/dismiss the owned pet. Pre-gate so a dismiss works even while downed.
+      case 'set-pet': if (cmd.on) this.summonPet(p); else this.dismissPet(p); return;
     }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {
@@ -3023,6 +3103,8 @@ export class Sim implements IWorld {
         mix(strHash(e.loot.stack.itemId)); mix(strHash(e.loot.stack.rarity));
         mix(e.loot.stack.plus); mix(e.loot.stack.qty); mix(e.loot.despawnAt);
       }
+      // GDD v0.5 (Pets): the companion's owner link (only kind 'pet' sets it; absent => byte-identical).
+      if (e.pet) mix(e.pet.ownerId);
     }
     // Pending respawns are deterministic state too (FIFO order is stable).
     for (const r of this.respawnQueue) { mix(r.at); mix(r.zone); }

@@ -728,10 +728,32 @@ function makeLootLabel(loot: GroundLootView): THREE.Sprite {
   return sprite;
 }
 
+// GDD v0.5 (Pets): a small friendly companion that follows its owner — a soft teal critter, distinct
+// from mobs (red) and players (blue) so it never reads as a threat. Cosmetic placeholder; swap for a
+// CC0 pet model later. The little cone reads as a head/ear so its facing is visible.
+function makePetMarker(): THREE.Object3D {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(0.34, 14, 10),
+    new THREE.MeshStandardMaterial({ color: 0x46d6b0, emissive: 0x0d3a30, roughness: 0.6, metalness: 0.1 }),
+  );
+  body.position.y = 0.34;
+  const ear = new THREE.Mesh(
+    new THREE.ConeGeometry(0.13, 0.24, 10),
+    new THREE.MeshStandardMaterial({ color: 0x46d6b0 }),
+  );
+  ear.position.set(0, 0.62, 0.18); // +Z is forward (matches facing)
+  ear.rotation.x = 0.5;
+  g.add(body, ear);
+  body.castShadow = ear.castShadow = true;
+  return g;
+}
+
 // A simple capsule-ish humanoid with a "nose" so facing is visible. A boss is
 // drawn bigger and in a distinct menacing color so it reads as a boss.
 function makeActor(kind: EntityKind, boss = false, loot: GroundLootView | null = null): THREE.Object3D {
   if (kind === 'loot') return makeLootMarker(loot); // GDD v0.5 loot físico: a chest on the ground, not a humanoid
+  if (kind === 'pet') return makePetMarker(); // GDD v0.5 (Pets): a small friendly companion, not a humanoid
   const bodyColor =
     boss ? 0xa030d0 : kind === 'player' ? 0x3b82f6 : kind === 'npc' ? 0xe0b030 : 0xb23b3b;
   const g = new THREE.Group();
