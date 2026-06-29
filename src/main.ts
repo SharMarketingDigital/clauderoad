@@ -29,6 +29,7 @@ import { TeleporterHud } from './ui/teleporter_hud';
 import { PartyMatching } from './ui/party_matching';
 import { ChatBox } from './ui/chat';
 import { MusicPlayer } from './ui/audio';
+import { Sfx } from './ui/sfx';
 import { SettingsMenu } from './ui/settings_menu';
 import { EscMenu } from './ui/esc_menu';
 import { NameSelect, normalizeName, isValidName } from './ui/name_select';
@@ -68,13 +69,15 @@ function startOffline(name: string): void {
   const teleporterHud = new TeleporterHud(sim); // GDD v0.5 TP3: hub menu (click the NPC) + Return button
   const petBagHud = new PetBagHud(); // GDD v0.5 (Pets PET2): O opens the transport pet's bag (when a pet is out)
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; never touches the sim)
-  new SettingsMenu(music); // settings (abre no Backspace / via menu Esc); self-driven
+  const sfx = new Sfx(); // procedural combat SFX (cosmetic; reads the same SimEvent stream as the damage numbers)
+  new SettingsMenu(music, sfx); // settings (abre no Backspace / via menu Esc); self-driven
   new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
   // Class selection on entry (G1): pick a starter class -> the sim equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {
     sim.sendCommand({ t: 'select-class', classId });
     music.unlock();
+    sfx.unlock();
   });
   const combatText = new CombatText();
   new Recorder(canvas); // in-game ● REC button (captures the 3D canvas to .webm)
@@ -90,7 +93,7 @@ function startOffline(name: string): void {
 
   // Turn new sim events into presentation (hit flash + damage number, level-up, etc.).
   // The SAME helper runs in multiplayer, reading the networked world's events.
-  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, hud);
+  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, hud, sfx);
 
   let last = performance.now() / 1000;
   let acc = 0;
@@ -129,13 +132,15 @@ function startOnline(url: string, name: string): void {
   const hud = new Hud(); // the FULL personal HUD, driven by OUR `self` state from the server
   const map = new WorldMap(); // world map (tecla M) — same module as SP, reads IWorld
   const music = new MusicPlayer(); // background music (cosmetic, reads IWorld; same module as SP)
-  new SettingsMenu(music); // settings (abre no Backspace / via menu Esc); self-driven
+  const sfx = new Sfx(); // procedural combat SFX (cosmetic; same module + SimEvent stream as SP)
+  new SettingsMenu(music, sfx); // settings (abre no Backspace / via menu Esc); self-driven
   new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
   // Class selection on entry (G1): pick a starter class -> the server equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {
     world.sendCommand({ t: 'select-class', classId });
     music.unlock();
+    sfx.unlock();
   });
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
@@ -154,7 +159,7 @@ function startOnline(url: string, name: string): void {
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,
   // flash the hit, and the Hud banners deaths/boss spawns — identically on every client.
-  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, hud);
+  const drawCombatFeedback = makeCombatFeedback(renderer, combatText, hud, sfx);
 
   let last = performance.now() / 1000;
   function frame(): void {

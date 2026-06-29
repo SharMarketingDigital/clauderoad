@@ -7,6 +7,7 @@
 // Built to grow: the panel is a stack of sections — today only "Áudio"; future settings (vídeo,
 // jogabilidade…) drop in as more sections without touching the ESC plumbing.
 import type { MusicPlayer } from './audio';
+import type { Sfx } from './sfx';
 import { registerOverlay, anyOverlayOpen } from './overlays';
 import { isTyping } from './typing';
 import { decoratePanel } from './theme';
@@ -16,7 +17,10 @@ export class SettingsMenu {
   private open = false;
   private refresh: () => void = () => {};
 
-  constructor(private readonly music: MusicPlayer) {
+  constructor(
+    private readonly music: MusicPlayer,
+    private readonly sfx?: Sfx,
+  ) {
     injectStyle();
     this.root = this.build();
     document.body.appendChild(this.root);
@@ -104,10 +108,38 @@ export class SettingsMenu {
     audio.append(muteRow);
 
     panel.append(audio);
+
+    // --- Efeitos (SFX) section: drives the procedural Sfx engine (same public API as the music) ---
+    let sfxRefresh = (): void => {};
+    if (this.sfx) {
+      const s = this.sfx;
+      const fx = el('set-section');
+      fx.append(span('set-section-title', 'Efeitos'));
+      const fxSlider = document.createElement('input');
+      fxSlider.type = 'range';
+      fxSlider.min = '0';
+      fxSlider.max = '100';
+      fxSlider.className = 'set-slider';
+      fxSlider.oninput = () => s.setVolume(Number(fxSlider.value) / 100);
+      fx.append(row('Volume', fxSlider));
+      const fxMute = button('set-btn');
+      fxMute.onclick = () => s.toggleMute();
+      fx.append(row('Mudo', fxMute));
+      panel.append(fx);
+      sfxRefresh = (): void => {
+        fxSlider.value = String(Math.round(s.getVolume() * 100));
+        fxMute.textContent = s.isMuted() ? 'Ativado' : 'Desativado';
+        fxMute.classList.toggle('on', s.isMuted());
+      };
+      s.onChange(() => {
+        if (this.open) this.refresh();
+      });
+    }
+
     decoratePanel(panel); // medieval stone frame around the settings panel
     root.append(panel);
 
-    // Pull current MusicPlayer state into the controls.
+    // Pull current MusicPlayer + Sfx state into the controls.
     this.refresh = (): void => {
       const enabled = this.music.isEnabled();
       onOffBtn.textContent = enabled ? 'Ligada' : 'Desligada';
@@ -117,6 +149,7 @@ export class SettingsMenu {
       muteBtn.classList.toggle('on', this.music.isMuted());
       // When music is Off, volume/mute don't do anything — dim them to make that clear.
       audio.classList.toggle('disabled', !enabled);
+      sfxRefresh();
     };
 
     root.style.display = 'none';
