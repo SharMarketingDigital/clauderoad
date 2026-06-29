@@ -1,8 +1,8 @@
 // K3 — defensive stats on equipment. Items carry phyDef/magDef (src/sim/content/items.ts);
 // recomputeStats folds them onto the entity (Entity.phyDef/magDef) with the SAME
-// rarity -> "+N" -> durability scaling as the offensive stats. Combat does NOT read them yet
-// (that's Gabriel's mitigate()), so there is no public EntityView field — these tests read the
-// internal entity directly via the same `as unknown as` escape hatch the sim suite already uses.
+// rarity -> "+N" -> durability scaling as the offensive stats. These tests verify the AGGREGATION
+// (the sheet values); the mitigation that READS them in combat is covered in armor.test.ts. They read
+// the internal entity directly via the same `as unknown as` escape hatch the sim suite already uses.
 import { describe, it, expect } from 'vitest';
 import { Sim } from '../src/sim/sim';
 import type { Entity } from '../src/sim/types';

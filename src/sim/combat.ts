@@ -132,19 +132,30 @@ export interface MitigationContext {
   target: Entity; // the entity RECEIVING the damage — read its armor / magic-def here
 }
 
-// Magic resist per point of Intelligence (the defender's). Simple linear base — the
-// magical counterpart to (future) armor. Enemies have Int 0, so they take FULL magical
-// damage; a player gains magic resist by investing in Int. Tune by play.
+// Magic resist per point of Intelligence (the defender's). A player gains magic resist by
+// investing in Int; this STACKS with the gear's magDef (both feed the same armor curve below).
+// Enemies have Int 0 AND magDef 0, so they take FULL magical damage. Tune by play.
 export const MAGIC_DEF_PER_INT = 0.25;
 
-// Reduce an incoming hit by the target's defense. PHYSICAL stays a passthrough (no armor
-// yet) — byte-identical to before. MAGICAL is reduced by the target's Int magic-resist,
-// floored at 0; the sim still applies its ">=1 on a landed hit" rule at the apply step.
+// Armor softening constant for the mitigation curve: reduction = armor / (armor + ARMOR_K).
+// Grounded in the WoW-style diminishing-returns curve (so high armor never zeroes damage and the
+// % reduction is CONSTANT across the whole damage range, unlike flat subtraction which trivializes
+// low hits and barely touches big ones). K=50 => leather set (phyDef 9) ~15%, SUN+10 (54) ~52%. Tune by play.
+export const ARMOR_K = 50;
+
+// Reduce an incoming hit by the target's effective armor for that damage TYPE:
+//   physical -> target.phyDef (gear).
+//   magical  -> target.magDef (gear) + the Int-based magic resist (they STACK).
+// Mitigation uses the curve `amount * (1 - armor/(armor+K))` so the % reduction is constant across
+// the damage range. `armor <= 0` returns the hit EXACTLY (byte-identical passthrough) — so every
+// enemy (always 0 armor) and every un-armored player are unchanged; only a geared target is reduced.
+// The sim still applies its ">=1 on a landed hit" floor + the Postura-Defensiva buff at the apply step.
 export function mitigate(ctx: MitigationContext): number {
   const { hit, target } = ctx;
-  if (hit.type === 'magical') {
-    const resist = Math.floor(target.baseInt * MAGIC_DEF_PER_INT);
-    return Math.max(0, hit.amount - resist);
-  }
-  return hit.amount;
+  const armor =
+    hit.type === 'magical'
+      ? target.magDef + Math.floor(target.baseInt * MAGIC_DEF_PER_INT)
+      : target.phyDef;
+  if (armor <= 0) return hit.amount; // no armor => exact passthrough (byte-identical to before)
+  return Math.max(0, Math.round(hit.amount * (1 - armor / (armor + ARMOR_K))));
 }

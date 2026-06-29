@@ -60,7 +60,7 @@ import {
 } from '../src/sim/content/vendor';
 import type { Command, Rarity } from '../src/world_api';
 import type { ItemStack, Entity } from '../src/sim/types';
-import { spellDamage, spellAbilityDamage, INT_TO_DAMAGE, mitigate, MAGIC_DEF_PER_INT } from '../src/sim/combat';
+import { spellDamage, spellAbilityDamage, INT_TO_DAMAGE, mitigate, MAGIC_DEF_PER_INT, ARMOR_K } from '../src/sim/combat';
 import type { Damage } from '../src/sim/combat';
 
 // Run a FIXED, scripted command sequence against a fresh Sim and return the
@@ -3277,15 +3277,18 @@ describe('mage mastery (Mago) — magical damage (Int)', () => {
     expect(spellAbilityDamage(FIREBALL, 20, 9)).toBe(Math.round(spellDamage(20, 9) * (FIREBALL.damageMultiplier ?? 0)));
   });
 
-  it('mitigate: Int magic-resist reduces magical damage; physical is untouched; Int 0 takes full', () => {
-    const t40 = { baseInt: 40 } as unknown as Entity; // mitigate only reads baseInt off the target
-    const t0 = { baseInt: 0 } as unknown as Entity; // every enemy today (Int 0)
+  it('mitigate: armor curve reduces by type; magDef + Int-resist STACK for magical; armor 0 takes full', () => {
+    // Balde A: gear defense now flows through the curve `30 * (1 - armor/(armor+ARMOR_K))`.
+    const t = (phyDef: number, magDef: number, baseInt: number): Entity => ({ phyDef, magDef, baseInt }) as unknown as Entity;
     const magical: Damage = { amount: 30, type: 'magical', crit: false };
     const physical: Damage = { amount: 30, type: 'physical', crit: false };
-    expect(mitigate({ hit: magical, target: t40 })).toBe(Math.max(0, 30 - Math.floor(40 * MAGIC_DEF_PER_INT)));
-    expect(mitigate({ hit: magical, target: t40 })).toBeLessThan(30); // resisted
-    expect(mitigate({ hit: magical, target: t0 })).toBe(30); // Int 0 -> full magical damage (player nukes mobs)
-    expect(mitigate({ hit: physical, target: t40 })).toBe(30); // physical ignores magic-resist (passthrough)
+    const intArmor = Math.floor(40 * MAGIC_DEF_PER_INT); // 10 from Int 40
+    expect(mitigate({ hit: magical, target: t(0, 0, 40) })).toBe(Math.round(30 * (1 - intArmor / (intArmor + ARMOR_K))));
+    expect(mitigate({ hit: magical, target: t(0, 0, 40) })).toBeLessThan(30); // resisted by Int
+    // magDef STACKS on top of the Int-resist (more reduction than Int alone)
+    expect(mitigate({ hit: magical, target: t(0, 8, 40) })).toBeLessThan(mitigate({ hit: magical, target: t(0, 0, 40) }));
+    expect(mitigate({ hit: magical, target: t(0, 0, 0) })).toBe(30); // magDef 0 AND Int 0 -> full (player nukes mobs)
+    expect(mitigate({ hit: physical, target: t(0, 99, 40) })).toBe(30); // physical ignores magDef/Int (phyDef 0 -> passthrough)
   });
 
   it('equipping the staff swaps the action bar to the Mago kit; unequipping restores the sword', () => {
