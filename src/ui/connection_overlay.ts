@@ -26,8 +26,8 @@ export class ConnectionOverlay {
     this.retryBtn = document.createElement('button');
     this.retryBtn.className = 'conn-retry';
     this.retryBtn.type = 'button';
-    this.retryBtn.textContent = 'Tentar de novo';
-    this.retryBtn.onclick = () => world.retry();
+    // A taken name can't be retried (it would just be refused again) — reload to the name screen instead.
+    this.retryBtn.onclick = () => (world.rejectedReason != null ? window.location.reload() : world.retry());
     const box = div('conn-box');
     box.append(this.spinner, this.titleEl, this.subEl, this.retryBtn);
     this.root.append(box);
@@ -48,10 +48,17 @@ export class ConnectionOverlay {
       this.root.style.display = 'grid';
       this.shown = true;
     }
-    if (world.gaveUp) {
+    if (world.rejectedReason === 'name-taken') {
+      this.titleEl.textContent = 'Esse nome já está em uso';
+      this.subEl.textContent = 'Outro jogador online está usando esse nome. Escolha outro para entrar.';
+      this.spinner.style.display = 'none';
+      this.retryBtn.textContent = 'Trocar de nome';
+      this.retryBtn.style.display = 'inline-block';
+    } else if (world.gaveUp) {
       this.titleEl.textContent = 'Não foi possível conectar';
       this.subEl.textContent = 'O servidor pode estar dormindo ou indisponível. Tente novamente em instantes.';
       this.spinner.style.display = 'none';
+      this.retryBtn.textContent = 'Tentar de novo';
       this.retryBtn.style.display = 'inline-block';
     } else {
       this.titleEl.textContent = world.everConnected ? 'Conexão perdida — reconectando…' : 'Conectando ao servidor…';

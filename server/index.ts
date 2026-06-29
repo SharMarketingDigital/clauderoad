@@ -75,7 +75,7 @@ let guildStore: GuildStore = new MemoryGuildStore(); // durable guilds (Postgres
 let marketStore: MarketStore = new MemoryMarketStore(); // async marketplace blob (listings + mailbox; loaded on boot)
 const clientIds = new Map<WebSocket, number>(); // socket -> its player id (set on join)
 const clientNames = new Map<WebSocket, string>(); // socket -> its player name (server-known)
-const joining = new Set<WebSocket>(); // sockets mid-join (awaiting the async DB load) — guards the gap
+const joining = new Map<WebSocket, string>(); // socket -> lowercased name mid-join (awaiting the async DB load) — guards the gap + name race
 
 // One HTTP server hosts BOTH the healthcheck (plain GET) and the WebSocket upgrade.
 const httpServer = createServer(handleHttp);
@@ -118,8 +118,20 @@ async function handleMessage(ws: WebSocket, data: RawData): Promise<void> {
   }
   if (msg.t === 'join') {
     if (clientIds.has(ws) || joining.has(ws)) return; // already joined / mid-join — ignore repeats
-    joining.add(ws);
     const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim().slice(0, 24) : 'Jogador';
+    // Name-uniqueness guard: identity is by name (no auth yet), and the sim/mailbox/guild all key on
+    // name.toLowerCase(). If that name is ALREADY online (joined or mid-join), refuse — otherwise two
+    // clients would share one save (last-writer-wins erases progress), one marketplace mailbox, and one
+    // guild membership. Case-insensitive, matching how the sim resolves identity.
+    const lower = name.toLowerCase();
+    const online =
+      [...clientNames.values()].some((n) => n.toLowerCase() === lower) ||
+      [...joining.values()].some((jn) => jn === lower);
+    if (online) {
+      send(ws, { t: 'rejected', reason: 'name-taken' }); // client shows "nome em uso" and does NOT reconnect
+      return;
+    }
+    joining.set(ws, lower);
     // Load any saved character BEFORE spawning, so a returning player starts where it left off.
     const saved = await store.load(name);
     if (ws.readyState !== WebSocket.OPEN) { joining.delete(ws); return; } // disconnected while loading

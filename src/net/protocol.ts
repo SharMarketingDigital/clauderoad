@@ -167,4 +167,5 @@ export type ServerMessage =
   | { t: 'welcome'; id: number; snapshotHz: number } // your player id + the snapshot rate (for interpolation)
   | { t: 'snapshot'; entities: EntitySnap[]; events: NetEvent[]; time: number; rain: number } // shared world + events + synchronized time-of-day (0..1) and rain INTENSITY (0..1)
   | { t: 'self'; self: SelfSnap } // YOUR personal HUD/bag state (sent only to you)
-  | { t: 'chat'; line: ChatLine }; // a chat line, broadcast to everyone
+  | { t: 'chat'; line: ChatLine } // a chat line, broadcast to everyone
+  | { t: 'rejected'; reason: 'name-taken' }; // join refused (e.g. the name is already online) — don't reconnect

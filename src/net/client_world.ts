@@ -42,6 +42,7 @@ export class ClientWorld implements IWorld {
   everConnected = false;
   gotSnapshot = false;
   gaveUp = false;
+  rejectedReason: 'name-taken' | null = null; // the server refused the join — STOP reconnecting; the overlay tells the player
   private myId: number | null = null;
   private self: SelfSnap | null = null; // this client's own HUD/bag state (from the server)
   private snapIntervalMs = 100; // updated from the server's snapshotHz on welcome
@@ -84,6 +85,7 @@ export class ClientWorld implements IWorld {
   // Socket closed or failed to open: schedule a reconnect with capped exponential backoff. After
   // MAX_RECONNECT_ATTEMPTS, give up and let the overlay show a manual "Tentar de novo".
   private onDisconnect(): void {
+    if (this.rejectedReason != null) { this.status = 'offline'; return; } // join was refused — do NOT loop-reconnect
     if (this.reconnectTimer != null) return; // a retry is already scheduled
     this.status = 'offline';
     const attempt = this.reconnectAttempts++;
@@ -296,7 +298,11 @@ export class ClientWorld implements IWorld {
     } catch {
       return;
     }
-    if (msg.t === 'welcome') {
+    if (msg.t === 'rejected') {
+      this.rejectedReason = msg.reason; // e.g. the name is already online
+      this.status = 'offline';
+      this.ws.close(); // the join failed; close the dead socket (onDisconnect won't reconnect now)
+    } else if (msg.t === 'welcome') {
       this.myId = msg.id;
       if (msg.snapshotHz > 0) this.snapIntervalMs = 1000 / msg.snapshotHz;
     } else if (msg.t === 'snapshot') {
