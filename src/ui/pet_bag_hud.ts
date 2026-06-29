@@ -4,6 +4,7 @@
 // sends pet-deposit / pet-withdraw; the sim re-validates ownership + that a pet is out. Works offline + MP.
 import type { IWorld, ItemStackView, Rarity } from '../world_api';
 import { isTyping } from './typing';
+import { decoratePanel } from './theme';
 
 const RARITY_COLOR: Record<Rarity, string> = {
   normal: '#cdd5e0', sos: '#bfe0ff', som: '#e6ccff', sun: '#ffe9a8',
@@ -16,11 +17,10 @@ export class PetBagHud {
   constructor() {
     this.panel.style.cssText = [
       'position:absolute', 'top:64px', 'left:330px', 'width:280px', 'max-height:60vh', 'overflow:auto',
-      'padding:10px 12px', 'border-radius:8px', 'font:500 13px system-ui,sans-serif', 'color:#eef3ff',
-      'background:rgba(12,16,24,0.92)', 'border:1px solid rgba(70,214,176,0.5)', 'z-index:34',
-      'display:none', 'box-shadow:0 4px 18px rgba(0,0,0,0.5)',
+      'padding:14px 16px', 'font-weight:500', 'font-size:13px', 'color:#ece2cf', 'z-index:34', 'display:none',
     ].join(';');
     document.body.append(this.panel);
+    decoratePanel(this.panel); // medieval stone frame, like the other panels (replaces the blue inline box)
     // O toggles the pet bag (ignored while typing). O is free (P=party, B=bot, H=warehouse, F=pet, N=stall).
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() === 'o' && !isTyping() && !e.repeat) {
@@ -56,18 +56,18 @@ export class PetBagHud {
 function title(text: string): HTMLDivElement {
   const d = document.createElement('div');
   d.textContent = text;
-  d.style.cssText = 'font-weight:700;color:#7ee0c0;margin-bottom:8px;border-bottom:1px solid rgba(70,214,176,0.3);padding-bottom:5px;';
+  d.style.cssText = 'font-weight:700;color:#ffe9a8;margin-bottom:8px;border-bottom:1px solid rgba(176,140,60,0.35);padding-bottom:5px;';
   return d;
 }
 function section(text: string): HTMLDivElement {
   const d = document.createElement('div');
   d.textContent = text;
-  d.style.cssText = 'color:#9fb0c8;font-size:11px;margin:8px 0 3px;text-transform:uppercase;letter-spacing:0.04em;';
+  d.style.cssText = 'color:#b9ad93;font-size:11px;margin:8px 0 3px;text-transform:uppercase;letter-spacing:0.04em;';
   return d;
 }
 function itemRow(st: ItemStackView, onClick: () => void): HTMLDivElement {
   const row = document.createElement('div');
-  row.style.cssText = 'padding:3px 6px;margin:2px 0;border-radius:5px;cursor:pointer;background:rgba(30,40,60,0.5);';
+  row.style.cssText = 'padding:3px 6px;margin:2px 0;border-radius:5px;cursor:pointer;background:rgba(46,38,26,0.55);';
   row.textContent = `${st.name}${st.plus > 0 ? ` +${st.plus}` : ''} ×${st.qty}`;
   row.style.color = RARITY_COLOR[st.rarity];
   row.onclick = onClick;

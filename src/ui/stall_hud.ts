@@ -8,6 +8,7 @@
 import type { IWorld, Rarity } from '../world_api';
 import { isTyping } from './typing';
 import { askPrice } from './price_prompt';
+import { decoratePanel } from './theme';
 
 // Stack identity for the pending-listing map (matches the sim's stack key).
 function key(itemId: string, rarity: Rarity, plus: number): string {
@@ -29,11 +30,10 @@ export class StallHud {
     for (const p of [this.own, this.buy]) {
       p.style.cssText = [
         'position:absolute', 'top:64px', 'width:300px', 'max-height:60vh', 'overflow:auto',
-        'padding:10px 12px', 'border-radius:8px', 'font:500 13px system-ui,sans-serif', 'color:#eef3ff',
-        'background:rgba(12,16,24,0.92)', 'border:1px solid rgba(120,160,220,0.5)', 'z-index:34',
-        'display:none', 'box-shadow:0 4px 18px rgba(0,0,0,0.5)',
+        'padding:14px 16px', 'font-weight:500', 'font-size:13px', 'color:#ece2cf', 'z-index:34', 'display:none',
       ].join(';');
       document.body.append(p);
+      decoratePanel(p); // medieval stone frame, like the other panels (replaces the blue inline box)
     }
     this.own.style.left = '16px';
     this.buy.style.right = '16px';
@@ -78,7 +78,7 @@ export class StallHud {
     const mySent = this.isMyStallOpen(world);
     this.own.replaceChildren(title('Minha Barraca (N fecha)'));
     const hint = document.createElement('div');
-    hint.style.cssText = 'color:#9fb0c8;font-size:12px;margin-bottom:6px;';
+    hint.style.cssText = 'color:#b9ad93;font-size:12px;margin-bottom:6px;';
     hint.textContent = mySent ? 'Barraca ABERTA. Fique perto de outro jogador pra vender.'
                               : 'Clique num item pra definir o preço, depois "Abrir barraca".';
     this.own.append(hint);
@@ -91,7 +91,7 @@ export class StallHud {
       row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0;cursor:pointer;';
       const label = document.createElement('span');
       label.textContent = `${st.name}${st.plus > 0 ? ` +${st.plus}` : ''} ×${st.qty}${priced ? `  →  ${priced.price}g` : ''}`;
-      label.style.color = priced ? '#7ee0a0' : RARITY_COLOR[st.rarity];
+      label.style.color = priced ? '#ffe9a8' : RARITY_COLOR[st.rarity];
       row.append(label);
       row.onclick = () => this.promptPrice(st.itemId, st.rarity, st.plus);
       this.own.append(row);
@@ -138,15 +138,15 @@ export class StallHud {
 function title(text: string): HTMLDivElement {
   const d = document.createElement('div');
   d.textContent = text;
-  d.style.cssText = 'font-weight:700;color:#ffe9a8;margin-bottom:8px;border-bottom:1px solid rgba(120,160,220,0.3);padding-bottom:5px;';
+  d.style.cssText = 'font-weight:700;color:#ffe9a8;margin-bottom:8px;border-bottom:1px solid rgba(176,140,60,0.35);padding-bottom:5px;';
   return d;
 }
 
 function button(text: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
   b.textContent = text;
-  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid rgba(120,160,220,0.6);' +
-    'background:rgba(30,40,60,0.9);color:#eef3ff;font:600 12px system-ui,sans-serif;cursor:pointer;';
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #a07f3c;' +
+    'background:rgba(40,32,22,0.92);color:#f3e8cc;font-weight:600;font-size:12px;cursor:pointer;';
   b.onclick = onClick;
   return b;
 }
