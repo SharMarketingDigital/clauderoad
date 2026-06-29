@@ -1,5 +1,5 @@
-// Stalls (GDD v0.5 §5) — a MINIMAL personal-shop UI (MVP; a polished panel comes later). Two parts:
-//  • "Minha Barraca" (toggle with B): your bag items; click one to set a price (browser prompt), then
+// Stalls (GDD v0.5 §5) — a personal-shop UI. Two parts:
+//  • "Minha Barraca" (toggle with N): your bag items; click one to set a price (themed dialog), then
 //    "Abrir barraca" lists them all. The sim validates ownership + price; "Fechar barraca" takes it down.
 //  • "Comprar" (auto-shows when you stand next to a seller's open stall): the seller's items with a buy
 //    button each. The sim moves item + gold ATOMICALLY (anti-dup) on the click.
@@ -7,6 +7,7 @@
 // like the duel/pk HUDs. Wired into the online loop (P2P needs two players).
 import type { IWorld, Rarity } from '../world_api';
 import { isTyping } from './typing';
+import { askPrice } from './price_prompt';
 
 // Stack identity for the pending-listing map (matches the sim's stack key).
 function key(itemId: string, rarity: Rarity, plus: number): string {
@@ -18,7 +19,7 @@ const RARITY_COLOR: Record<Rarity, string> = {
 };
 
 export class StallHud {
-  private own = document.createElement('div'); // "Minha Barraca" panel (toggled with B)
+  private own = document.createElement('div'); // "Minha Barraca" panel (toggled with N)
   private buy = document.createElement('div'); // "Comprar" panel (auto when near a stall)
   private ownOpen = false;
   // Pending listings the player is assembling before opening the stall: stack key -> { ref, price }.
@@ -113,11 +114,17 @@ export class StallHud {
   // Set/clear the asking price for a bag stack (a 0 / blank / invalid price removes it from the listing).
   private promptPrice(itemId: string, rarity: Rarity, plus: number): void {
     const k = key(itemId, rarity, plus);
-    const raw = window.prompt('Preço de venda (gold) — 0 ou vazio remove:', String(this.pending.get(k)?.price ?? ''));
-    if (raw == null) return; // cancelled
-    const price = Math.floor(Number(raw));
-    if (Number.isInteger(price) && price > 0) this.pending.set(k, { itemId, rarity, plus, price });
-    else this.pending.delete(k);
+    askPrice({
+      title: 'Preço de venda',
+      hint: '0 remove o item da barraca',
+      initial: this.pending.get(k)?.price,
+      allowZero: true,
+      confirmLabel: 'OK',
+      onSubmit: (price) => {
+        if (price > 0) this.pending.set(k, { itemId, rarity, plus, price });
+        else this.pending.delete(k);
+      },
+    });
   }
 
   // Is the local player's OWN stall currently open? Read off its public entity flag.

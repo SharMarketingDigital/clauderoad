@@ -1,10 +1,12 @@
 // Global Marketplace — a central buy/sell board, reachable from ANYWHERE (toggle with J). Top: every
-// active listing (Buy on others', Cancel on your own). Bottom: your bag — click an item, set a per-unit
-// price (browser prompt), and it's listed globally. Pure presentation — reads IWorld + sends market-* ;
-// the sim re-validates ownership/gold and moves item + gold atomically (anti-dup). Wired into the online
-// loop (the market is a multiplayer exchange). MVP UI; the seller must be online (async/offline = later).
+// active listing (Buy on others', Cancel on your own) + your collectible proceeds mailbox. Bottom: your
+// bag — click an item, set a per-unit price (themed dialog), and it's listed globally. Pure presentation
+// — reads IWorld + sends market-* ; the sim re-validates ownership/gold and moves item + gold atomically
+// (anti-dup). The market is ASYNCHRONOUS: listing escrows the item, so it sells even while the seller is
+// OFFLINE and the gold waits in the mailbox to collect on return. Wired into the online loop.
 import type { IWorld, ItemStackView, Rarity } from '../world_api';
 import { isTyping } from './typing';
+import { askPrice } from './price_prompt';
 
 const RARITY_COLOR: Record<Rarity, string> = {
   normal: '#cdd5e0', sos: '#bfe0ff', som: '#e6ccff', sun: '#ffe9a8',
@@ -71,12 +73,14 @@ export class MarketHud {
     for (const st of world.inventory().stacks) {
       if (st.itemId === 'pet_grab') continue; // don't sell the pet token by accident
       this.panel.append(itemRow(st, () => {
-        const raw = window.prompt(`Preço por unidade de ${st.name} (gold):`, '');
-        if (raw == null) return;
-        const price = Math.floor(Number(raw));
-        if (Number.isInteger(price) && price > 0) {
-          world.sendCommand({ t: 'market-list', itemId: st.itemId, rarity: st.rarity, plus: st.plus, price });
-        }
+        askPrice({
+          title: `Vender ${st.name}`,
+          hint: 'Preço por unidade (gold)',
+          confirmLabel: 'Listar',
+          onSubmit: (price) => {
+            if (price > 0) world.sendCommand({ t: 'market-list', itemId: st.itemId, rarity: st.rarity, plus: st.plus, price });
+          },
+        });
       }));
     }
   }
