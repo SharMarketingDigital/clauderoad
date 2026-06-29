@@ -106,6 +106,13 @@ export const RESPAWN_TICKS = 15 * TICK_RATE; // ~15s after death a same-type ene
 // PROVISIONAL: the GDD B8 penalty (gear-durability loss, a real graveyard revive) is
 // deliberately deferred; today the wait is the only cost (see respawnPlayer).
 export const DEATH_RESPAWN_TICKS = 5 * TICK_RATE;
+// Out-of-combat regen (Silkroad-style sustain). After a short lull with no damage dealt OR taken,
+// a player slowly restores HP and MP — so the farm loop flows (and a caster isn't stranded with no
+// mana). Deterministic: a fixed per-second tick, no Rng. In-combat regen stays OFF (tension intact).
+export const REGEN_LINGER_TICKS = 5 * TICK_RATE; // seconds after the last hit before regen resumes
+const REGEN_PERIOD_TICKS = TICK_RATE; // apply once per second (cheap + clean per-second numbers)
+const REGEN_HP_FRAC = 0.02; // HP restored per second out of combat (~50s to full) — gentle, tunable
+const REGEN_MP_FRAC = 0.02; // MP restored per second out of combat (mirrors HP)
 const PLAYER_SPAWN_X = 0; // the "graveyard"/safe point a downed player wakes up at
 const PLAYER_SPAWN_Z = 0;
 // ---------- auto-play bot tuning (all deterministic; priority: SURVIVE > EVOLVE) ----------
@@ -386,7 +393,7 @@ export class Sim implements IWorld {
       baseMaxHp: cls.baseHp, baseMaxMp: cls.baseMp,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3: defense (player starts with none innate)
       swingTicks: Math.round(cls.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: cls.baseMp, maxMp: cls.baseMp, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       // SPARSE/positional bag: a fixed 20-slot grid (holes = null) so a drag-placed item keeps its slot.
@@ -433,7 +440,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: hp, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3: enemies have no defense (take full damage)
       swingTicks: Math.round(sp.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: tier.id,
@@ -459,7 +466,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -488,7 +495,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -520,7 +527,7 @@ export class Sim implements IWorld {
         baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 100, baseMaxMp: 0,
         basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
         swingTicks: 0, nextSwingAt: 0,
-        mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+        mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
         level: 1, xp: 0, attrPoints: 0, baseInt: 0,
         sp: 0, skillRanks: {},
         gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -549,7 +556,7 @@ export class Sim implements IWorld {
       baseStr: t.str, baseWeaponDamage: t.weaponDamage, baseMaxHp: t.hp, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: Math.round(t.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -632,7 +639,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: def.template.minionHp, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0, // K3
       swingTicks: Math.round(ms.swingTime * TICK_RATE), nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -894,7 +901,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 1, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -1552,6 +1559,11 @@ export class Sim implements IWorld {
       const p = this.ents.get(id);
       if (p) this.autoAttack(p);
     }
+    // Out-of-combat regen, on this tick's post-combat HP (combat above refreshed combatUntil).
+    for (const id of this.playerIds) {
+      const p = this.ents.get(id);
+      if (p) this.regenPlayer(p);
+    }
     for (const id of this.playerIds) {
       const p = this.ents.get(id);
       if (p) this.respawnPlayer(p); // revive a downed player once its timer elapses
@@ -1650,6 +1662,7 @@ export class Sim implements IWorld {
     // numbers to before. Giving enemies armor later happens here without touching this call.
     const dmg = combat.mitigate({ hit, target: t });
     t.hp -= dmg;
+    if (killer.kind === 'player') killer.combatUntil = this.tick + REGEN_LINGER_TICKS; // dealing damage holds off regen
     // Boss loot goes to the biggest damage contributor, so tally each player's damage to the boss.
     if (t.boss && killer.kind === 'player' && dmg > 0) this.recordBossDamage(t.id, killer.id, dmg);
     // Captured at the target's current position so the number shows even on a kill.
@@ -2965,6 +2978,18 @@ export class Sim implements IWorld {
     if (!t || !this.canAttack(p, t)) p.targetId = null;
   }
 
+  // Out-of-combat HP/MP regen (Silkroad-style). On a 1s cadence, once the combat lull has passed,
+  // restore a small % of max HP and MP. A spirit doesn't regen (respawn restores it); regen is the
+  // only out-of-combat heal, so the player isn't forced to the vendor between fights. No Rng.
+  private regenPlayer(p: Entity): void {
+    if (p.deadUntil !== 0) return; // a downed spirit doesn't regen
+    if (this.tick % REGEN_PERIOD_TICKS !== 0) return; // once per second
+    if (this.tick < p.combatUntil) return; // still in / freshly out of combat — no regen yet
+    if (p.hp >= p.maxHp && p.mp >= p.maxMp) return; // already topped up
+    p.hp = Math.min(p.maxHp, p.hp + Math.max(1, Math.ceil(p.maxHp * REGEN_HP_FRAC)));
+    p.mp = Math.min(p.maxMp, p.mp + Math.max(1, Math.ceil(p.maxMp * REGEN_MP_FRAC)));
+  }
+
   private stepPlayer(p: Entity): void {
     if (p.deadUntil !== 0) return; // frozen while a spirit
     if (this.isIncapacitated(p) || this.isRooted(p)) return; // can't move while stunned or rooted
@@ -3132,6 +3157,8 @@ export class Sim implements IWorld {
     const incoming = combat.mitigate({ hit, target: p });
     const taken = Math.max(1, Math.round(incoming * this.defenseFactor(p)));
     p.hp = Math.max(0, p.hp - taken);
+    p.combatUntil = this.tick + REGEN_LINGER_TICKS; // taking damage holds off regen
+    if (attacker?.kind === 'player') attacker.combatUntil = p.combatUntil; // and so does landing a PvP blow
     this.events.push({
       seq: this.nextEventSeq++,
       tick: this.tick,
@@ -3269,7 +3296,7 @@ export class Sim implements IWorld {
       baseStr: 0, baseWeaponDamage: 0, baseMaxHp: 1, baseMaxMp: 0,
       basePhyDef: 0, baseMagDef: 0, phyDef: 0, magDef: 0,
       swingTicks: 0, nextSwingAt: 0,
-      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0,
+      mp: 0, maxMp: 0, gcdUntil: 0, abilityReadyAt: {}, potionReadyAt: 0, deadUntil: 0, combatUntil: 0,
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
@@ -3429,6 +3456,7 @@ export class Sim implements IWorld {
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
       mix(e.mp); mix(e.gcdUntil); mix(e.potionReadyAt); mix(e.deadUntil); mix(e.returnReadyAt);
+      mix(e.combatUntil); // out-of-combat regen gate — drives HP/MP regen, so two hosts must agree
       mix(cityIndex(e.returnCity)); // GDD v0.5: registered city (per-player state; drives Return + respawn)
       // Per-slot ability cooldowns are gameplay state too (sibling of gcdUntil).
       // Fingerprint a fixed slot range so it stays complete across masteries.

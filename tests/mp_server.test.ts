@@ -399,22 +399,6 @@ describe('ServerWorld — Layer 4: per-player auto-play (bot)', () => {
 
 // Farm the nearest mob until the player has at least `target` gold (stops as soon as it's
 // reached, so loot doesn't overfill the bag). Mirrors how a real player earns to shop.
-function farmUntilGold(w: ServerWorld, a: number, target: number): void {
-  for (let i = 0; i < 5000 && w.selfState(a).gold < target; i++) {
-    const me = w.snapshot().entities.find((e) => e.id === a);
-    if (!me) break;
-    let mob: { id: number; x: number; z: number } | null = null;
-    let bd = Infinity;
-    for (const e of w.snapshot().entities) {
-      if (e.kind !== 'enemy') continue;
-      const d = (e.x - me.x) ** 2 + (e.z - me.z) ** 2;
-      if (d < bd) { bd = d; mob = e; }
-    }
-    if (mob) { w.setIntent(a, mob.x - me.x, mob.z - me.z); w.command(a, { t: 'set-target', id: mob.id }); }
-    w.step();
-  }
-}
-
 // Walk a player to the town vendor (server-side) until shop.inRange becomes true.
 function goToVendor(w: ServerWorld, a: number): void {
   w.command(a, { t: 'set-target', id: null });
@@ -433,7 +417,9 @@ describe('ServerWorld — Layer 3: vendor buy (online path)', () => {
     const a = w.addPlayer('A');
     const staffPrice = VENDOR_STOCK.find((s) => s.itemId === 'apprentice_staff')!.price;
     const potPrice = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!.price;
-    farmUntilGold(w, a, staffPrice + potPrice + 30);
+    // Grant the gold directly (the subject here is the BUY path, not farming). Avoids any dependence
+    // on the farm trajectory, which out-of-combat regen now shifts.
+    w.restorePlayer(a, { gold: staffPrice + potPrice + 50 });
     goToVendor(w, a);
     expect(w.selfState(a).shop.inRange).toBe(true);
     expect(w.selfState(a).shop.stock.some((s) => s.itemId === 'apprentice_staff')).toBe(true); // staff listed

@@ -1924,8 +1924,8 @@ describe('consumables', () => {
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });
     safeStep(sim); // applied at drinkTick + POTION_COOLDOWN_TICKS - 1: one tick short
     expect(sim.tick).toBe(drinkTick + POTION_COOLDOWN_TICKS - 1);
-    expect(potionQty(sim)).toBe(qtyEdge); // blocked: nothing consumed
-    expect(player(sim).hp).toBe(hpEdge);
+    expect(potionQty(sim)).toBe(qtyEdge); // blocked: nothing consumed (the real cooldown signal)
+    expect(player(sim).hp).toBeGreaterThanOrEqual(hpEdge); // unchanged by the POTION; out-of-combat regen may add a hair
 
     // Exactly at the boundary it works again (HP up, one more potion spent).
     sim.sendCommand({ t: 'use-item', itemId: 'health_potion', rarity: 'normal', plus: 0 });

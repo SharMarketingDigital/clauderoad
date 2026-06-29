@@ -86,6 +86,10 @@ export interface Entity {
   // player death: tick at which a downed player respawns (0 = alive). The spirit
   // can't act until then. Enemies always carry 0.
   deadUntil: number;
+  // out-of-combat regen gate: tick until which the player counts as "in combat" (refreshed on every
+  // hit dealt or taken). Passive HP/MP regen only resumes once `tick >= combatUntil`. Transient like
+  // returnReadyAt: NOT persisted (resets to 0 = out of combat on reload). Non-players always 0.
+  combatUntil: number;
   // progression. The player gains xp/levels; enemies just carry a level.
   level: number;
   xp: number; // XP accumulated into the current level
