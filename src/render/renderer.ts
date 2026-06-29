@@ -1,6 +1,16 @@
 // Three.js renderer. It READS the world (via IWorld) and draws it.
 // It must NEVER mutate the world or decide gameplay outcomes.
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+
+// Bloom: glow the BRIGHT pixels only (additive VFX, the +N enhancement aura, the sun) so light
+// "blooms" without washing the scene. High threshold keeps terrain/UI untouched; tunable.
+const BLOOM_STRENGTH = 0.55;
+const BLOOM_RADIUS = 0.4;
+const BLOOM_THRESHOLD = 0.85;
 import type { IWorld, EntityKind, EntityView, MasteryId, Rarity, GroundLootView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
 import { PlayerAvatars } from './player_avatars';
@@ -122,6 +132,7 @@ export class Renderer {
   private shakeRemaining = 0;
   private shakeDuration = 0;
   private shakeMag = 0;
+  private composer!: EffectComposer; // post-processing pipeline (set in the constructor)
 
   constructor(canvas: HTMLCanvasElement) {
     // preserveDrawingBuffer lets the clip recorder copy this canvas into its 9:16
@@ -139,6 +150,14 @@ export class Renderer {
 
     this.selectionRing = makeSelectionRing();
     this.scene.add(this.selectionRing);
+
+    // Post-processing: RenderPass -> bloom -> OutputPass. The OutputPass does the final sRGB encode;
+    // we keep the renderer's default tone-mapping so the calibrated day/night colours are unchanged —
+    // only the bright additive effects gain a glow. setSize (in resize) gives the passes their resolution.
+    this.composer = new EffectComposer(this.gl);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD));
+    this.composer.addPass(new OutputPass());
 
     // Decorative scenery (async, fire-and-forget — the game runs while it loads;
     // failure just leaves it bare). Both are presentation-only with no collision.
@@ -271,7 +290,7 @@ export class Renderer {
     for (const av of this.npcAvatars.values()) if (av.ready) av.update(dt); // keep each NPC's idle playing
     this.updateCamera(world);
     this.cullOffscreen(); // O4: hide actors fully off-screen (skips their colour + shadow pass)
-    this.gl.render(this.scene, this.camera);
+    this.composer.render(); // RenderPass + bloom + sRGB output (replaces gl.render for the glow pass)
   }
 
   // Drive each enemy skeleton: idle vs walk by movement, and a short lunge when it
@@ -664,6 +683,8 @@ export class Renderer {
     const w = window.innerWidth;
     const h = window.innerHeight;
     this.gl.setSize(w, h, false);
+    this.composer.setPixelRatio(this.gl.getPixelRatio());
+    this.composer.setSize(w, h); // keep the post-processing targets in sync with the canvas
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
