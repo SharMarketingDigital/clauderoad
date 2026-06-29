@@ -1855,6 +1855,24 @@ describe('consumables', () => {
     expect(potionQty(sim)).toBe(qtyBefore - 1); // exactly one potion spent
   });
 
+  it('a Mana Potion restores MP and consumes one (the caster burst refill)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    const save0 = sim.serializePlayer(pid)!;
+    save0.bag = [{ itemId: 'mana_potion', rarity: 'normal', plus: 0, qty: 3 }];
+    sim.restorePlayer(pid, save0);
+    drainSomeMp(sim); // cast slot 1 until MP < maxMp (leaves us combat-fresh, so regen stays suppressed)
+    const manaQty = () =>
+      (sim.serializePlayer(pid)?.bag ?? []).filter((s) => s != null && s.itemId === 'mana_potion').reduce((n, s) => n + s!.qty, 0);
+    const mpBefore = player(sim).mp;
+    const qtyBefore = manaQty();
+    expect(mpBefore).toBeLessThan(player(sim).maxMp); // there's an MP gap to refill
+    sim.sendCommand({ t: 'use-item', itemId: 'mana_potion', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(player(sim).mp).toBeGreaterThan(mpBefore); // the potion restored MP
+    expect(manaQty()).toBe(qtyBefore - 1); // exactly one consumed
+  });
+
   it('refuses at full HP — no potion consumed and no cooldown armed', () => {
     const sim = new Sim(7);
     // LF-S4: inject the potions + leather directly (loot now drops on the ground, not into the bag).

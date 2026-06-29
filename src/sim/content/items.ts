@@ -43,6 +43,9 @@ export interface ItemDef {
 export const ITEMS: Record<string, ItemDef> = {
   // consumable: heals ~40% of the 120-HP starter, à la a WoW Classic minor healing potion
   health_potion: { id: 'health_potion', name: 'Poção de Vida', consumable: { healHp: 50 }, value: 10 },
+  // mana counterpart (Silkroad-style): the caster's burst refill, alongside the slow out-of-combat
+  // MP regen. Same generic consume path (healMp), shared potion cooldown — no sim changes needed.
+  mana_potion: { id: 'mana_potion', name: 'Poção de Mana', consumable: { healMp: 50 }, value: 10 },
   // crude leather "armor" — common drop, gives a little HP
   wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'chest', stats: { maxHp: 20, phyDef: 2, magDef: 1 }, value: 8 },
   // K1 added the rest of the Silkroad armor set + shield + accessories (str/maxHp/maxMp).
