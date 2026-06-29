@@ -37,6 +37,7 @@ export class EscMenu {
       { label: 'Loja', shortcut: 'V', run: () => this.fireKey('v') },
       { label: 'Armazém', shortcut: 'H', run: () => this.fireKey('h') },
       { label: 'Mapa', shortcut: 'M', run: () => this.fireKey('m') },
+      { label: 'Controles', shortcut: '?', run: () => this.fireKey('?') },
       { label: 'Grupo', shortcut: 'P', run: () => this.fireKey('p') },
       { label: 'Encontrar Grupo', shortcut: 'E', run: () => this.fireKey('e') },
       { label: 'Auto-play', shortcut: 'B', run: () => this.fireKey('b') },

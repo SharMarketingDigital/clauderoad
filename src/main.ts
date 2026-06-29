@@ -20,6 +20,7 @@ import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
 import { ConnectionOverlay } from './ui/connection_overlay';
+import { ControlsOverlay } from './ui/controls_overlay';
 import { PartyHud } from './ui/party_hud';
 import { DuelHud } from './ui/duel_hud';
 import { PkHud } from './ui/pk_hud';
@@ -73,12 +74,14 @@ function startOffline(name: string): void {
   const sfx = new Sfx(); // procedural combat SFX (cosmetic; reads the same SimEvent stream as the damage numbers)
   new SettingsMenu(music, sfx); // settings (abre no Backspace / via menu Esc); self-driven
   new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
+  const controls = new ControlsOverlay(); // tecla ? — referência de teclas; auto-mostra na 1ª sessão
   // Class selection on entry (G1): pick a starter class -> the sim equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {
     sim.sendCommand({ t: 'select-class', classId });
     music.unlock();
     sfx.unlock();
+    controls.maybeAutoShow(); // first-ever session: teach the keys right as they enter
   });
   const combatText = new CombatText();
   new Recorder(canvas); // in-game ● REC button (captures the 3D canvas to .webm)
@@ -136,12 +139,14 @@ function startOnline(url: string, name: string): void {
   const sfx = new Sfx(); // procedural combat SFX (cosmetic; same module + SimEvent stream as SP)
   new SettingsMenu(music, sfx); // settings (abre no Backspace / via menu Esc); self-driven
   new EscMenu(); // menu central (Esc): lista todos os painéis + atalhos; self-driven, no per-frame update
+  const controls = new ControlsOverlay(); // tecla ? — referência de teclas; auto-mostra na 1ª sessão
   // Class selection on entry (G1): pick a starter class -> the server equips its weapon/kit.
   // The pick is the first user gesture, so it also unlocks audio (browser autoplay policy).
   new ClassSelect((classId) => {
     world.sendCommand({ t: 'select-class', classId });
     music.unlock();
     sfx.unlock();
+    controls.maybeAutoShow(); // first-ever session: teach the keys right as they enter
   });
   const mpHud = new MpHud(); // world-awareness overlay: connection status + names + mob HP bars
   const partyHud = new PartyHud(world); // co-op: party frames + create/invite/leave + invite popup
@@ -157,6 +162,13 @@ function startOnline(url: string, name: string): void {
     (sub, arg) => world.guildCommand(sub, arg), // GDD v0.5 §1: /guild create|invite|accept|decline|leave|kick
   );
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
+  // A local welcome line so a newcomer knows the goal + where the controls live (the world has no quest text).
+  chat.add({
+    from: '',
+    text: 'Bem-vindo ao ClaudeRoad! Mate inimigos (Tab para mirar, 1 para atacar) e ganhe XP e ouro. Bolsa: I. Todos os controles: ?',
+    ts: 0,
+    system: true,
+  });
   const connectionOverlay = new ConnectionOverlay(world); // "Conectando…" / reconnect until the first snapshot
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,

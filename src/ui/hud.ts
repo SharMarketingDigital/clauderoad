@@ -181,7 +181,7 @@ export class Hud {
         <div class="skills-title">Habilidades | SP: <span class="skills-sp">0</span></div>
         <div class="skills-list"></div>
       </div>
-      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1 Golpe Forte &middot; I bolsa &middot; K habilidades &middot; V loja &middot; arrastar gira</div>
+      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1–9 habilidades &middot; I bolsa &middot; G pegar loot &middot; <b>? controles</b></div>
       <div class="announce"></div>
     `;
     document.body.appendChild(this.root);
