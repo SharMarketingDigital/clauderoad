@@ -470,7 +470,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
-      species: '',
+      species: 'vendor', // cosmetic tag so the renderer can give the shopkeeper its own model (not hashed)
       boss: false, summoned: false, spawnZone: -1,
       homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
       returnCity: '', // N/A: player-only state
@@ -499,7 +499,7 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
-      species: '',
+      species: 'warehouse', // cosmetic tag so the renderer can give the bank keeper its own model (not hashed)
       boss: false, summoned: false, spawnZone: -1,
       homeX: WAREHOUSE_SPAWN_X, homeZ: WAREHOUSE_SPAWN_Z,
       returnCity: '', // N/A: player-only state

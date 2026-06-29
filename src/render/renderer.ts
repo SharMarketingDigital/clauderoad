@@ -11,6 +11,14 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 const BLOOM_STRENGTH = 0.55;
 const BLOOM_RADIUS = 0.4;
 const BLOOM_THRESHOLD = 0.85;
+
+// Town NPC look by role (cosmetic; the sim tags vendor/warehouse, teleporter is per-city). Distinct
+// CC0 models already in public/models so the three roles don't all read as the same Mage.
+const NPC_MODEL: Record<string, string> = {
+  vendor: '/models/Rogue.glb',
+  warehouse: '/models/Knight.glb',
+  teleporter: '/models/Mage.glb',
+};
 import type { IWorld, EntityKind, EntityView, MasteryId, Rarity, GroundLootView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
 import { PlayerAvatars } from './player_avatars';
@@ -492,10 +500,11 @@ export class Renderer {
     }
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
     if (e.kind === 'npc') {
-      // One avatar per NPC id (vendor + warehouse), created on first sight.
+      // One avatar per NPC id, created on first sight. Distinct CC0 models per role (vendor=Rogue
+      // merchant, warehouse=Knight guard, teleporter=Mage) so the town reads as alive, not cloned.
+      // Teleporter hubs (TP3) also float a name tag so they read as travel points.
       let av = this.npcAvatars.get(e.id);
-      // Teleporter hubs (TP3) float a name tag so they read as travel points; vendor/warehouse pass none.
-      if (!av) { av = new NpcAvatar('/models/Mage.glb', e.species === 'teleporter' ? e.name : undefined); this.npcAvatars.set(e.id, av); }
+      if (!av) { av = new NpcAvatar(NPC_MODEL[e.species] ?? '/models/Mage.glb', e.species === 'teleporter' ? e.name : undefined); this.npcAvatars.set(e.id, av); }
       return av.ready ? av.root : null;
     }
     return null;
@@ -575,6 +584,11 @@ export class Renderer {
       const ip = this.interpPos(e.id, e); // O1: smooth the 20Hz sim position at render rate
       m.position.set(ip.x, terrainHeight(ip.x, ip.z), ip.z); // sit on the (visual) terrain
       m.rotation.y = ip.facing;
+      // Onda 4 polish: loot + pet gently hover/bob so they read as alive and catch the eye (the rarity
+      // glow blooms too now). Phase-shifted by id so a pile of drops doesn't bob in unison. Cosmetic.
+      if (e.kind === 'loot' || e.kind === 'pet') {
+        m.position.y += 0.14 + Math.sin(this.lastRenderMs / 1000 * 2.2 + e.id * 0.7) * 0.07;
+      }
       updateGlow(m, e.weaponPlus);
       updateHostileTint(m, e);
       updateDeadFade(m, e);
