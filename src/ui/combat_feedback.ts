@@ -34,6 +34,9 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
           const text = ev.crit ? `${ev.amount}!` : String(ev.amount);
           combatText.spawn(p.x, p.y, text, incoming ? 'hurt' : 'damage', ev.crit ?? false);
         }
+        // A subtle camera kick on a crit that involves ME (I landed it on my target, or I took it).
+        const mine = ev.targetId === world.localPlayerId() || ev.targetId === world.localTargetId();
+        if (ev.crit && mine) renderer.shake(0.06, 0.12);
       } else if (ev.kind === 'levelup') {
         renderer.flash(ev.targetId);
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
@@ -59,6 +62,7 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
       } else if (ev.kind === 'boss-defeat') {
         // The sim composes the full line ("Fulano derrotou [Chefe]"); show it as-is.
         announcer.announce(ev.text ?? 'Um chefe foi derrotado!');
+        renderer.shake(0.16, 0.3); // an epic moment — a clear thump for everyone
       } else if (ev.kind === 'boss-summon') {
         announcer.announce(`${ev.text ?? 'O chefe'} chama a matilha!`);
       } else if (ev.kind === 'pk-kill') {
@@ -67,6 +71,8 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
       } else if (ev.kind === 'death') {
         const me = ev.targetId === world.localPlayerId();
         announcer.announce(me ? 'Você morreu! Renascendo...' : `${ev.text ?? 'Um jogador'} morreu.`);
+        // A heavier kick when I go down, or when the player I'm fighting does.
+        if (me || ev.targetId === world.localTargetId()) renderer.shake(0.13, 0.24);
       } else if (ev.kind === 'respawn') {
         const me = ev.targetId === world.localPlayerId();
         announcer.announce(me ? 'Você renasceu.' : `${ev.text ?? 'Um jogador'} renasceu.`);

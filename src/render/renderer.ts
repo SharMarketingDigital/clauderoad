@@ -117,6 +117,11 @@ export class Renderer {
   // saved player framing (pitch + distance) while a clip applies its own; the YAW
   // is deliberately left untouched so the movement reference never changes.
   private clipCamSaved: { pitch: number; dist: number } | null = null;
+  // Camera-shake impact feedback (purely cosmetic): a decaying positional jitter applied
+  // to the camera after framing. `shake()` arms it; render() decays it; updateCamera() applies it.
+  private shakeRemaining = 0;
+  private shakeDuration = 0;
+  private shakeMag = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     // preserveDrawingBuffer lets the clip recorder copy this canvas into its 9:16
@@ -214,6 +219,16 @@ export class Renderer {
     this.flashes.set(id, FLASH_DURATION);
   }
 
+  // Arm a brief camera shake (impact feedback) — `magnitude` in world units (~0.05–0.2).
+  // Cosmetic only: it perturbs the camera position, easing out to zero. A stronger shake
+  // overrides a weaker ongoing one, but a weaker one never cuts a stronger one short.
+  shake(magnitude: number, duration = 0.18): void {
+    if (this.shakeRemaining > 0 && magnitude <= this.shakeMag) return;
+    this.shakeMag = magnitude;
+    this.shakeRemaining = duration;
+    this.shakeDuration = duration;
+  }
+
   // Project a world point to screen pixels (for DOM overlays like damage text).
   // `visible` is false when the point is behind the camera / outside the frustum.
   project(x: number, y: number, z: number): { x: number; y: number; visible: boolean } {
@@ -233,6 +248,7 @@ export class Renderer {
     this.lastRenderMs = nowMs;
 
     this.alpha = clamp(alpha, 0, 1);
+    if (this.shakeRemaining > 0) this.shakeRemaining = Math.max(0, this.shakeRemaining - dt); // decay the camera shake
     this.advanceInterp(world); // O1: roll prev/cur position buffers when the sim has ticked
     this.localId = world.localPlayerId(); // remembered for pick(): never let our own avatar occlude a click
 
@@ -617,6 +633,15 @@ export class Renderer {
       pz + Math.cos(this.camYaw) * this.camDist * cy,
     );
     this.camera.lookAt(px, py + 1.2, pz);
+    // Impact shake: nudge the camera AFTER framing so the whole view jitters. Ease-out (t²)
+    // so it settles smoothly. Math.random is fine here — pure decoration, never the sim's Rng.
+    if (this.shakeRemaining > 0 && this.shakeDuration > 0) {
+      const t = this.shakeRemaining / this.shakeDuration; // 1 -> 0
+      const amp = this.shakeMag * t * t;
+      this.camera.position.x += (Math.random() * 2 - 1) * amp;
+      this.camera.position.y += (Math.random() * 2 - 1) * amp;
+      this.camera.position.z += (Math.random() * 2 - 1) * amp;
+    }
   }
 
   // Hide entity meshes whose sphere is fully outside the view frustum, so off-screen actors cost
