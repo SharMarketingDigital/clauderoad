@@ -1661,6 +1661,7 @@ export class Sim implements IWorld {
       amount: dmg,
       x: t.x,
       z: t.z,
+      crit: hit.crit, // already rolled in compute(); forwarded for a distinct crit pop (no new rng draw)
     });
     // Fire any crossed summon thresholds — even on a lethal blow — so a future
     // retune (bigger hits / smaller HP bands) can never silently drop a wave.
@@ -3139,6 +3140,7 @@ export class Sim implements IWorld {
       amount: taken,
       x: p.x,
       z: p.z,
+      crit: hit.crit, // forwarded for the crit pop; the value was already rolled in compute()
     });
     if (p.hp <= 0) this.killPlayer(p, attacker);
   }

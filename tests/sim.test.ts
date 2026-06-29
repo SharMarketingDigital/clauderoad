@@ -1121,6 +1121,44 @@ describe('spear mastery (Lança)', () => {
     expect(crit).toBe(normal * CRIT_MULT);
   });
 
+  it('a critical hit is flagged on the damage event (so the UI can pop a distinct crit number)', () => {
+    // Fúria gives +100% crit, so the first auto-attack after it is guaranteed to crit; the
+    // presentation event must carry crit:true. A plain spear swing (no crit buff) must not.
+    const firstHitCrit = (withFury: boolean): boolean | undefined => {
+      const sim = new Sim(7);
+      equipSpear(sim);
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      let wid = -1;
+      for (let i = 0; i < 800; i++) {
+        const p = player(sim);
+        const w = nearestWolf(sim);
+        if (!w) { sim.step(); continue; }
+        if (Math.hypot(w.x - p.x, w.z - p.z) <= 2.4) { wid = w.id; break; }
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+      }
+      expect(wid).not.toBe(-1);
+      if (withFury) { sim.sendCommand({ t: 'use-ability', slot: 4 }); sim.step(); }
+      for (let i = 0; i < 120; i++) {
+        const w = sim.entities().find((e) => e.id === wid);
+        if (!w) break;
+        const p = player(sim);
+        const before = sim.recentEvents();
+        const lastSeq = before.length ? Math.max(...before.map((e) => e.seq)) : 0;
+        sim.sendCommand({ t: 'set-target', id: wid });
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+        const hit = sim.recentEvents().find((e) => e.seq > lastSeq && e.kind === 'damage' && e.targetId === wid);
+        if (hit) return hit.crit;
+      }
+      return undefined;
+    };
+    expect(firstHitCrit(true)).toBe(true); // Fúria => the event is flagged crit
+    expect(firstHitCrit(false)).toBeFalsy(); // a normal swing carries no crit flag
+  });
+
   it('Estocada knocks a target down (proven on the high-HP boss, which survives the hit)', () => {
     const sim = new Sim(7);
     equipSpear(sim);

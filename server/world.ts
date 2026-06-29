@@ -530,6 +530,7 @@ export class ServerWorld {
         x: round(ev.x),
         z: round(ev.z),
         text: ev.text,
+        crit: ev.crit, // forward the crit flag so the client can pop a distinct crit number
       });
     }
     // Time-of-day + rain INTENSITY (0..1), both rounded — the same for every client, so

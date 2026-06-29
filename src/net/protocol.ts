@@ -81,6 +81,7 @@ export interface NetEvent {
   x: number;
   z: number;
   text?: string;
+  crit?: boolean; // 'damage' only: the hit was a critical (for a distinct on-screen pop)
 }
 
 // One party registered in the PUBLIC matching list ("looking for members"). This is

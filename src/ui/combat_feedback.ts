@@ -30,7 +30,9 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
         const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
         if (p.visible) {
           const incoming = ev.targetId === world.localPlayerId();
-          combatText.spawn(p.x, p.y, String(ev.amount), incoming ? 'hurt' : 'damage');
+          // A crit pops bigger/hotter and gets a "!" — the payoff of the crit roll.
+          const text = ev.crit ? `${ev.amount}!` : String(ev.amount);
+          combatText.spawn(p.x, p.y, text, incoming ? 'hurt' : 'damage', ev.crit ?? false);
         }
       } else if (ev.kind === 'levelup') {
         renderer.flash(ev.targetId);

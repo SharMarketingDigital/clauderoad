@@ -684,6 +684,14 @@ html, body {
   text-shadow: 0 0 6px #7a1c1c, 0 1px 2px #000;
 }
 
+/* Critical hit: bigger + a stronger glow on top of the variant. Outgoing crits also
+   go hot-orange (reserve that color for crits); incoming crits stay red but big. */
+.fct-crit {
+  font-size: 30px;
+  text-shadow: 0 0 9px #ff8a1c, 0 1px 3px #000;
+}
+.fct-damage.fct-crit { color: #ffb13b; }
+
 @keyframes fct-pop {
   0%   { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
   15%  { transform: translate(-50%, -10px) scale(1.15); opacity: 1; }

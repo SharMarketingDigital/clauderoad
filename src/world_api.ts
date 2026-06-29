@@ -414,7 +414,8 @@ export interface AbilityView {
 export type SimEvent = {
   readonly seq: number;
   readonly tick: number;
-  // 'damage': amount = hit dealt to targetId. 'levelup': amount = new level.
+  // 'damage': amount = hit dealt to targetId; `crit` = the hit was a critical (for a
+  //   distinct, bigger pop). 'levelup': amount = new level.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
   // 'enhance-break': a failed high-"+" attempt destroyed the item; `text` = its name.
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
@@ -440,6 +441,7 @@ export type SimEvent = {
   readonly x: number;
   readonly z: number;
   readonly text?: string; // optional label (e.g. a boss name for announcements)
+  readonly crit?: boolean; // 'damage' only: the hit was a critical — presentation flag for a distinct number
 };
 
 export interface IWorld {
