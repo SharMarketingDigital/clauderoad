@@ -17,7 +17,13 @@ import type {
   MatchingEntryView, MatchingRequestView,
 } from './protocol';
 
-export type NetStatus = 'connecting' | 'online' | 'offline';
+export type NetStatus = 'connecting' | 'online' | 'offline' | 'reconnecting';
+
+// Auto-reconnect with capped exponential backoff. After this many failed tries we stop and let the
+// overlay offer a manual "Tentar de novo" — so a sleeping/down server never freezes the player forever.
+const MAX_RECONNECT_ATTEMPTS = 6;
+const RECONNECT_BASE_MS = 600;
+const RECONNECT_CAP_MS = 8000;
 
 export class ClientWorld implements IWorld {
   readonly tick = 0; // not meaningful online; satisfies IWorld
@@ -27,7 +33,15 @@ export class ClientWorld implements IWorld {
   // and we invoke it for each chat line the server broadcasts. Not part of IWorld.
   onChat: ((line: ChatLine) => void) | null = null;
 
-  private ws: WebSocket;
+  private ws!: WebSocket; // (re)assigned by connect(), always before use
+  private readonly url: string;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Connection lifecycle, read by the ConnectionOverlay: did we ever connect, has the first
+  // snapshot arrived (gameplay is ready), and did auto-reconnect give up (offer a manual retry).
+  everConnected = false;
+  gotSnapshot = false;
+  gaveUp = false;
   private myId: number | null = null;
   private self: SelfSnap | null = null; // this client's own HUD/bag state (from the server)
   private snapIntervalMs = 100; // updated from the server's snapshotHz on welcome
@@ -46,14 +60,53 @@ export class ClientWorld implements IWorld {
   private hasWeather = false; // false until the first snapshot arrives
 
   constructor(url: string, private readonly name: string) {
-    this.ws = new WebSocket(url);
-    this.ws.onopen = () => {
+    this.url = url;
+    this.connect();
+  }
+
+  // Open the socket and (on success) join by name. Reused for the first connect AND every reconnect,
+  // so a dropped connection transparently resumes the SAME character (persistence is keyed by name).
+  private connect(): void {
+    this.status = this.everConnected ? 'reconnecting' : 'connecting';
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
+    ws.onopen = () => {
       this.status = 'online';
+      this.everConnected = true;
+      this.reconnectAttempts = 0;
       this.send({ t: 'join', name: this.name });
     };
-    this.ws.onmessage = (e) => this.onMessage(e.data);
-    this.ws.onclose = () => { this.status = 'offline'; };
-    this.ws.onerror = () => { this.status = 'offline'; };
+    ws.onmessage = (e) => this.onMessage(e.data);
+    ws.onclose = () => this.onDisconnect();
+    ws.onerror = () => { /* an onclose always follows — handle the retry there, once */ };
+  }
+
+  // Socket closed or failed to open: schedule a reconnect with capped exponential backoff. After
+  // MAX_RECONNECT_ATTEMPTS, give up and let the overlay show a manual "Tentar de novo".
+  private onDisconnect(): void {
+    if (this.reconnectTimer != null) return; // a retry is already scheduled
+    this.status = 'offline';
+    const attempt = this.reconnectAttempts++;
+    if (attempt >= MAX_RECONNECT_ATTEMPTS) {
+      this.gaveUp = true;
+      return;
+    }
+    const delay = Math.min(RECONNECT_CAP_MS, RECONNECT_BASE_MS * 2 ** attempt);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  // Manual retry from the overlay's "Tentar de novo" button: reset the backoff and try now.
+  retry(): void {
+    if (this.reconnectTimer != null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    this.gaveUp = false;
+    this.connect();
   }
 
   // Advance the interpolation clock. Call once per rendered frame.
@@ -247,6 +300,7 @@ export class ClientWorld implements IWorld {
       this.myId = msg.id;
       if (msg.snapshotHz > 0) this.snapIntervalMs = 1000 / msg.snapshotHz;
     } else if (msg.t === 'snapshot') {
+      this.gotSnapshot = true; // gameplay is ready — the overlay can hide
       this.from = this.to; // the previous snapshot becomes the interpolation source
       this.to = new Map(msg.entities.map((e) => [e.id, e]));
       this.lastSnapMs = this.nowMs;

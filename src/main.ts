@@ -19,6 +19,7 @@ import { makeCombatFeedback } from './ui/combat_feedback';
 import { Recorder, ClipRecorder } from './ui/recorder';
 import { ClientWorld, type NetStatus } from './net/client_world';
 import { MpHud } from './ui/mp_hud';
+import { ConnectionOverlay } from './ui/connection_overlay';
 import { PartyHud } from './ui/party_hud';
 import { DuelHud } from './ui/duel_hud';
 import { PkHud } from './ui/pk_hud';
@@ -156,6 +157,7 @@ function startOnline(url: string, name: string): void {
     (sub, arg) => world.guildCommand(sub, arg), // GDD v0.5 §1: /guild create|invite|accept|decline|leave|kick
   );
   world.onChat = (line) => chat.add(line); // server-broadcast lines flow into the chat box
+  const connectionOverlay = new ConnectionOverlay(world); // "Conectando…" / reconnect until the first snapshot
   const combatText = new CombatText();
   // SAME feedback as offline: the server streams combat events, we pop damage numbers,
   // flash the hit, and the Hud banners deaths/boss spawns — identically on every client.
@@ -176,6 +178,7 @@ function startOnline(url: string, name: string): void {
     hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
     map.update(world); // world map (M) — player position on the zones
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
+    connectionOverlay.update(world); // blocking "Conectando…"/reconnect until the world is ready
     partyHud.update(world); // party frames + controls + invite popup (from localParty/localInvite)
     duelHud.update(world, renderer, input.duelTargetId()); // PvP: banner + challenge popup + floating "Duelar" button on the left-click-selected player
     pkHud.update(world, input.pkHeld()); // PvP: free-PK "zona PvP" / "PK armado" warning (GDD v0.5 §2)
@@ -216,5 +219,8 @@ function withChosenName(start: (name: string) => void): void {
 }
 
 function statusLabel(s: NetStatus): string {
-  return s === 'online' ? 'conectado' : s === 'connecting' ? 'conectando…' : 'desconectado';
+  if (s === 'online') return 'conectado';
+  if (s === 'connecting') return 'conectando…';
+  if (s === 'reconnecting') return 'reconectando…';
+  return 'desconectado';
 }
