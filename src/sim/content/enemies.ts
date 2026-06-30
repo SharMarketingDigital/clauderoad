@@ -78,6 +78,9 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
     // alchemy materials (rare-ish, so upgrading is a real choice)
     { itemId: 'elixir_weapon', chance: 0.12 },
     { itemId: 'elixir_armor', chance: 0.12 },
+    // gear dropável (set completo) — anel 1: o kit inicial de couro começa a cair aqui.
+    { itemId: 'leather_cap', chance: 0.08 }, // capacete
+    { itemId: 'leather_gloves', chance: 0.07 }, // luvas
   ],
 };
 
@@ -103,6 +106,12 @@ export const ROGUE_TEMPLATE: EnemyTemplate = {
     { itemId: 'health_potion', chance: 0.3 },
     { itemId: 'old_sword', chance: 0.06 },
     { itemId: 'elixir_weapon', chance: 0.14 },
+    // gear dropável — anel 2: resto do couro + arco + 1º acessório.
+    { itemId: 'leather_pants', chance: 0.08 }, // calça
+    { itemId: 'leather_boots', chance: 0.07 }, // botas
+    { itemId: 'wooden_shield', chance: 0.06 }, // escudo
+    { itemId: 'short_bow', chance: 0.05 }, // arma (maestria Arco)
+    { itemId: 'copper_ring', chance: 0.04 }, // anel
   ],
 };
 
@@ -127,6 +136,12 @@ export const WARRIOR_TEMPLATE: EnemyTemplate = {
     { itemId: 'health_potion', chance: 0.3 },
     { itemId: 'iron_spear', chance: 0.06 }, // carries a spear (a way to farm into the Lança mastery)
     { itemId: 'elixir_armor', chance: 0.16 },
+    // gear dropável — anel 4: armas grau-1/2 restantes + acessórios.
+    { itemId: 'apprentice_staff', chance: 0.05 }, // arma (maestria Mago)
+    { itemId: 'iron_sword', chance: 0.04 }, // arma grau-2
+    { itemId: 'steel_spear', chance: 0.03 }, // arma grau-2
+    { itemId: 'copper_necklace', chance: 0.04 }, // colar
+    { itemId: 'copper_earring', chance: 0.04 }, // brinco
   ],
 };
 
@@ -152,6 +167,13 @@ export const MAGE_TEMPLATE: EnemyTemplate = {
     { itemId: 'health_potion', chance: 0.25 },
     { itemId: 'elixir_weapon', chance: 0.14 },
     { itemId: 'elixir_armor', chance: 0.14 },
+    // gear dropável — anel 10: armas grau-2/3 ranged/caster (raras no mob, generosas no boss).
+    { itemId: 'adept_staff', chance: 0.05 }, // arma grau-2 (Mago)
+    { itemId: 'hunters_bow', chance: 0.05 }, // arma grau-2 (Arco)
+    { itemId: 'steel_sword', chance: 0.025 }, // arma grau-3 (Espada)
+    { itemId: 'halberd', chance: 0.025 }, // arma grau-3 (Lança)
+    { itemId: 'composite_bow', chance: 0.025 }, // arma grau-3 (Arco)
+    { itemId: 'sorcerer_staff', chance: 0.025 }, // arma grau-3 (Mago)
   ],
 };
 

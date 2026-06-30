@@ -76,6 +76,11 @@ export const BOSS_TEMPLATE: BossTemplate = {
     { itemId: 'wolf_leather', chance: 0.9 },
     { itemId: 'elixir_weapon', chance: 0.6 },
     { itemId: 'elixir_armor', chance: 0.6 },
+    // gear dropável — o Necromante larga armas de caster grau-2/3 + acessórios (generoso: kill raro).
+    { itemId: 'sorcerer_staff', chance: 0.3 }, // arma grau-3 (Mago)
+    { itemId: 'adept_staff', chance: 0.4 }, // arma grau-2 (Mago)
+    { itemId: 'copper_necklace', chance: 0.5 }, // colar
+    { itemId: 'copper_earring', chance: 0.5 }, // brinco
   ],
   rarities: BOSS_RARITIES,
   summonThresholds: [0.75, 0.5, 0.25],
@@ -110,6 +115,11 @@ export const WARLORD_TEMPLATE: BossTemplate = {
     { itemId: 'wolf_leather', chance: 0.9 },
     { itemId: 'elixir_weapon', chance: 0.7 },
     { itemId: 'elixir_armor', chance: 0.7 },
+    // gear dropável — o Senhor da Guerra larga armas de melee grau-3 + escudo/anel (generoso: kill raro).
+    { itemId: 'halberd', chance: 0.3 }, // arma grau-3 (Lança)
+    { itemId: 'steel_sword', chance: 0.3 }, // arma grau-3 (Espada)
+    { itemId: 'wooden_shield', chance: 0.5 }, // escudo
+    { itemId: 'copper_ring', chance: 0.5 }, // anel
   ],
   rarities: BOSS_RARITIES,
   summonThresholds: [0.7, 0.4], // two mercenary waves

@@ -1675,7 +1675,9 @@ describe('loot & inventory', () => {
     // its display name resolved from ITEMS (what the HUD renders), dropped un-enhanced.
     const many = lootAfter(7, 12);
     expect(many.ground.length).toBeGreaterThan(0);
-    const dropIds = ENEMY_TEMPLATE.drops.map((d) => d.itemId);
+    // 12 kills can range from ring 1 into ring 2, so validate against the UNION of every species' drop
+    // table (any valid drop-table item is fine — not just the Lacaio's).
+    const dropIds = ENEMY_SPECIES.flatMap((s) => s.drops.map((d) => d.itemId));
     for (const g of many.ground) {
       expect(g.loot).toBeTruthy();
       expect(dropIds).toContain(g.loot!.itemId);
