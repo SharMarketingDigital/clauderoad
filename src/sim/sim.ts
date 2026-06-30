@@ -57,6 +57,7 @@ import {
 import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
+  type VendorStockEntry,
 } from './content/vendor';
 
 // Fresh, fully-populated equipment record (every slot null). One source so every
@@ -231,6 +232,10 @@ export class Sim implements IWorld {
 
   // The town vendor NPC's entity id (a fixed, non-combat shopkeeper).
   private vendorId = 0;
+  // Shop NPCs: entity id -> the stock that NPC sells. Built at spawn (fixed, no Rng). Lets shopFor/buy
+  // resolve against the NEAREST shop NPC in range — so the single all-in-one vendor can later split into
+  // specialized shops (ferreiro/armadureiro/…) with no change to the buy/sell path. Not hashed (static).
+  private shopStock = new Map<number, readonly VendorStockEntry[]>();
   // The town WAREHOUSE keeper NPC's entity id (K5 — the armazém/banco interaction anchor).
   private warehouseId = 0;
   // Auto-play: the set of player ids whose bot is ON. The bot drives each of those
@@ -477,6 +482,7 @@ export class Sim implements IWorld {
       returnReadyAt: 0,
       targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
     });
+    this.shopStock.set(id, VENDOR_STOCK); // this NPC is a shop selling the (single, all-in-one) vendor stock
     return id;
   }
 
@@ -760,18 +766,22 @@ export class Sim implements IWorld {
     return this.shopFor(this.localId);
   }
 
-  // The vendor storefront for a SPECIFIC player (`inRange` depends on that player's
-  // position). The IWorld shop() uses the local player.
+  // The storefront for a SPECIFIC player: the NEAREST shop NPC in range and ITS stock (`inRange`
+  // depends on that player's position). The IWorld shop() uses the local player. Near a shop -> show
+  // that shop's catalog; otherwise keep the catalog title greyed (with one all-in-one vendor that's the
+  // vendor — the click-to-open-a-specific-shop model supersedes this fallback later).
   shopFor(id: number): ShopView {
     const p = this.ents.get(id);
+    const shop = p ? this.nearestShop(p) : null;
+    const stock = shop ? shop.stock : VENDOR_STOCK;
     return {
-      name: VENDOR_NAME,
-      stock: VENDOR_STOCK.map((s) => ({
+      name: shop ? shop.npc.name : VENDOR_NAME,
+      stock: stock.map((s) => ({
         itemId: s.itemId,
         name: ITEMS[s.itemId]?.name ?? s.itemId,
         price: s.price,
       })),
-      inRange: p ? this.nearVendor(p) : false,
+      inRange: shop != null,
     };
   }
 
@@ -2670,17 +2680,18 @@ export class Sim implements IWorld {
   // Buy one of a vendor stock item. Requires being near the vendor and enough
   // gold; the item is added Normal/+0. Refuses (no charge) if the bag is full.
   private buy(p: Entity, itemId: string): void {
-    if (!this.nearVendor(p)) return;
-    const entry = VENDOR_STOCK.find((s) => s.itemId === itemId);
-    if (!entry || p.gold < entry.price) return; // not sold here, or can't afford
+    const shop = this.nearestShop(p);
+    if (!shop) return; // not near any shop NPC
+    const entry = shop.stock.find((s) => s.itemId === itemId);
+    if (!entry || p.gold < entry.price) return; // not sold by this shop, or can't afford
     if (!addToBag(p.bag, itemId, 'normal', 0, 1)) return; // bag full -> no purchase, no charge
     p.gold -= entry.price;
   }
 
-  // Sell one of a bag stack to the vendor for its (rarity-scaled) value. Requires
-  // being near the vendor and actually holding that exact stack.
+  // Sell one of a bag stack to the nearest shop NPC for its (rarity-scaled) value. Requires being near a
+  // shop NPC and actually holding that exact stack.
   private sell(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
-    if (!this.nearVendor(p)) return;
+    if (!this.nearestShop(p)) return;
     const value = rarityStat(ITEMS[itemId]?.value ?? 0, rarity);
     if (value <= 0) return; // worthless here -> don't let the player give it away for nothing
     if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
@@ -2716,7 +2727,7 @@ export class Sim implements IWorld {
   // being near the vendor and enough gold; refuses (no charge) at full or when broke.
   // Worn gear gives less of its bonus, so this buys the lost stats back.
   private repair(p: Entity, slot: EquipSlot): void {
-    if (!this.nearVendor(p)) return;
+    if (!this.nearestShop(p)) return;
     const eq = p.equipment[slot];
     if (!eq || eq.durability >= MAX_DURABILITY) return; // nothing to repair
     const cost = repairCost(eq.durability);
@@ -2726,13 +2737,32 @@ export class Sim implements IWorld {
     this.recomputeStats(p); // restore the full bonus now that it's repaired
   }
 
-  // Whether the player is close enough to the vendor NPC to trade.
+  // Whether the player is close enough to the vendor NPC to trade. (Still used by the auto-play bot,
+  // which navigates to the vendor spot; the player-facing buy/sell/repair use nearestShop below.)
   private nearVendor(p: Entity): boolean {
     const v = this.ents.get(this.vendorId);
     if (!v) return false;
     const dx = p.x - v.x;
     const dz = p.z - v.z;
     return dx * dx + dz * dz <= VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
+  }
+
+  // The nearest shop NPC within interaction range of `p`, with the stock it sells — or null if none is
+  // close. With one (all-in-one) shop NPC this is exactly the old single-vendor proximity; with several
+  // it routes the trade to the CLOSEST shop. Deterministic: iterates shopStock (insertion order); on a
+  // tie the later-inserted shop wins (<=). No Rng.
+  private nearestShop(p: Entity): { npc: Entity; stock: readonly VendorStockEntry[] } | null {
+    let best: { npc: Entity; stock: readonly VendorStockEntry[] } | null = null;
+    let bestD = VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
+    for (const [npcId, stock] of this.shopStock) {
+      const npc = this.ents.get(npcId);
+      if (!npc) continue;
+      const dx = p.x - npc.x;
+      const dz = p.z - npc.z;
+      const d = dx * dx + dz * dz;
+      if (d <= bestD) { bestD = d; best = { npc, stock }; }
+    }
+    return best;
   }
 
   // Whether the player is close enough to the warehouse NPC to deposit/withdraw.
