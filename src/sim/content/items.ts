@@ -85,6 +85,39 @@ export const ITEMS: Record<string, ItemDef> = {
   // Cajado / Mago (base apprentice_staff, wd 9) — dano mágico escala com Int + weaponDamage
   adept_staff:    { id: 'adept_staff',    name: 'Cajado de Adepto (2º Grau)',     slot: 'weapon', mastery: 'mage',  degree: 2, reqLevel: 4, stats: { weaponDamage: 13 }, value: 110 },
   sorcerer_staff: { id: 'sorcerer_staff', name: 'Cajado de Feiticeiro (3º Grau)', slot: 'weapon', mastery: 'mage',  degree: 3, reqLevel: 8, stats: { weaponDamage: 16 }, value: 190 },
+  // --- Sistema 3 (gear-por-mob): escada de ARMADURA + ACESSÓRIO de 2º/3º grau, espelhando a escada de
+  // armas acima. Stats baked = round(base × DEGREES[grau].statMult) (1.4 / 1.8); o sim nunca lê statMult
+  // em runtime (degrees.ts). reqLevel pela faixa do grau (D2=4, D3=8); equipar é gated por nível.
+  // Material: couro(g1) → malha(g2) → placas(g3); cobre(g1) → prata(g2) → ouro(g3). NOTA: brinco/anel
+  // sobem str 1→2→3 (não round(1×1.4)=1), senão o g2 sairia idêntico ao g1 mas com reqLevel maior = item
+  // dominado. Armadura defensiva e colar seguem round(base×statMult) (ladderiam bem nos números maiores).
+  // helmet (base leather_cap: maxHp 12 / phyDef 1 / magDef 1)
+  studded_cap:     { id: 'studded_cap',     name: 'Elmo Rebitado (2º Grau)',      slot: 'helmet',   degree: 2, reqLevel: 4, stats: { maxHp: 17, phyDef: 1, magDef: 1 }, value: 12 },
+  plate_helm:      { id: 'plate_helm',      name: 'Elmo de Placas (3º Grau)',     slot: 'helmet',   degree: 3, reqLevel: 8, stats: { maxHp: 22, phyDef: 2, magDef: 2 }, value: 21 },
+  // chest (base wolf_leather: maxHp 20 / phyDef 2 / magDef 1)
+  chain_vest:      { id: 'chain_vest',      name: 'Cota de Malha (2º Grau)',      slot: 'chest',    degree: 2, reqLevel: 4, stats: { maxHp: 28, phyDef: 3, magDef: 1 }, value: 16 },
+  plate_armor:     { id: 'plate_armor',     name: 'Armadura de Placas (3º Grau)', slot: 'chest',    degree: 3, reqLevel: 8, stats: { maxHp: 36, phyDef: 4, magDef: 2 }, value: 28 },
+  // hands (base leather_gloves: maxHp 8 / phyDef 1 / magDef 1)
+  chain_gloves:    { id: 'chain_gloves',    name: 'Manoplas de Malha (2º Grau)',  slot: 'hands',    degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, value: 10 },
+  plate_gauntlets: { id: 'plate_gauntlets', name: 'Manoplas de Placas (3º Grau)', slot: 'hands',    degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, value: 18 },
+  // legs (base leather_pants: maxHp 14 / phyDef 2 / magDef 1)
+  chain_leggings:  { id: 'chain_leggings',  name: 'Grevas de Malha (2º Grau)',    slot: 'legs',     degree: 2, reqLevel: 4, stats: { maxHp: 20, phyDef: 3, magDef: 1 }, value: 14 },
+  plate_legs:      { id: 'plate_legs',      name: 'Grevas de Placas (3º Grau)',   slot: 'legs',     degree: 3, reqLevel: 8, stats: { maxHp: 25, phyDef: 4, magDef: 2 }, value: 25 },
+  // feet (base leather_boots: maxHp 8 / phyDef 1 / magDef 1)
+  chain_boots:     { id: 'chain_boots',     name: 'Botas de Malha (2º Grau)',     slot: 'feet',     degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, value: 10 },
+  plate_boots:     { id: 'plate_boots',     name: 'Botas de Placas (3º Grau)',    slot: 'feet',     degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, value: 18 },
+  // shield (base wooden_shield: maxHp 18 / phyDef 2 / magDef 2)
+  iron_shield:     { id: 'iron_shield',     name: 'Escudo de Ferro (2º Grau)',    slot: 'shield',   degree: 2, reqLevel: 4, stats: { maxHp: 25, phyDef: 3, magDef: 3 }, value: 20 },
+  tower_shield:    { id: 'tower_shield',    name: 'Escudo Torre (3º Grau)',       slot: 'shield',   degree: 3, reqLevel: 8, stats: { maxHp: 32, phyDef: 4, magDef: 4 }, value: 35 },
+  // necklace (base copper_necklace: maxMp 12)
+  silver_necklace: { id: 'silver_necklace', name: 'Colar de Prata (2º Grau)',     slot: 'necklace', degree: 2, reqLevel: 4, stats: { maxMp: 17 }, value: 24 },
+  gold_necklace:   { id: 'gold_necklace',   name: 'Colar de Ouro (3º Grau)',      slot: 'necklace', degree: 3, reqLevel: 8, stats: { maxMp: 22 }, value: 42 },
+  // earring (base copper_earring: str 1) — str 1→2→3 (ver nota acima)
+  silver_earring:  { id: 'silver_earring',  name: 'Brinco de Prata (2º Grau)',    slot: 'earring',  degree: 2, reqLevel: 4, stats: { str: 2 }, value: 24 },
+  gold_earring:    { id: 'gold_earring',    name: 'Brinco de Ouro (3º Grau)',     slot: 'earring',  degree: 3, reqLevel: 8, stats: { str: 3 }, value: 42 },
+  // ring (base copper_ring: str 1) — str 1→2→3
+  silver_ring:     { id: 'silver_ring',     name: 'Anel de Prata (2º Grau)',      slot: 'ring',     degree: 2, reqLevel: 4, stats: { str: 2 }, value: 24 },
+  gold_ring:       { id: 'gold_ring',       name: 'Anel de Ouro (3º Grau)',       slot: 'ring',     degree: 3, reqLevel: 8, stats: { str: 3 }, value: 42 },
   // alchemy materials (no rarity; consumed to attempt a "+N" upgrade)
   elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', value: 15 },
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', value: 15 },
