@@ -2466,7 +2466,8 @@ export class Sim implements IWorld {
     }
     const potionPrice = botPrice('health_potion');
     while (potionPrice > 0 && this.botCount(p, 'health_potion') < BOT_POTION_STOCK
-      && p.gold >= potionPrice && this.botCanStock(p, 'health_potion')) {
+      && p.gold >= potionPrice && this.botCanStock(p, 'health_potion')
+      && this.botShopSells(p, 'health_potion')) {
       this.applyAction(p, { t: 'buy', itemId: 'health_potion' });
     }
     // repair worn equipped gear (death cost) — buys back the combat stats it lost
@@ -2479,7 +2480,8 @@ export class Sim implements IWorld {
     for (const mat of ['elixir_weapon', 'elixir_armor'] as const) {
       const price = botPrice(mat);
       while (price > 0 && this.botCount(p, mat) < BOT_MATERIAL_RESERVE + 2
-        && p.gold - price >= BOT_GOLD_RESERVE && this.botCanStock(p, mat)) {
+        && p.gold - price >= BOT_GOLD_RESERVE && this.botCanStock(p, mat)
+        && this.botShopSells(p, mat)) {
         this.applyAction(p, { t: 'buy', itemId: mat });
       }
     }
@@ -2491,6 +2493,16 @@ export class Sim implements IWorld {
   private botCanStock(p: Entity, itemId: string): boolean {
     if (freeBagSlots(p.bag) > 0) return true;
     return p.bag.some((s) => s != null && s.itemId === itemId && s.rarity === 'normal' && s.plus === 0);
+  }
+
+  // True when the shop the bot is standing at actually stocks `itemId`. The split town
+  // (ferreiro/boticário/armadureiro/alquimista) sells only PART of the catalog per NPC, so a
+  // buy for an item this shop doesn't carry silently no-ops — guard the restock-loops with this
+  // so they can never spin forever waiting on a purchase that can't land. The bot anchors at the
+  // boticário (potions = survival); Elixirs live at the alquimista, so it sources those from drops.
+  private botShopSells(p: Entity, itemId: string): boolean {
+    const shop = this.nearestShop(p);
+    return shop != null && shop.stock.some((s) => s.itemId === itemId);
   }
 
   // Refine the equipped gear when we hold materials ABOVE the reserve (never spend
