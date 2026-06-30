@@ -12,10 +12,12 @@ import {
   ENEMY_SPEED,
   MELEE_RANGE,
   CRIT_MULT,
+  TICK_RATE,
   DT,
   RESPAWN_TICKS,
   EVENT_TTL_TICKS,
   GCD_TICKS,
+  AUTO_DPS_BASE_SWING,
   POTION_COOLDOWN_TICKS,
   DEATH_RESPAWN_TICKS,
   xpForLevel,
@@ -1351,9 +1353,12 @@ describe('bow mastery (Arco)', () => {
       }
     }
     const pp = player(sim);
-    const base = meleeDamage(pp.str, pp.weaponDamage);
+    // Cadência por arma (Opção A): o auto escala por swingTime/baseline — o Arco (1.5s) bate mais leve por
+    // golpe (×0.75), mantendo o auto-DPS igual. Espelha o compute() do sim (round no golpe e no crit).
+    const autoMult = MASTERIES.bow.swingTime / AUTO_DPS_BASE_SWING;
+    const base = Math.round(meleeDamage(pp.str, pp.weaponDamage) * autoMult);
     expect(amounts.has(base)).toBe(true); // ordinary shots
-    expect(amounts.has(base * CRIT_MULT)).toBe(true); // and precision crits
+    expect(amounts.has(Math.round(base * CRIT_MULT))).toBe(true); // and precision crits
   });
 
   it('an equipped-bow run is deterministic (same seed => identical world)', () => {
@@ -1379,6 +1384,65 @@ describe('bow mastery (Arco)', () => {
 
 // Champion & Elite tiers: the starting pack is baseline, but reinforcements roll
 // occasional tougher tiers (more HP/damage/reward, drawn bigger).
+// Cadência de ataque por arma (Opção A): cada maestria tem seu swingTime (Arco rápido … Lança pesada); o
+// auto-ataque escala o golpe por swingTime/2.0 pra manter o auto-DPS — só o FEEL (ritmo + número por golpe)
+// muda. Habilidades (cooldown próprio + GCD) e mobs ficam intocados.
+describe('weapon cadence (feel distinto por arma)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  // Injeta a arma na bolsa e equipa (rápido — sem farmar): mesmo padrão dos testes do bot.
+  const equipWeapon = (sim: Sim, itemId: string): void => {
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.bag = [{ itemId, rarity: 'normal', plus: 0, qty: 1 }];
+    sim.restorePlayer(pid, save);
+    const w = sim.inventory().stacks.find((s) => s.itemId === itemId)!;
+    sim.sendCommand({ t: 'equip', itemId, rarity: w.rarity, plus: w.plus });
+    sim.step();
+  };
+  it('os swingTimes dão o spread de arquétipo, e a cadência em ticks que o sim grava', () => {
+    expect(MASTERIES.bow.swingTime).toBe(1.5);
+    expect(MASTERIES.mage.swingTime).toBe(1.8);
+    expect(MASTERIES.sword.swingTime).toBe(2.0); // baseline — a classe inicial não muda de sensação
+    expect(MASTERIES.spear.swingTime).toBe(2.5);
+    // a cadência em ticks (round(swingTime × TICK_RATE)) — o que recomputeStats grava em p.swingTicks
+    expect(Math.round(MASTERIES.bow.swingTime * TICK_RATE)).toBe(30);   // Arco rápido
+    expect(Math.round(MASTERIES.sword.swingTime * TICK_RATE)).toBe(40); // Espada baseline
+    expect(Math.round(MASTERIES.mage.swingTime * TICK_RATE)).toBe(36);
+    expect(Math.round(MASTERIES.spear.swingTime * TICK_RATE)).toBe(50); // Lança pesada
+    // o feel na direção certa: ranged rápido, lança lenta, espada no meio
+    expect(MASTERIES.bow.swingTime).toBeLessThan(MASTERIES.sword.swingTime);
+    expect(MASTERIES.spear.swingTime).toBeGreaterThan(MASTERIES.sword.swingTime);
+  });
+
+  it('o auto da Lança bate mais forte por golpe (×1.25) porém mais devagar — auto-DPS preservado (iso-DPS)', () => {
+    const sim = new Sim(7);
+    equipWeapon(sim, 'iron_spear');
+    const p0 = player(sim);
+    // A Lança não tem baseCrit (0): TODO auto-hit é exatamente o golpe base escalado — dá pra ler do sim.
+    const expectedHit = Math.round(meleeDamage(p0.str, p0.weaponDamage) * (MASTERIES.spear.swingTime / AUTO_DPS_BASE_SWING));
+    let lastSeq = 0;
+    let autoHit = -1;
+    for (let i = 0; i < 4000 && autoHit < 0; i++) {
+      const p = player(sim);
+      const w = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0)
+        .sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2))[0];
+      if (w) { sim.sendCommand({ t: 'set-target', id: w.id }); sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); }
+      sim.step();
+      const pid = player(sim).id;
+      for (const ev of sim.recentEvents()) {
+        if (ev.seq <= lastSeq) continue;
+        lastSeq = ev.seq;
+        if (ev.kind === 'damage' && ev.targetId !== pid) { autoHit = ev.amount; break; }
+      }
+    }
+    expect(autoHit).toBe(expectedHit); // o sim aplicou o autoMult: golpe pesado = meleeDamage × 1.25
+    // iso-DPS: o golpe escalado ÷ swingTime ≈ o DPS baseline (meleeDamage ÷ 2.0)
+    const dpsNow = expectedHit / MASTERIES.spear.swingTime;
+    const dpsBaseline = meleeDamage(p0.str, p0.weaponDamage) / AUTO_DPS_BASE_SWING;
+    expect(Math.abs(dpsNow - dpsBaseline)).toBeLessThan(0.5);
+  });
+});
+
 describe('enemy tiers (champion & elite)', () => {
   // These tier tests assert HP/damage scaled off the grey wolf, so they look at the
   // wolf species specifically (the world now also spawns humanoid species).

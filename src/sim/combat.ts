@@ -46,6 +46,10 @@ export interface OffenseContext {
   damageType: DamageType; // resolved by the sim (physical today; 'magical' for the Mago in G1)
   critChance: number; // 0..1, resolved by the sim (mastery baseCrit + crit buffs). 0 => no roll
   rng: Rng; // the sim's MAIN rng — the crit roll draws from it ONLY when critChance > 0
+  // Auto-attack ONLY (no ability): per-hit scale so a faster weapon hits softer and a slower one harder,
+  // keeping auto-DPS equal across archetypes (Opção A — só o feel muda). Default 1 => abilities and mobs are
+  // byte-identical (they never pass it). The crit ROLL is unaffected — it's gated by critChance, not this.
+  autoMult?: number;
 }
 
 // Generate one outgoing hit. The PHYSICAL path mirrors the old inline code exactly
@@ -66,9 +70,12 @@ export function compute(ctx: OffenseContext): Damage {
           : abilityDamage(ability, attacker.str, attacker.weaponDamage)
         ) * rankDamageMult(rank),
       )
-    : magical
-      ? spellDamage(attacker.baseInt, attacker.weaponDamage)
-      : meleeDamage(attacker.str, attacker.weaponDamage);
+    : Math.round(
+        (magical
+          ? spellDamage(attacker.baseInt, attacker.weaponDamage)
+          : meleeDamage(attacker.str, attacker.weaponDamage)
+        ) * (ctx.autoMult ?? 1), // auto-attack: scale per-hit by swingTime/baseline so auto-DPS stays equal
+      );
   // Crit: draw from the main rng ONLY when there's a chance (so an unbuffed world never
   // touches the stream — the determinism invariant). Identical to the old `rollCrit`.
   let crit = false;

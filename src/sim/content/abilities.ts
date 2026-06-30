@@ -211,6 +211,11 @@ export interface MasteryDef {
   id: MasteryId;
   name: string;
   ranged: boolean; // ranged masteries shoot at distance (no frontal facing gate; pivot to fire)
+  // Seconds between auto-attacks for this weapon archetype — the "feel": Arco rápido 1.5, Lança pesada 2.5,
+  // Espada baseline 2.0, Mago 1.8. The sim folds it into p.swingTicks on equip (recomputeStats); the
+  // auto-attack damage is scaled by swingTime/2.0 (OffenseContext.autoMult) so auto-DPS stays archetype-equal
+  // — only the rhythm + per-hit number change. Abilities (own cooldown + GCD) and mobs are untouched.
+  swingTime: number;
   attackRange?: number; // units the auto-attack/abilities reach (undefined -> the sim's melee range)
   baseCrit?: number; // always-on crit chance (0..1) — the Arco "precision" passive
   // Damage type this mastery's auto-attack and abilities deal (default 'physical').
@@ -226,6 +231,7 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     id: 'sword',
     name: 'Espada',
     ranged: false,
+    swingTime: 2.0, // baseline — a classe inicial mantém a sensação de quem começa
     // attackRange omitted -> the sim's default melee range, so the starter feels unchanged.
     passive: {}, // block/absorption is delivered actively via Postura Defensiva for now
     abilities: SWORD_ABILITIES,
@@ -234,6 +240,7 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     id: 'spear',
     name: 'Lança',
     ranged: false,
+    swingTime: 2.5, // lenta e pesada — golpes grandes, ritmo cadenciado
     attackRange: 3.0, // a reach weapon: a little longer than a sword
     passive: { maxHp: 30 }, // GDD: "Lança — passivo: aumenta vida"
     abilities: SPEAR_ABILITIES,
@@ -242,6 +249,7 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     id: 'bow',
     name: 'Arco',
     ranged: true,
+    swingTime: 1.5, // rápido e leve — rajada veloz de tiros
     attackRange: 14, // shoots from well outside a wolf's aggro radius — kite and pick targets
     baseCrit: 0.15, // GDD: "Arco — passivo: aumenta precisão" (a steady chance to crit)
     passive: {},
@@ -251,6 +259,7 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     id: 'mage',
     name: 'Mago',
     ranged: true, // casts from range, pivoting to fire (like the bow)
+    swingTime: 1.8, // médio-rápido — bonk/bolt do cajado entre os feitiços
     attackRange: 12, // staff reach — a bit shorter than the bow's 14
     baseCrit: 0.05, // crit comes from the WEAPON (a small steady chance); Int does NOT add crit
     damageType: 'magical', // staff hits scale with Int and are reduced by magic-resist

@@ -141,6 +141,9 @@ const BOT_CLUSTER_RADIUS = 6; // other enemies within this of a candidate form a
 const BOT_CLUSTER_PENALTY = 100; // when cautious, bias away from clustered targets (units²)
 export const EVENT_TTL_TICKS = TICK_RATE; // keep presentation events ~1s for the renderer
 export const GCD_TICKS = Math.round(1.5 * TICK_RATE); // 1.5s global cooldown between abilities
+// Auto-attack damage is normalized to this baseline cadence (Espada / 2.0s): a weapon's swingTime changes
+// only the FEEL (rhythm + per-hit number), not its auto-DPS — see combat.OffenseContext.autoMult (Opção A).
+export const AUTO_DPS_BASE_SWING = 2.0;
 export const POTION_COOLDOWN_TICKS = Math.round(POTION_COOLDOWN_SECS * TICK_RATE); // shared "potion sickness"
 export const RETURN_COOLDOWN_TICKS = Math.round(RETURN_COOLDOWN_SECS * TICK_RATE); // GDD v0.5: free Return recall cooldown
 export const LOOT_DESPAWN_TICKS = Math.round(LOOT_DESPAWN_SECS * TICK_RATE); // GDD v0.5: ground-loot lifetime before it vanishes
@@ -1674,6 +1677,7 @@ export class Sim implements IWorld {
     // roll the old rollCrit did; combat.mitigate (inside hitEnemy) is passthrough today.
     this.hitTarget(t, combat.compute({
       attacker: p, rank: 1, damageType: this.damageTypeOf(p), critChance: this.critChance(p), rng: this.rng,
+      autoMult: this.activeMastery(p).swingTime / AUTO_DPS_BASE_SWING, // Opção A: faster weapon hits softer, slower harder
     }), p);
   }
 
@@ -2835,6 +2839,10 @@ export class Sim implements IWorld {
     bonusMaxMp += passive.maxMp ?? 0;
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
+    // Cadência por arma (feel distinto): a maestria ativa define o ritmo do auto-ataque (Arco 1.5s … Lança
+    // 2.5s). Player-only — mobs mantêm o swingTicks do próprio template (definido no spawn). O nextSwingAt em
+    // voo permanece; o PRÓXIMO golpe já usa a nova cadência.
+    if (p.kind === 'player') p.swingTicks = Math.round(this.activeMastery(p).swingTime * TICK_RATE);
     p.maxHp = p.baseMaxHp + bonusMaxHp; // Strength's HP is folded into baseMaxHp on spend (see spendAttr)
     p.maxMp = p.baseMaxMp + p.baseInt * MP_PER_INT + bonusMaxMp; // Intelligence adds max MP
     // K3: defense is a plain additive write (NOT routed through the Int/maxMp line). Combat does
