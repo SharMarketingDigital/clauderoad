@@ -8,6 +8,7 @@ import type { Entity } from '../src/sim/types';
 import { ENEMY_TEMPLATE, ROGUE_TEMPLATE, WARRIOR_TEMPLATE, MAGE_TEMPLATE } from '../src/sim/content/enemies';
 import { BOSS_TEMPLATE, WARLORD_TEMPLATE } from '../src/sim/content/bosses';
 import { ITEMS } from '../src/sim/content/items';
+import { degreeOf, equipLevelReq } from '../src/sim/content/degrees';
 import { EQUIP_SLOTS } from '../src/sim/inventory';
 import type { Rarity } from '../src/world_api';
 
@@ -95,5 +96,42 @@ describe('Gear dropável — determinismo', () => {
       return sim.hash();
     };
     expect(run()).toBe(run());
+  });
+});
+
+describe('Gear por anel — o grau do drop bate com o anel (Sistema 3, Fatia 2)', () => {
+  // ring1/ring2 (internos) → grau 1; ring4 (médio) → grau 2; ring10 (externo) → grau 3.
+  const RING_GRADE: { t: typeof ENEMY_TEMPLATE; grade: number }[] = [
+    { t: ENEMY_TEMPLATE, grade: 1 }, // ring1 (L1)
+    { t: ROGUE_TEMPLATE, grade: 1 }, // ring2 (L2)
+    { t: WARRIOR_TEMPLATE, grade: 2 }, // ring4 (L4)
+    { t: MAGE_TEMPLATE, grade: 3 }, // ring10 (L10)
+  ];
+  const gearDrops = (t: typeof ENEMY_TEMPLATE) => t.drops.filter((d) => ITEMS[d.itemId]?.slot != null);
+
+  it('cada espécie de anel só dropa GEAR do grau do seu anel', () => {
+    for (const { t, grade } of RING_GRADE) {
+      const gear = gearDrops(t);
+      expect(gear.length, `${t.id} sem gear`).toBeGreaterThan(0);
+      for (const d of gear) {
+        expect(degreeOf(ITEMS[d.itemId]!), `${t.id} dropa ${d.itemId} de grau errado`).toBe(grade);
+      }
+    }
+  });
+
+  it('a progressão cobre os 3 graus ao longo dos anéis (g1 interno, g2 médio, g3 externo)', () => {
+    const grades = new Set(RING_GRADE.flatMap(({ t }) => gearDrops(t).map((d) => degreeOf(ITEMS[d.itemId]!))));
+    expect(grades).toEqual(new Set([1, 2, 3]));
+  });
+
+  it('o reqLevel do gear dropado bate com o grau do anel (g1≤1, g2=4, g3=8)', () => {
+    for (const { t, grade } of RING_GRADE) {
+      for (const d of gearDrops(t)) {
+        const req = equipLevelReq(ITEMS[d.itemId]!);
+        if (grade === 1) expect(req, `${d.itemId}`).toBeLessThanOrEqual(1);
+        if (grade === 2) expect(req, `${d.itemId}`).toBe(4);
+        if (grade === 3) expect(req, `${d.itemId}`).toBe(8);
+      }
+    }
   });
 });

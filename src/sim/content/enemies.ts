@@ -72,15 +72,16 @@ export const ENEMY_TEMPLATE: EnemyTemplate = {
   aggroRadius: 8,
   leashRadius: 16,
   drops: [
-    { itemId: 'wolf_leather', chance: 0.4 },
     { itemId: 'health_potion', chance: 0.25 },
-    { itemId: 'old_sword', chance: 0.05 }, // rare-ish placeholder
     // alchemy materials (rare-ish, so upgrading is a real choice)
-    { itemId: 'elixir_weapon', chance: 0.12 },
-    { itemId: 'elixir_armor', chance: 0.12 },
-    // gear dropável (set completo) — anel 1: o kit inicial de couro começa a cair aqui.
-    { itemId: 'leather_cap', chance: 0.08 }, // capacete
-    { itemId: 'leather_gloves', chance: 0.07 }, // luvas
+    { itemId: 'elixir_weapon', chance: 0.1 },
+    { itemId: 'elixir_armor', chance: 0.1 },
+    // Sistema 3 (gear-por-anel) — anel 1 (interno) dropa GRAU 1: kit de couro + armas base de corpo-a-corpo.
+    { itemId: 'wolf_leather', chance: 0.3 }, // peito g1 (signature)
+    { itemId: 'leather_cap', chance: 0.1 }, // capacete g1
+    { itemId: 'leather_gloves', chance: 0.08 }, // luvas g1
+    { itemId: 'old_sword', chance: 0.05 }, // arma g1 (Espada)
+    { itemId: 'iron_spear', chance: 0.05 }, // arma g1 (Lança)
   ],
 };
 
@@ -104,14 +105,17 @@ export const ROGUE_TEMPLATE: EnemyTemplate = {
   onHit: { kind: 'dot', chance: 0.3, durationSecs: 3, magnitude: 2, periodSecs: 1 },
   drops: [
     { itemId: 'health_potion', chance: 0.3 },
-    { itemId: 'old_sword', chance: 0.06 },
-    { itemId: 'elixir_weapon', chance: 0.14 },
-    // gear dropável — anel 2: resto do couro + arco + 1º acessório.
-    { itemId: 'leather_pants', chance: 0.08 }, // calça
-    { itemId: 'leather_boots', chance: 0.07 }, // botas
-    { itemId: 'wooden_shield', chance: 0.06 }, // escudo
-    { itemId: 'short_bow', chance: 0.05 }, // arma (maestria Arco)
-    { itemId: 'copper_ring', chance: 0.04 }, // anel
+    { itemId: 'elixir_weapon', chance: 0.12 },
+    { itemId: 'elixir_armor', chance: 0.1 },
+    // Sistema 3 — anel 2 (interno) dropa GRAU 1: completa o set de couro + armas base ranged + acessórios g1.
+    { itemId: 'leather_pants', chance: 0.1 }, // calça g1
+    { itemId: 'leather_boots', chance: 0.08 }, // botas g1
+    { itemId: 'wooden_shield', chance: 0.07 }, // escudo g1
+    { itemId: 'short_bow', chance: 0.05 }, // arma g1 (Arco)
+    { itemId: 'apprentice_staff', chance: 0.05 }, // arma g1 (Mago)
+    { itemId: 'copper_necklace', chance: 0.05 }, // colar g1
+    { itemId: 'copper_earring', chance: 0.05 }, // brinco g1
+    { itemId: 'copper_ring', chance: 0.05 }, // anel g1
   ],
 };
 
@@ -132,16 +136,23 @@ export const WARRIOR_TEMPLATE: EnemyTemplate = {
   leashRadius: 16,
   speed: 2.0, // lumbering
   drops: [
-    { itemId: 'wolf_leather', chance: 0.45 },
     { itemId: 'health_potion', chance: 0.3 },
-    { itemId: 'iron_spear', chance: 0.06 }, // carries a spear (a way to farm into the Lança mastery)
-    { itemId: 'elixir_armor', chance: 0.16 },
-    // gear dropável — anel 4: armas grau-1/2 restantes + acessórios.
-    { itemId: 'apprentice_staff', chance: 0.05 }, // arma (maestria Mago)
-    { itemId: 'iron_sword', chance: 0.04 }, // arma grau-2
-    { itemId: 'steel_spear', chance: 0.03 }, // arma grau-2
-    { itemId: 'copper_necklace', chance: 0.04 }, // colar
-    { itemId: 'copper_earring', chance: 0.04 }, // brinco
+    { itemId: 'elixir_weapon', chance: 0.14 },
+    { itemId: 'elixir_armor', chance: 0.14 },
+    // Sistema 3 — anel 4 (médio) dropa GRAU 2 (malha + prata): a escada g2 completa (reqLevel 4).
+    { itemId: 'chain_vest', chance: 0.2 }, // peito g2 (signature)
+    { itemId: 'studded_cap', chance: 0.06 }, // capacete g2
+    { itemId: 'chain_gloves', chance: 0.05 }, // luvas g2
+    { itemId: 'chain_leggings', chance: 0.05 }, // calça g2
+    { itemId: 'chain_boots', chance: 0.05 }, // botas g2
+    { itemId: 'iron_shield', chance: 0.05 }, // escudo g2
+    { itemId: 'iron_sword', chance: 0.04 }, // arma g2 (Espada)
+    { itemId: 'steel_spear', chance: 0.04 }, // arma g2 (Lança)
+    { itemId: 'hunters_bow', chance: 0.04 }, // arma g2 (Arco)
+    { itemId: 'adept_staff', chance: 0.04 }, // arma g2 (Mago)
+    { itemId: 'silver_necklace', chance: 0.04 }, // colar g2
+    { itemId: 'silver_earring', chance: 0.04 }, // brinco g2
+    { itemId: 'silver_ring', chance: 0.04 }, // anel g2
   ],
 };
 
@@ -167,13 +178,20 @@ export const MAGE_TEMPLATE: EnemyTemplate = {
     { itemId: 'health_potion', chance: 0.25 },
     { itemId: 'elixir_weapon', chance: 0.14 },
     { itemId: 'elixir_armor', chance: 0.14 },
-    // gear dropável — anel 10: armas grau-2/3 ranged/caster (raras no mob, generosas no boss).
-    { itemId: 'adept_staff', chance: 0.05 }, // arma grau-2 (Mago)
-    { itemId: 'hunters_bow', chance: 0.05 }, // arma grau-2 (Arco)
-    { itemId: 'steel_sword', chance: 0.025 }, // arma grau-3 (Espada)
-    { itemId: 'halberd', chance: 0.025 }, // arma grau-3 (Lança)
-    { itemId: 'composite_bow', chance: 0.025 }, // arma grau-3 (Arco)
-    { itemId: 'sorcerer_staff', chance: 0.025 }, // arma grau-3 (Mago)
+    // Sistema 3 — anel 10 (externo) dropa GRAU 3 (placas + ouro): a escada g3 completa (reqLevel 8).
+    { itemId: 'plate_armor', chance: 0.18 }, // peito g3 (signature)
+    { itemId: 'plate_helm', chance: 0.05 }, // capacete g3
+    { itemId: 'plate_gauntlets', chance: 0.04 }, // luvas g3
+    { itemId: 'plate_legs', chance: 0.04 }, // calça g3
+    { itemId: 'plate_boots', chance: 0.04 }, // botas g3
+    { itemId: 'tower_shield', chance: 0.04 }, // escudo g3
+    { itemId: 'steel_sword', chance: 0.03 }, // arma g3 (Espada)
+    { itemId: 'halberd', chance: 0.03 }, // arma g3 (Lança)
+    { itemId: 'composite_bow', chance: 0.03 }, // arma g3 (Arco)
+    { itemId: 'sorcerer_staff', chance: 0.03 }, // arma g3 (Mago)
+    { itemId: 'gold_necklace', chance: 0.03 }, // colar g3
+    { itemId: 'gold_earring', chance: 0.03 }, // brinco g3
+    { itemId: 'gold_ring', chance: 0.03 }, // anel g3
   ],
 };
 
