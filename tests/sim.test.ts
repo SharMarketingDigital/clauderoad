@@ -3549,28 +3549,17 @@ describe('degrees — gate de nível para equipar', () => {
   });
 });
 
-// --- K2: the vendor stocks degree gear (Slice 3) ---
-describe('degrees — mercador vende equipamento por grau', () => {
-  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
-
-  it('sells a degree weapon into the bag; equipping it is still gated by level', () => {
+// --- K2: degree gear is level-gated to equip (it is DROP-ONLY now — the vendor stopped selling D2/D3) ---
+describe('degrees — equipar gear de grau é gated por nível (drop-only)', () => {
+  it('a degree weapon (drop-only) can be held but equipping is refused below its reqLevel', () => {
     const sim = new Sim(7);
     const id = sim.localPlayerId()!;
-    // seed gold so we skip grinding; level 1 keeps the equip gated
-    sim.restorePlayer(id, { level: 1, gold: 1000, bag: [], equipment: {} });
-    for (let i = 0; i < 800 && !sim.shop().inRange; i++) {
-      const p = player(sim);
-      sim.sendCommand({ t: 'move', dx: VENDOR_SPAWN_X - p.x, dz: VENDOR_SPAWN_Z - p.z });
-      sim.step();
-    }
-    expect(sim.shop().inRange).toBe(true);
-    expect(sim.shop().stock.some((e) => e.itemId === 'steel_sword')).toBe(true); // vendor stocks the D3
-    sim.sendCommand({ t: 'set-target', id: null });
-    sim.sendCommand({ t: 'buy', itemId: 'steel_sword' });
-    sim.sendCommand({ t: 'stop' });
-    sim.step();
-    expect(sim.inventory().stacks.some((s) => s.itemId === 'steel_sword')).toBe(true); // bought into the bag
-    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 }); // refused at lvl 1
+    // steel_sword é D3 (reqLevel 8). A Fatia 2 tirou as armas grau 2/3 do vendor — agora só dropam;
+    // injeto na bolsa direto pra testar o GATE de equipar (o assunto real do teste).
+    sim.restorePlayer(id, { level: 1, gold: 0, bag: [{ itemId: 'steel_sword', rarity: 'normal', plus: 0, qty: 1 }], equipment: {} });
+    expect(VENDOR_STOCK.some((e) => e.itemId === 'steel_sword')).toBe(false); // drop-only: o vendor não vende mais
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'steel_sword')).toBe(true); // está na bolsa
+    sim.sendCommand({ t: 'equip', itemId: 'steel_sword', rarity: 'normal', plus: 0 }); // recusado no lvl 1
     sim.step();
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBeNull();
   });
