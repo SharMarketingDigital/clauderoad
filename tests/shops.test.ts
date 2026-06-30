@@ -9,7 +9,8 @@ import type { Entity } from '../src/sim/types';
 type Internal = { ents: Map<number, Entity> };
 const ents = (s: Sim): Entity[] => [...(s as unknown as Internal).ents.values()];
 const player = (s: Sim): Entity => ents(s).find((e) => e.kind === 'player')!;
-const vendor = (s: Sim): Entity => ents(s).find((e) => e.kind === 'npc' && e.species === 'vendor')!;
+// The boticário sells health_potion, so it's the shop these buy-tests target.
+const vendor = (s: Sim): Entity => ents(s).find((e) => e.kind === 'npc' && e.species === 'apothecary')!;
 
 const walkTo = (sim: Sim, tx: number, tz: number, ticks = 600): void => {
   for (let i = 0; i < ticks; i++) {

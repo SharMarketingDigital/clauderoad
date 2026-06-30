@@ -15,9 +15,12 @@ const BLOOM_THRESHOLD = 0.85;
 // Town NPC look by role (cosmetic; the sim tags vendor/warehouse, teleporter is per-city). Distinct
 // CC0 models already in public/models so the three roles don't all read as the same Mage.
 const NPC_MODEL: Record<string, string> = {
-  vendor: '/models/Rogue.glb',
-  warehouse: '/models/Knight.glb',
-  teleporter: '/models/Mage.glb',
+  blacksmith: '/models/Barbarian.glb', // ferreiro (armas)
+  armorer: '/models/Knight.glb', // armadureiro (armadura + escudo)
+  apothecary: '/models/Mage.glb', // boticário (poções)
+  alchemist: '/models/Rogue.glb', // alquimista/mercador (elixires + acessórios + pet)
+  warehouse: '/models/Rogue_Hooded.glb', // armazém
+  teleporter: '/models/Ranger.glb', // teleportador
 };
 import type { IWorld, EntityKind, EntityView, MasteryId, Rarity, GroundLootView } from '../world_api';
 import { PlayerAvatar } from './player_avatar';
@@ -500,11 +503,12 @@ export class Renderer {
     }
     if (e.kind === 'enemy') return this.enemyAvatars.rootFor(e);
     if (e.kind === 'npc') {
-      // One avatar per NPC id, created on first sight. Distinct CC0 models per role (vendor=Rogue
-      // merchant, warehouse=Knight guard, teleporter=Mage) so the town reads as alive, not cloned.
-      // Teleporter hubs (TP3) also float a name tag so they read as travel points.
+      // One avatar per NPC id, created on first sight. Distinct CC0 models per role (ferreiro=Barbarian,
+      // armadureiro=Knight, boticário=Mage, alquimista=Rogue, armazém=Rogue_Hooded, teleportador=Ranger)
+      // so the town reads as a living Silkroad market. Every town NPC floats its NAME so the player can
+      // tell the shops apart at a glance.
       let av = this.npcAvatars.get(e.id);
-      if (!av) { av = new NpcAvatar(NPC_MODEL[e.species] ?? '/models/Mage.glb', e.species === 'teleporter' ? e.name : undefined); this.npcAvatars.set(e.id, av); }
+      if (!av) { av = new NpcAvatar(NPC_MODEL[e.species] ?? '/models/Mage.glb', e.name); this.npcAvatars.set(e.id, av); }
       return av.ready ? av.root : null;
     }
     return null;

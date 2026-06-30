@@ -1998,6 +1998,24 @@ describe('vendor (shop)', () => {
     sim.step();
   }
 
+  // Walk to the Boticário (split-shop town, Onda 5.x): Health Potions are sold THERE now,
+  // not at the first NPC (which is the Ferreiro / weapon shop). Same bounded walk shape.
+  function goToApothecary(sim: Sim): void {
+    const range2 = VENDOR_INTERACT_RANGE * VENDOR_INTERACT_RANGE;
+    const apo = (s: Sim) => s.entities().find((e) => e.kind === 'npc' && e.species === 'apothecary')!;
+    for (let i = 0; i < 3000; i++) {
+      const p = player(sim);
+      const v = apo(sim);
+      const dx = v.x - p.x;
+      const dz = v.z - p.z;
+      if (dx * dx + dz * dz <= range2) break;
+      sim.sendCommand({ t: 'move', dx, dz });
+      sim.step();
+    }
+    sim.sendCommand({ t: 'stop' });
+    sim.step();
+  }
+
   it('spawns a vendor NPC at its fixed point; the shop is in-range only when close', () => {
     const sim = new Sim(7);
     const v = vendor(sim);
@@ -2033,7 +2051,7 @@ describe('vendor (shop)', () => {
     const entry = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!;
     for (let i = 0; i < 800 && player(sim).gold < entry.price; i++) killNearestEnemy(sim); // earn gold
     expect(player(sim).gold).toBeGreaterThanOrEqual(entry.price);
-    goToVendor(sim);
+    goToApothecary(sim); // potions are sold at the Boticário now (split shops), not the first NPC
     const goldBefore = player(sim).gold;
     const potsBefore = qtyOf(sim, 'health_potion');
 
@@ -2084,7 +2102,7 @@ describe('vendor (shop)', () => {
       const sim = new Sim(seed);
       const entry = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!;
       for (let i = 0; i < 800 && player(sim).gold < entry.price; i++) killNearestEnemy(sim);
-      goToVendor(sim);
+      goToApothecary(sim); // potions sold at the Boticário (split shops)
       sim.sendCommand({ t: 'buy', itemId: 'health_potion' });
       sim.step();
       return sim.hash();
@@ -2768,31 +2786,6 @@ function goToVendor(sim: Sim): void {
   sim.step();
 }
 
-// At the vendor: sell off every equippable item in the bag (frees slots + funds buys).
-function sellAllGear(sim: Sim): void {
-  for (let pass = 0; pass < 60; pass++) {
-    const gear = sim.inventory().stacks.find((s) => s.equipSlot != null);
-    if (!gear) break;
-    sim.sendCommand({ t: 'sell', itemId: gear.itemId, rarity: gear.rarity, plus: gear.plus });
-    sim.step();
-  }
-}
-
-// Buy one of a vendor item (bot OFF; must already be in range and able to afford it).
-function buyOne(sim: Sim, itemId: string): void {
-  sim.sendCommand({ t: 'buy', itemId });
-  sim.step();
-}
-
-// At the vendor: sell an item down to exactly `target` held (to neutralize drops).
-function sellDownTo(sim: Sim, itemId: string, target: number): void {
-  for (let pass = 0; pass < 40 && bagQty(sim, itemId) > target; pass++) {
-    const s = sim.inventory().stacks.find((x) => x.itemId === itemId)!;
-    sim.sendCommand({ t: 'sell', itemId, rarity: s.rarity, plus: s.plus });
-    sim.step();
-  }
-}
-
 // The smarter bot looks after itself: heals, gears up, sells junk, and refines its
 // equipment with spare materials while always keeping a reserve. Each test sets the
 // stage with plain commands (bot OFF), then flips the bot on and pins the decision.
@@ -2843,23 +2836,23 @@ describe('bot (auto-play): self-sufficiency', () => {
 
   it('evolution: with spare materials in a safe lull, it enhances its equipped gear (keeping a reserve)', () => {
     const sim = new Sim(7);
-    // LF-S4: inject the armor + gold directly (loot now drops on the ground). The bot's enhance
-    // decision with a surplus is the subject (acquisition is the upcoming bot rework).
+    // Inject the armor + SPARE materials + potions directly. Split-shop town (Onda 5.x): Elixirs are sold at
+    // the Alquimista, NOT the bot's potion anchor (Boticário), so the bot sources materials from drops — the
+    // test seeds the surplus. The potions keep it from making a vendor run instead of enhancing. The bot's
+    // enhance-with-a-surplus decision is the subject.
     const pid = sim.localPlayerId()!;
     const save0 = sim.serializePlayer(pid)!;
-    save0.bag = [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    save0.bag = [
+      { itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 },
+      { itemId: 'elixir_armor', rarity: 'normal', plus: 0, qty: BOT_MATERIAL_RESERVE + 2 }, // SPARE: above the reserve
+      { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 3 },
+    ];
     save0.gold = 250;
     sim.restorePlayer(pid, save0);
     const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
     expect(lea).toBeDefined();
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
     sim.step();
-    // sell the rest of the gear for room + gold, then stock SPARE Armor Elixirs (above
-    // the reserve) + a few potions so it won't make a vendor run instead of enhancing
-    goToVendor(sim);
-    sellAllGear(sim);
-    for (let i = 0; i < BOT_MATERIAL_RESERVE + 2; i++) buyOne(sim, 'elixir_armor');
-    for (let i = 0; i < 3; i++) buyOne(sim, 'health_potion');
     expect(bagQty(sim, 'elixir_armor')).toBeGreaterThan(BOT_MATERIAL_RESERVE);
 
     // step away to a lull and let the bot run: it attempts a refine (an enhance event)
@@ -2876,20 +2869,20 @@ describe('bot (auto-play): self-sufficiency', () => {
 
   it('evolution: it never enhances down past the material reserve', () => {
     const sim = new Sim(7);
-    // LF-S4: inject the armor + gold directly (loot now drops on the ground).
+    // Inject the armor + EXACTLY the reserve of materials + potions. Split-shop town: Elixirs come from drops,
+    // not the bot's Boticário anchor. Holding only the reserve, the bot is IN the enhance path but must not spend.
     const pid = sim.localPlayerId()!;
     const save0 = sim.serializePlayer(pid)!;
-    save0.bag = [{ itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 }];
+    save0.bag = [
+      { itemId: 'wolf_leather', rarity: 'normal', plus: 0, qty: 1 },
+      { itemId: 'elixir_armor', rarity: 'normal', plus: 0, qty: BOT_MATERIAL_RESERVE }, // EXACTLY the reserve
+      { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 3 },
+    ];
     save0.gold = 160;
     sim.restorePlayer(pid, save0);
     const lea = sim.inventory().stacks.find((s) => s.itemId === 'wolf_leather')!;
     sim.sendCommand({ t: 'equip', itemId: 'wolf_leather', rarity: lea.rarity, plus: lea.plus });
     sim.step();
-    goToVendor(sim);
-    sellAllGear(sim);
-    sellDownTo(sim, 'elixir_armor', 0); // dump any Elixirs that dropped while farming
-    for (let i = 0; i < BOT_MATERIAL_RESERVE; i++) buyOne(sim, 'elixir_armor'); // hold EXACTLY the reserve
-    for (let i = 0; i < 3; i++) buyOne(sim, 'health_potion');
     expect(bagQty(sim, 'elixir_armor')).toBe(BOT_MATERIAL_RESERVE);
 
     // a safe lull holding only the reserve: it's IN the enhance path but must not spend

@@ -56,8 +56,8 @@ import {
 } from './storage';
 import { toSave, applySave, type PlayerSave } from './save';
 import {
-  VENDOR_NAME, VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
-  type VendorStockEntry,
+  VENDOR_NAME, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
+  TOWN_SHOPS, shopEntityId, type VendorStockEntry,
 } from './content/vendor';
 
 // Fresh, fully-populated equipment record (every slot null). One source so every
@@ -295,9 +295,9 @@ export class Sim implements IWorld {
         for (let k = 0; k < MOBS_PER_SPOT; k++) this.spawnEnemy(zi, spot, false);
       }
     }
-    this.vendorId = this.spawnVendor(); // no Rng (fixed spot) -> doesn't perturb loot
-    this.warehouseId = this.spawnWarehouse(); // AFTER the vendor (vendor stays the first 'npc')
-    this.spawnTeleporters(); // GDD v0.5 TP3: one hub NPC per city, AFTER vendor/warehouse (reserved ids)
+    this.vendorId = this.spawnShops(); // 4 specialized shop NPCs at RESERVED ids; returns the boticário (bot anchor)
+    this.warehouseId = this.spawnWarehouse(); // RESERVED id
+    this.spawnTeleporters(); // GDD v0.5 TP3: one hub NPC per city, RESERVED ids
   }
 
   // Wire up a player's per-player intent/command state and add it to the iteration
@@ -460,11 +460,12 @@ export class Sim implements IWorld {
 
   // The town vendor: a fixed, non-combat NPC. kind 'npc' keeps it out of every
   // enemy code path (no wander, no aggro, not targetable/attackable).
-  private spawnVendor(): number {
-    const id = this.nextId++;
-    this.ents.set(id, {
-      id, kind: 'npc', name: VENDOR_NAME,
-      x: VENDOR_SPAWN_X, z: VENDOR_SPAWN_Z, facing: 0,
+  // A fixed, non-combat town NPC (vendor/warehouse/teleporter shape): full HP, no swing, no aggro, not
+  // targetable. Position is its home (it never wanders). Factored so every fixed NPC is byte-identical.
+  private makeFixedNpc(id: number, name: string, x: number, z: number, species: string): Entity {
+    return {
+      id, kind: 'npc', name,
+      x, z, facing: 0,
       hp: 100, maxHp: 100,
       targetId: null,
       str: 0, weaponDamage: 0,
@@ -475,15 +476,28 @@ export class Sim implements IWorld {
       level: 1, xp: 0, attrPoints: 0, baseInt: 0,
       sp: 0, skillRanks: {},
       gold: 0, bag: [], storage: [], equipment: emptyEquipment(), effects: [], tier: 'normal',
-      species: 'vendor', // cosmetic tag so the renderer can give the shopkeeper its own model (not hashed)
+      species, // the gameplay/shop tag AND the renderer's model key (not hashed)
       boss: false, summoned: false, spawnZone: -1,
-      homeX: VENDOR_SPAWN_X, homeZ: VENDOR_SPAWN_Z,
+      homeX: x, homeZ: z,
       returnCity: '', // N/A: player-only state
       returnReadyAt: 0,
-      targetX: VENDOR_SPAWN_X, targetZ: VENDOR_SPAWN_Z, repickAt: 0,
+      targetX: x, targetZ: z, repickAt: 0,
+    };
+  }
+
+  // Spawn the town's SPECIALIZED shop NPCs (Silkroad-style: ferreiro/armadureiro/boticário/alquimista),
+  // each at a RESERVED id with the stock it sells registered in shopStock. No Rng (fixed spots) -> doesn't
+  // perturb the stream. Returns the BOTICÁRIO's id: the auto-play bot's town-run anchors there (potions are
+  // its critical restock; it sells/repairs at any shop and finds alchemy materials from drops).
+  private spawnShops(): number {
+    let anchorId = 0;
+    TOWN_SHOPS.forEach((shop, i) => {
+      const id = shopEntityId(i);
+      this.ents.set(id, this.makeFixedNpc(id, shop.name, shop.x, shop.z, shop.species));
+      this.shopStock.set(id, shop.stock);
+      if (shop.species === 'apothecary') anchorId = id;
     });
-    this.shopStock.set(id, VENDOR_STOCK); // this NPC is a shop selling the (single, all-in-one) vendor stock
-    return id;
+    return anchorId;
   }
 
   // The town WAREHOUSE keeper NPC (armazém) — same fixed, non-combat NPC shape as the vendor,

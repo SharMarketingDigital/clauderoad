@@ -3,7 +3,7 @@
 // and the PERSONAL state (HUD/bag) it hands back to each player. Layer 1 = combat + HUD.
 import { describe, it, expect } from 'vitest';
 import { ServerWorld } from '../server/world';
-import { VENDOR_SPAWN_X, VENDOR_SPAWN_Z, VENDOR_STOCK } from '../src/sim/content/vendor';
+import { VENDOR_STOCK } from '../src/sim/content/vendor';
 import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z } from '../src/sim/storage';
 import type { EquipSlot } from '../src/world_api';
 
@@ -400,11 +400,18 @@ describe('ServerWorld — Layer 4: per-player auto-play (bot)', () => {
 // Farm the nearest mob until the player has at least `target` gold (stops as soon as it's
 // reached, so loot doesn't overfill the bag). Mirrors how a real player earns to shop.
 // Walk a player to the town vendor (server-side) until shop.inRange becomes true.
-function goToVendor(w: ServerWorld, a: number): void {
+// Walk a player to a SPECIFIC shop NPC (by species) — the town now has specialized shops (ferreiro/
+// armadureiro/boticário/alquimista), each selling a slice of the catalog. Loops on DISTANCE to the
+// target NPC (not shop.inRange, which would trip on a nearer shop en route).
+function goToShop(w: ServerWorld, a: number, species: string): void {
+  const npc = w.snapshot().entities.find((e) => e.kind === 'npc' && e.species === species)!;
   w.command(a, { t: 'set-target', id: null });
-  for (let i = 0; i < 1500 && !w.selfState(a).shop.inRange; i++) {
+  for (let i = 0; i < 1500; i++) {
     const me = w.snapshot().entities.find((e) => e.id === a)!;
-    w.setIntent(a, VENDOR_SPAWN_X - me.x, VENDOR_SPAWN_Z - me.z);
+    const dx = npc.x - me.x;
+    const dz = npc.z - me.z;
+    if (dx * dx + dz * dz <= 9) break; // within ~3 units -> inside the interaction range of THIS shop
+    w.setIntent(a, dx, dz);
     w.step();
   }
   w.setIntent(a, 0, 0);
@@ -417,14 +424,12 @@ describe('ServerWorld — Layer 3: vendor buy (online path)', () => {
     const a = w.addPlayer('A');
     const staffPrice = VENDOR_STOCK.find((s) => s.itemId === 'apprentice_staff')!.price;
     const potPrice = VENDOR_STOCK.find((s) => s.itemId === 'health_potion')!.price;
-    // Grant the gold directly (the subject here is the BUY path, not farming). Avoids any dependence
-    // on the farm trajectory, which out-of-combat regen now shifts.
+    // Grant the gold directly (the subject here is the BUY path, not farming).
     w.restorePlayer(a, { gold: staffPrice + potPrice + 50 });
-    goToVendor(w, a);
-    expect(w.selfState(a).shop.inRange).toBe(true);
-    expect(w.selfState(a).shop.stock.some((s) => s.itemId === 'apprentice_staff')).toBe(true); // staff listed
 
-    // a basic stackable item buys: gold drops by the price, the item lands in the bag
+    // a basic stackable (poção) buys at the BOTICÁRIO: gold drops by the price, the item lands in the bag
+    goToShop(w, a, 'apothecary');
+    expect(w.selfState(a).shop.inRange).toBe(true);
     const g0 = w.selfState(a).gold;
     w.command(a, { t: 'buy', itemId: 'health_potion' });
     w.step();
@@ -432,11 +437,14 @@ describe('ServerWorld — Layer 3: vendor buy (online path)', () => {
     expect(s1.gold).toBe(g0 - potPrice);
     expect(s1.inventory.stacks.some((x) => x.itemId === 'health_potion')).toBe(true);
 
-    // the new Mago staff buys end-to-end through the server too
+    // the Mago staff buys at the FERREIRO (specialized shops — each sells its own slice)
+    goToShop(w, a, 'blacksmith');
+    expect(w.selfState(a).shop.stock.some((s) => s.itemId === 'apprentice_staff')).toBe(true); // staff listed there
+    const g1 = w.selfState(a).gold;
     w.command(a, { t: 'buy', itemId: 'apprentice_staff' });
     w.step();
     const s2 = w.selfState(a);
-    expect(s2.gold).toBe(s1.gold - staffPrice);
+    expect(s2.gold).toBe(g1 - staffPrice);
     expect(s2.inventory.stacks.some((x) => x.itemId === 'apprentice_staff')).toBe(true);
   });
 });
