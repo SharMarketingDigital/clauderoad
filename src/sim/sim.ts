@@ -26,7 +26,7 @@ import {
 import { SPAWN_ZONES, WORLD_HALF, RING_WIDTH, zoneAt, CITIES, type SpawnSpot } from './zones';
 import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETURN_COOLDOWN_SECS, TELEPORTER_NAME } from './teleport';
 import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE, PET_GRAB_RADIUS } from './loot';
-import { MASTERIES, DEFAULT_MASTERY, type AbilityDef, type MasteryDef } from './content/abilities';
+import { MASTERIES, DEFAULT_MASTERY, abilityUnlockLevel, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
@@ -705,7 +705,9 @@ export class Sim implements IWorld {
   // queries this per client to build that player's bar; IWorld abilities() uses the local one.
   abilitiesFor(id: number): ReadonlyArray<AbilityView> {
     const p = this.ents.get(id);
-    const kit = p ? this.activeMastery(p).abilities : MASTERIES[DEFAULT_MASTERY].abilities;
+    const kit = p
+      ? this.activeMastery(p).abilities.filter((def) => this.skillUnlocked(p, def)) // só as destravadas (a barra cresce com o nível)
+      : MASTERIES[DEFAULT_MASTERY].abilities;
     return kit.map((def) => {
       const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
       const gcdLeft = p ? Math.max(0, p.gcdUntil - this.tick) : 0;
@@ -2420,6 +2422,7 @@ export class Sim implements IWorld {
       let best: AbilityDef | undefined;
       let bestCost = Infinity;
       for (const def of this.activeMastery(p).abilities) {
+        if (!this.skillUnlocked(p, def)) continue; // anti-loop: nunca ranquear skill bloqueada (o for(;;) giraria)
         const cost = skillUpgradeCost(this.skillRank(p, def));
         if (cost > 0 && cost <= p.sp && cost < bestCost) { best = def; bestCost = cost; }
       }
@@ -2583,6 +2586,7 @@ export class Sim implements IWorld {
     const hurt = p.hp < p.maxHp * BOT_CAUTION_FRAC;
     const targetControlled = target.effects.some((s) => s.kind === 'stun' || s.kind === 'knockdown');
     for (const def of this.activeMastery(p).abilities) {
+      if (!this.skillUnlocked(p, def)) continue; // só considera skills destravadas
       const fx = (k: StatusKind): boolean => def.effects?.some((e) => e.kind === k) ?? false;
       let want = false;
       if (def.kind === 'buff') {
@@ -2698,6 +2702,7 @@ export class Sim implements IWorld {
   private rankUp(p: Entity, slot: number): void {
     const def = this.activeMastery(p).abilities.find((a) => a.slot === slot);
     if (!def) return;
+    if (!this.skillUnlocked(p, def)) return; // Sistema 1: não dá pra ranquear skill bloqueada
     const rank = this.skillRank(p, def);
     if (rank >= SKILL_MAX_RANK) return; // already maxed
     const cost = skillUpgradeCost(rank);
@@ -2861,6 +2866,11 @@ export class Sim implements IWorld {
     const id = w ? ITEMS[w.itemId]?.mastery : undefined;
     return MASTERIES[id ?? DEFAULT_MASTERY] ?? MASTERIES[DEFAULT_MASTERY];
   }
+  // Sistema 1: uma skill só aparece na barra / casta / ranqueia quando o personagem atinge o nível de
+  // destrave (abilityUnlockLevel, regra 2N−1). Derivado do nível salvo — sem campo novo no save. Puro.
+  private skillUnlocked(p: Entity, def: AbilityDef): boolean {
+    return p.level >= abilityUnlockLevel(def);
+  }
   // How far this player's auto-attack and (non-charge) abilities reach — the
   // active mastery's range, or the default melee range when it sets none.
   private attackRange(p: Entity): number {
@@ -2880,6 +2890,7 @@ export class Sim implements IWorld {
   private useAbility(p: Entity, slot: number): void {
     const def = this.activeMastery(p).abilities.find((a) => a.slot === slot);
     if (!def) return;
+    if (!this.skillUnlocked(p, def)) return; // Sistema 1: skill ainda bloqueada (destrava por nível)
     if (this.tick < p.gcdUntil) return; // global cooldown
     if (this.tick < (p.abilityReadyAt[slot] ?? 0)) return; // own cooldown
     if (p.mp < def.mpCost) return; // not enough MP

@@ -35,7 +35,7 @@ import {
 import { Rng } from '../src/sim/rng';
 import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ROGUE_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
-import { ABILITIES, MASTERIES } from '../src/sim/content/abilities';
+import { ABILITIES, MASTERIES, abilityUnlockLevel } from '../src/sim/content/abilities';
 import { addToBag, BAG_SLOTS, STORAGE_SLOTS } from '../src/sim/inventory';
 import { WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_ENTITY_ID } from '../src/sim/storage';
 import { ITEMS } from '../src/sim/content/items';
@@ -80,6 +80,16 @@ function run(seed: number): string {
     sim.step();
   }
   return sim.hash();
+}
+
+// Sistema 1 (skills destravam por nível): sobe o personagem ao nível alvo (default 7 = tudo destravado) SEM
+// farmar — injeta o nível via restorePlayer. NÃO altera str/weaponDamage, então o dano dos casts é idêntico
+// ao do nível 1 (o restore só dá full HP/MP). Usado nos testes que castam/checam skills de slot 2+.
+function unlockSkills(sim: Sim, level = 7): void {
+  const pid = sim.localPlayerId()!;
+  const save = sim.serializePlayer(pid)!;
+  save.level = Math.max(save.level, level);
+  sim.restorePlayer(pid, save);
 }
 
 describe('determinism', () => {
@@ -782,6 +792,7 @@ describe('status effects', () => {
 
   it('stun: a wolf is frozen for exactly the stun duration, then resumes acting', () => {
     const sim = new Sim(7);
+    unlockSkills(sim); // Sistema 1: Atordoamento é slot 3 (destrava no nv5)
     const wid = castWolf(sim, 3); // Atordoamento
     expect(wid).not.toBeNull();
     const castTick = sim.tick; // the stun landed on this tick
@@ -891,13 +902,16 @@ describe('sword kit (multi-slot abilities)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
 
   it('the action bar exposes all three sword slots, in order', () => {
-    const bar = new Sim(7).abilities();
+    const sim = new Sim(7);
+    unlockSkills(sim); // Sistema 1: a barra completa exige o nível de destrave
+    const bar = sim.abilities();
     expect(bar.map((a) => a.slot)).toEqual([1, 2, 3]);
     expect(bar.map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
   });
 
   it('Postura Defensiva: a self-buff (no target) lasting its full duration, then expiring', () => {
     const sim = new Sim(7);
+    unlockSkills(sim); // Sistema 1: Postura Defensiva é slot 2 (destrava no nv3)
     // Flee to an empty corner first so stray wolves can't end the buff early by
     // killing us — the buff timer itself is independent of movement.
     const fleeStep = () => {
@@ -926,6 +940,7 @@ describe('sword kit (multi-slot abilities)', () => {
     // between the two runs is the mitigation buff, so any HP gap IS the buff.
     const run = (brace: boolean) => {
       const sim = new Sim(7);
+      unlockSkills(sim); // Sistema 1: Postura Defensiva é slot 2 (destrava no nv3)
       approachUntilAggro(sim); // walk in until a wolf aggros (deterministic, no target set)
       if (brace) sim.sendCommand({ t: 'use-ability', slot: 2 });
       sim.sendCommand({ t: 'stop' });
@@ -977,6 +992,7 @@ describe('spear mastery (Lança)', () => {
 
   it('equipping a spear swaps the action bar to the Lança kit; unequipping restores the sword', () => {
     const sim = new Sim(7);
+    unlockSkills(sim); // Sistema 1: a barra completa (todos os slots) exige o nível de destrave
     expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
     equipSpear(sim);
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('iron_spear');
@@ -999,6 +1015,7 @@ describe('spear mastery (Lança)', () => {
   it('Investida charges the player to the target, closing a real gap', () => {
     const sim = new Sim(7);
     equipSpear(sim);
+    unlockSkills(sim); // Sistema 1: Investida é slot 3 (destrava no nv5)
     sim.sendCommand({ t: 'set-target', id: null });
     sim.sendCommand({ t: 'stop' });
     sim.step();
@@ -1081,6 +1098,7 @@ describe('spear mastery (Lança)', () => {
     const measureFirstHit = (withFury: boolean): number => {
       const sim = new Sim(7);
       equipSpear(sim);
+      unlockSkills(sim); // Sistema 1: Fúria é slot 4 (destrava no nv7)
       sim.sendCommand({ t: 'set-target', id: null });
       sim.sendCommand({ t: 'stop' });
       sim.step();
@@ -1129,6 +1147,7 @@ describe('spear mastery (Lança)', () => {
     const firstHitCrit = (withFury: boolean): boolean | undefined => {
       const sim = new Sim(7);
       equipSpear(sim);
+      unlockSkills(sim); // Sistema 1: Fúria é slot 4 (destrava no nv7)
       sim.sendCommand({ t: 'set-target', id: null });
       sim.sendCommand({ t: 'stop' });
       sim.step();
@@ -1240,6 +1259,7 @@ describe('bow mastery (Arco)', () => {
   it('equipping a bow swaps the action bar to the Arco kit', () => {
     const sim = new Sim(7);
     equipBow(sim);
+    unlockSkills(sim); // Sistema 1: a barra completa exige o nível de destrave
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('short_bow');
     expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento']);
   });
@@ -1284,6 +1304,7 @@ describe('bow mastery (Arco)', () => {
   it('Tiro Lento applies a slow to its target', () => {
     const sim = new Sim(7);
     equipBow(sim);
+    unlockSkills(sim); // Sistema 1: Tiro Lento é slot 3 (destrava no nv5)
     // castWolf casts slot 3 (Tiro Lento here) and returns a wolf that survived
     // carrying a status — it retries past any precision-crit that would kill it.
     const wid = castWolf(sim, 3);
@@ -3053,6 +3074,58 @@ function castSlot1Damage(sim: Sim): number {
 
 // SP / skill ranks (GDD B4): mobs grant a second currency the player spends to raise
 // an ability's rank, which makes it hit harder and its effects last longer.
+describe('skills destravam por nível (Sistema 1)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const setLevel = (sim: Sim, level: number) => {
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.level = level;
+    sim.restorePlayer(pid, save);
+  };
+
+  it('a regra de destrave é 2N−1 por slot (slot1=nv1, slot2=3, slot3=5, slot4=7)', () => {
+    for (const m of [MASTERIES.sword, MASTERIES.spear, MASTERIES.bow, MASTERIES.mage]) {
+      for (const def of m.abilities) {
+        expect(abilityUnlockLevel(def)).toBe(2 * def.slot - 1);
+      }
+    }
+  });
+
+  it('a action bar começa só com o slot 1 e CRESCE conforme o nível', () => {
+    const sim = new Sim(7); // Espada (default)
+    setLevel(sim, 1);
+    expect(sim.abilities().map((a) => a.slot)).toEqual([1]); // só Golpe Forte
+    setLevel(sim, 3);
+    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2]); // + Postura Defensiva
+    setLevel(sim, 5);
+    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3]); // + Atordoamento (kit completo da Espada)
+  });
+
+  it('uma skill bloqueada NÃO casta (slot 2 no nível 1 é no-op; destrava no nível certo)', () => {
+    const sim = new Sim(7); // Postura Defensiva (slot 2, buff) destrava no nv3
+    setLevel(sim, 1);
+    sim.sendCommand({ t: 'use-ability', slot: 2 }); // buff: não precisa de alvo
+    sim.step();
+    expect(player(sim).statuses).not.toContain('defense'); // bloqueada -> nada acontece
+    setLevel(sim, 3);
+    sim.sendCommand({ t: 'use-ability', slot: 2 });
+    sim.step();
+    expect(player(sim).statuses).toContain('defense'); // destravada -> aplica
+  });
+
+  it('uma skill bloqueada NÃO ranqueia (o SP não é gasto)', () => {
+    const sim = new Sim(7); // Atordoamento (slot 3) destrava no nv5
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.level = 1;
+    save.sp = 100; // SP de sobra
+    sim.restorePlayer(pid, save);
+    sim.sendCommand({ t: 'rank-up', slot: 3 }); // bloqueada no nv1
+    sim.step();
+    expect(player(sim).sp).toBe(100); // SP intacto (rank-up recusado)
+  });
+});
+
 describe('SP and skill ranks', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
   const slot1 = (sim: Sim) => sim.abilities().find((a) => a.slot === 1)!;
@@ -3352,6 +3425,7 @@ describe('mage mastery (Mago) — magical damage (Int)', () => {
 
   it('equipping the staff swaps the action bar to the Mago kit; unequipping restores the sword', () => {
     const sim = new Sim(7);
+    unlockSkills(sim); // Sistema 1: a barra completa exige o nível de destrave
     expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
     equipStaff(sim);
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('apprentice_staff');
@@ -3431,6 +3505,7 @@ describe('class selection (G1)', () => {
 
   it('a fresh player picks a class and gets that class starter weapon + kit', () => {
     const sim = new Sim(7);
+    unlockSkills(sim); // Sistema 1: a barra completa do kit exige o nível de destrave
     expect(weaponOf(sim)).toBeNull(); // fresh: unarmed (default Sword kit)
     sim.sendCommand({ t: 'select-class', classId: 'archer' });
     sim.step();
@@ -3447,6 +3522,7 @@ describe('class selection (G1)', () => {
     };
     for (const [classId, names] of Object.entries(kits)) {
       const sim = new Sim(7);
+      unlockSkills(sim); // Sistema 1: o kit completo (todos os slots) exige o nível de destrave
       sim.sendCommand({ t: 'select-class', classId });
       sim.step();
       expect(sim.abilities().map((a) => a.name)).toEqual(names);

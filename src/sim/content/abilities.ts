@@ -20,6 +20,10 @@ export interface AbilityDef {
   id: string;
   name: string;
   slot: number; // action-bar slot (1-based)
+  // Sistema 1 (skills destravam por nível): nível de personagem mínimo p/ ESTA skill aparecer na barra,
+  // ser usada e ranqueada. Ausente => DERIVADO do slot pela regra 2N−1 (slot1=nv1, slot2=3, slot3=5,
+  // slot4=7) em abilityUnlockLevel(). O campo permite tunar uma skill específica sem mexer na regra.
+  unlockLevel?: number;
   icon: string; // glyph shown on the HUD slot (presentation data, no logic)
   mpCost: number;
   cooldownSecs: number; // the ability's OWN cooldown (on top of the global one)
@@ -267,6 +271,13 @@ export const MASTERIES: Record<MasteryId, MasteryDef> = {
     abilities: MAGE_ABILITIES,
   },
 };
+
+// Sistema 1: o nível de personagem que destrava uma skill. Default pela regra 2N−1 (slot 1 já no nv1; o
+// último slot abre até o nv7, com folga sob o cap 10), com override opcional via AbilityDef.unlockLevel.
+// Puro/determinístico (sem Rng) — o destrave é derivado do nível salvo, então o save não muda.
+export function abilityUnlockLevel(def: AbilityDef): number {
+  return def.unlockLevel ?? 2 * def.slot - 1;
+}
 
 // Unarmed (or a weapon with no mastery) falls back to the Sword tree — the
 // starter style every character begins with.
