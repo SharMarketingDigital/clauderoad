@@ -1,7 +1,7 @@
 // K5 — Painel do Armazém (banco da cidade). Grade DUPLA: bolsa (esquerda) ↔ armazém (direita).
-// Auto-contido, no espírito de character_sheet.ts / map.ts / party_hud.ts: registra a PRÓPRIA
-// tecla (H abre/fecha, Esc fecha) com os guards isTyping()+e.repeat, monta o próprio DOM e fala
-// só com a IWorld — NÃO toca o hud.ts além de ser hospedado por ele. Clicar um item da bolsa o
+// Auto-contido, no espírito de character_sheet.ts / map.ts / party_hud.ts: monta o próprio DOM e fala
+// só com a IWorld — NÃO toca o hud.ts além de ser hospedado por ele. Fatia 3: abre ao CLICAR no NPC do
+// armazém (o Hud despacha o clique via input.clickedNpc); Esc fecha. Clicar um item da bolsa o
 // DEPOSITA; clicar um do armazém o SACA (stack inteiro). Só perto do NPC do armazém
 // (storage().inRange) — senão mostra a dica e desabilita os cliques.
 import type { IWorld, InventoryView, StorageView, ItemStackView } from '../world_api';
@@ -53,12 +53,10 @@ export class StoragePanel {
     this.bagGrid = this.root.querySelector('.bag-side') as HTMLDivElement;
     this.storeGrid = this.root.querySelector('.store-side') as HTMLDivElement;
 
-    // própria hotkey (H), mesmos guards do HUD: não repete a tecla nem dispara digitando no chat.
+    // Fatia 3: abre ao CLICAR no NPC do armazém (o Hud despacha input.clickedNpc); Esc ainda fecha.
     window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
       if (isTyping()) return;
-      if (e.key.toLowerCase() === 'h') this.setOpen(!this.open);
-      else if (e.key === 'Escape') this.setOpen(false);
+      if (e.key === 'Escape') this.setOpen(false);
     });
 
     // Take part in Esc priority so the central Esc menu (and other windows) respect an open armazém.

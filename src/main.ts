@@ -118,7 +118,7 @@ function startOffline(name: string): void {
 
     renderer.render(sim, null, acc / DT); // O1: pass the interpolation fraction (residual acc) to smooth 20Hz motion
     drawCombatFeedback(sim); // after render: project with this frame's updated camera
-    hud.update(sim);
+    hud.update(sim, input); // Fatia 3: input feeds the click-to-interact dispatch (shop / warehouse NPCs)
     map.update(sim);
     teleporterHud.update(sim, input); // TP3: hub menu (on teleporter-NPC click) + Return button state
     petBagHud.update(sim); // PET2: the transport pet's bag panel (O)
@@ -187,7 +187,7 @@ function startOnline(url: string, name: string): void {
     // The server owns time-of-day + rain, so all clients share one sky (interpolated).
     renderer.render(world, world.weather()); // local player = Knight, others = Knights, mobs = avatars
     drawCombatFeedback(world); // after render: damage numbers from the server's events
-    hud.update(world); // personal HUD: hp/mp/xp/level + action bar cooldowns + target frame
+    hud.update(world, input); // personal HUD + Fatia 3 click-to-interact dispatch (shop / warehouse NPCs)
     map.update(world); // world map (M) — player position on the zones
     mpHud.update(world, renderer, statusLabel(world.status), world.playerCount());
     connectionOverlay.update(world); // blocking "Conectando…"/reconnect until the world is ready

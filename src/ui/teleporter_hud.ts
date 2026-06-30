@@ -56,7 +56,7 @@ export class TeleporterHud {
     const v = world.teleporter();
     // Clicking a teleporter NPC opens the menu — but only when actually AT a hub, so a raycast that
     // passes through a distant NPC doesn't pop an empty menu.
-    if (input.takeTeleporterClick() && v.inRange) this.setOpen(true);
+    if (input.clickedNpc()?.species === 'teleporter' && v.inRange) this.setOpen(true);
     if (this.menuOpen && !v.inRange) this.setOpen(false); // walked away from the hub
 
     // --- Return button (always visible) ---

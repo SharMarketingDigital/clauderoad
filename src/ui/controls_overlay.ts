@@ -35,8 +35,6 @@ const GROUPS: KeyGroup[] = [
       { key: 'C', label: 'Personagem' },
       { key: 'K', label: 'Habilidades' },
       { key: 'L', label: 'Alquimia' },
-      { key: 'V', label: 'Loja' },
-      { key: 'H', label: 'Armazém' },
       { key: 'M', label: 'Mapa' },
       { key: 'J', label: 'Mercado global' },
       { key: 'N', label: 'Minha barraca' },
@@ -53,9 +51,11 @@ const GROUPS: KeyGroup[] = [
     ],
   },
   {
-    title: 'Pet & Viagem',
+    title: 'Cidade & Viagem',
     rows: [
       { key: 'F', label: 'Invocar / dispensar o pet' },
+      { key: 'Clicar loja', label: 'Abrir a loja (ferreiro / armadureiro / boticário / alquimista)' },
+      { key: 'Clicar armazém', label: 'Abrir o banco da cidade (depósito / saque)' },
       { key: 'Clicar teleportador', label: 'Viajar entre cidades' },
     ],
   },

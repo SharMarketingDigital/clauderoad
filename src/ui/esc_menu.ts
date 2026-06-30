@@ -34,8 +34,6 @@ export class EscMenu {
       { label: 'Personagem', shortcut: 'C', run: () => this.fireKey('c') },
       { label: 'Habilidades', shortcut: 'K', run: () => this.fireKey('k') },
       { label: 'Alquimia', shortcut: 'L', run: () => this.fireKey('l') },
-      { label: 'Loja', shortcut: 'V', run: () => this.fireKey('v') },
-      { label: 'Armazém', shortcut: 'H', run: () => this.fireKey('h') },
       { label: 'Mapa', shortcut: 'M', run: () => this.fireKey('m') },
       { label: 'Controles', shortcut: '?', run: () => this.fireKey('?') },
       { label: 'Grupo', shortcut: 'P', run: () => this.fireKey('p') },

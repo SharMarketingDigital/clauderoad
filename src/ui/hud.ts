@@ -1,6 +1,7 @@
 // Minimal classic-style HUD. Reads the world via IWorld; draws DOM, no framework.
 import type { IWorld, AbilityView, InventoryView, EntityView, ShopView, EquipView, EquipSlot, MasteryId } from '../world_api';
 import { isTyping } from './typing';
+import type { Input } from '../game/input';
 import { registerOverlay } from './overlays';
 import { SLOT_LABELS } from './inventory';
 import { PROTECT_DROP_CAP } from '../sim/content/enhance';
@@ -23,6 +24,10 @@ import { CharacterSheet } from './character_sheet';
 import { StoragePanel } from './storage';
 import { decoratePanel } from './theme';
 import { injectAbilityIcons, abilityIconId } from './icons';
+
+// Fatia 3 (click-to-interact): the town's shop-NPC species (mirrors src/sim/content/vendor.ts TOWN_SHOPS
+// and the renderer's NPC_MODEL). Left-clicking any of these — while in shop range — opens the shop window.
+const SHOP_SPECIES = new Set(['blacksmith', 'armorer', 'apothecary', 'alchemist']);
 
 export class Hud {
   private root: HTMLDivElement;
@@ -275,7 +280,6 @@ export class Hud {
       if (e.repeat) return;
       if (isTyping()) return; // don't fire HUD hotkeys while typing in the chat
       if (e.key.toLowerCase() === 'i') this.setBag(!this.bagOpen);
-      else if (e.key.toLowerCase() === 'v') this.setShop(!this.shopOpen);
       else if (e.key.toLowerCase() === 'k') this.setSkills(!this.skillsOpen);
       else if (e.key.toLowerCase() === 'l') this.setAlchemy(!this.alchemyOpen);
       else if (e.key.toLowerCase() === 'b') this.toggleBot();
@@ -328,8 +332,19 @@ export class Hud {
     this.announceEl.classList.add('show');
   }
 
-  update(world: IWorld): void {
+  update(world: IWorld, input: Input): void {
     this.world = world; // so bag click handlers can send equip/unequip commands
+
+    // Fatia 3 (click-to-interact, Silkroad-style): clicking a shop NPC opens its shop; the warehouse NPC
+    // opens the bank. Only when actually in range (a raycast through a distant NPC mustn't pop an empty
+    // window), and it closes itself when you walk away — mirroring the teleporter hub.
+    const click = input.clickedNpc();
+    if (click) {
+      if (SHOP_SPECIES.has(click.species) && world.shop().inRange) this.setShop(true);
+      else if (click.species === 'warehouse' && world.storage().inRange) this.storagePanel.setOpen(true);
+    }
+    if (this.shopOpen && !world.shop().inRange) this.setShop(false); // walked away from the shop
+    if (this.storagePanel.isOpen() && !world.storage().inRange) this.storagePanel.setOpen(false);
     // Auto-play state: light up the button + show the "AUTO-PLAY" indicator.
     const bot = world.botActive();
     this.botToggleBtn.textContent = `Bot: ${bot ? 'ON' : 'OFF'} (B)`;

@@ -25,9 +25,10 @@ export class Input {
   private uiSelectedPlayerId: number | null = null;
   private leftClickId: number | null = null;
   private hasLeftClick = false;
-  // TP3: one-shot — the id of a teleporter NPC just left-clicked, consumed by the teleporter HUD to
-  // open its menu (cleared on read). Pure UI state; the sim ignores npc targets.
-  private teleporterClick: number | null = null;
+  // Fatia 3 (click-to-interact): the NPC left-clicked THIS frame (id + species), or null. Set in apply()
+  // from the already-resolved entity and read by the HUDs the SAME frame — the teleporter, shop, and
+  // warehouse each open on their own species when in range. Reset every apply() so one click fires once.
+  private frameClickedNpc: { id: number; species: string } | null = null;
   // PK livre (GDD v0.5 §2): whether ALT is currently held (PK mode armed). Read from each event's
   // authoritative modifier state (e.altKey) — robust to a dropped keyup — and mirrored to the sim
   // edge-triggered in apply(). `pkSent` is the last value pushed, so we only send on a change.
@@ -127,17 +128,17 @@ export class Input {
     return this.altHeld;
   }
 
-  // One-shot: true on the frame the player left-clicked a teleporter NPC (consumed by the teleporter
-  // HUD to open its menu). Cleared on read, so one click opens the menu exactly once.
-  takeTeleporterClick(): boolean {
-    const hit = this.teleporterClick != null;
-    this.teleporterClick = null;
-    return hit;
+  // The NPC left-clicked this frame (id + species), or null. The shop / warehouse / teleporter HUDs read
+  // this to open their window when the click is on their NPC and the player is in range. Valid only for
+  // the frame the click happened (reset at the top of apply()), so it opens a window exactly once.
+  clickedNpc(): { id: number; species: string } | null {
+    return this.frameClickedNpc;
   }
 
   // Push queued actions + the current movement intent into the world. Called
   // once per frame.
   apply(world: IWorld): void {
+    this.frameClickedNpc = null; // Fatia 3: clear last frame's NPC click; re-set below only if one lands this frame
     // PK livre (GDD v0.5 §2): mirror the held ALT modifier to the sim, edge-triggered (only on change,
     // so we don't spam the wire each frame). Forced OFF while botting or typing — you only PK with your
     // hands on the controls. The sim still gates the actual eligibility (PK flag + both outside a city).
@@ -151,7 +152,6 @@ export class Input {
       this.pending.length = 0;
       this.hasLeftClick = false;
       this.uiSelectedPlayerId = null;
-      this.teleporterClick = null;
       this.pendingPetToggle = false;
       return;
     }
@@ -160,7 +160,6 @@ export class Input {
     if (isTyping()) {
       this.pending.length = 0;
       this.hasLeftClick = false;
-      this.teleporterClick = null;
       this.pendingPetToggle = false;
       this.keys.clear();
       world.sendCommand({ t: 'stop' });
@@ -185,8 +184,9 @@ export class Input {
       const me = world.localPlayerId();
       const e = id != null ? world.entities().find((en) => en.id === id) : undefined;
       this.uiSelectedPlayerId = e && e.kind === 'player' && e.id !== me ? e.id : null;
-      // TP3: clicking a teleporter NPC opens its menu (the teleporter HUD consumes this one-shot).
-      if (e && e.kind === 'npc' && e.species === 'teleporter') this.teleporterClick = e.id;
+      // Fatia 3: record a clicked NPC (any species) for the HUDs — the teleporter/shop/warehouse window
+      // each opens when the click is on ITS species and the player is in range. The sim ignores npc targets.
+      if (e && e.kind === 'npc') this.frameClickedNpc = { id: e.id, species: e.species };
       // GDD v0.5 (loot físico): clicking a ground item picks it up — the sim validates range + it's loot (FFA).
       if (e && e.kind === 'loot') world.sendCommand({ t: 'pickup', lootId: e.id });
     }
