@@ -108,7 +108,8 @@ export class Hud {
   // auto-play (bot) toggle + indicator
   private botToggleBtn: HTMLButtonElement;
   private botIndicator: HTMLDivElement;
-  private autoPotToggleBtn: HTMLButtonElement; // Sistema 15 (QoL): auto-potion on/off toggle
+  private autoPotToggleBtn: HTMLButtonElement; // Sistema 15 (QoL): HP auto-pot preset cycle
+  private autoPotMpToggleBtn: HTMLButtonElement; // Sistema 15 (QoL, Fatia 2): MP auto-pot preset cycle
   // latest world + inventory, captured each frame so click handlers (equip /
   // unequip) can send commands against the current state.
   private world: IWorld | null = null;
@@ -138,6 +139,7 @@ export class Hud {
         </div>
         <button class="bot-toggle">Bot: OFF (B)</button>
         <button class="autopot-toggle">Poção auto: OFF</button>
+        <button class="autopot-mp-toggle">Mana auto: OFF</button>
       </div>
       <div class="unit-frame target-frame" hidden>
         <div class="portrait portrait-target">&#9876;</div>
@@ -254,7 +256,9 @@ export class Hud {
     this.botIndicator = this.root.querySelector('.bot-indicator') as HTMLDivElement;
     this.botToggleBtn.addEventListener('click', () => this.toggleBot());
     this.autoPotToggleBtn = this.root.querySelector('.autopot-toggle') as HTMLButtonElement;
-    this.autoPotToggleBtn.addEventListener('click', () => this.toggleAutoPot());
+    this.autoPotToggleBtn.addEventListener('click', () => this.cycleAutoPot('hp'));
+    this.autoPotMpToggleBtn = this.root.querySelector('.autopot-mp-toggle') as HTMLButtonElement;
+    this.autoPotMpToggleBtn.addEventListener('click', () => this.cycleAutoPot('mp'));
 
     // T1.1: the centered modals must paint ABOVE the map/party overlays. `.bag` and `.skills`
     // live inside `.hud` (position:fixed => its own stacking context), so a z-index on them can
@@ -303,12 +307,16 @@ export class Hud {
     if (this.world) this.world.sendCommand({ t: 'set-bot', on: !this.world.botActive() });
   }
 
-  // Sistema 15 (QoL): flip auto-potion on/off. OFF -> arm at 40% HP (matches the bot's BOT_HEAL_FRAC);
-  // ON -> 0 (off). The sim drinks a held Health Potion when HP dips below the threshold (shared cooldown).
-  private toggleAutoPot(): void {
+  // Sistema 15 (QoL): cycle the auto-pot threshold (HP or MP) through presets OFF -> low -> mid -> high ->
+  // OFF. Configurable-by-click — a faithful adaptation of the SRO adjustable threshold (a preset cycle in
+  // place of a raw slider, which fits the corner button). The sim clamps + shares the potion cooldown.
+  private cycleAutoPot(axis: 'hp' | 'mp'): void {
     if (!this.world) return;
-    const on = this.world.autoPotHpPct() > 0;
-    this.world.sendCommand({ t: 'set-auto-pot', hpPct: on ? 0 : 0.4 });
+    const presets = axis === 'hp' ? [0, 0.4, 0.6, 0.8] : [0, 0.5, 0.7];
+    const cur = axis === 'hp' ? this.world.autoPotHpPct() : this.world.autoPotMpPct();
+    const idx = presets.findIndex((v) => Math.abs(v - cur) < 0.001);
+    const next = presets[(idx + 1) % presets.length]; // idx -1 (valor fora dos presets) -> começa em OFF
+    this.world.sendCommand(axis === 'hp' ? { t: 'set-auto-pot', hpPct: next } : { t: 'set-auto-pot', mpPct: next });
   }
 
   private setBag(open: boolean): void {
@@ -362,10 +370,13 @@ export class Hud {
     this.botToggleBtn.textContent = `Bot: ${bot ? 'ON' : 'OFF'} (B)`;
     this.botToggleBtn.classList.toggle('on', bot);
     this.botIndicator.hidden = !bot;
-    // Sistema 15 (QoL): auto-potion toggle state (shows the armed threshold %).
-    const autoPotPct = world.autoPotHpPct();
-    this.autoPotToggleBtn.textContent = autoPotPct > 0 ? `Poção auto: ON (${Math.round(autoPotPct * 100)}%)` : 'Poção auto: OFF';
-    this.autoPotToggleBtn.classList.toggle('on', autoPotPct > 0);
+    // Sistema 15 (QoL): auto-pot toggles show the armed threshold % (or OFF), for HP and MP.
+    const autoPotHp = world.autoPotHpPct();
+    this.autoPotToggleBtn.textContent = autoPotHp > 0 ? `Poção auto: ${Math.round(autoPotHp * 100)}%` : 'Poção auto: OFF';
+    this.autoPotToggleBtn.classList.toggle('on', autoPotHp > 0);
+    const autoPotMp = world.autoPotMpPct();
+    this.autoPotMpToggleBtn.textContent = autoPotMp > 0 ? `Mana auto: ${Math.round(autoPotMp * 100)}%` : 'Mana auto: OFF';
+    this.autoPotMpToggleBtn.classList.toggle('on', autoPotMp > 0);
 
     // 3D viewers, driven BEFORE the early-returns below (a momentary missing player entity during
     // the death/respawn window must not freeze them or stale their dt). The head badge renders

@@ -153,6 +153,10 @@ export interface Entity {
   // the hash (gameplay state) AND persisted (a saved preference, unlike the transient pkActive). Non-players
   // never set it.
   autoPotHpPct?: number;
+  // Sistema 15 (QoL — auto-potion, Fatia 2): the player's auto-pot MP threshold (fraction of maxMp; 0..1).
+  // Same model as autoPotHpPct — when > 0 and the bot is off, the sim drinks a held Mana Potion below it,
+  // sharing the SAME potion cooldown (so HP+MP never stack in one tick — faithful to the SRO potion delay).
+  autoPotMpPct?: number;
   // GDD v0.5 (Pets): present ONLY on a kind 'pet' entity — links the companion to the player it follows.
   // undefined for players/enemies/NPCs/loot, so no existing spawn literal changes and the hash fold stays
   // conditional (mirrors `loot?`). The owner's "has a pet" state is derived from the Sim's petOf index.

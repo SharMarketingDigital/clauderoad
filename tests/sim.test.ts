@@ -3563,6 +3563,39 @@ describe('Sistema 15: auto-potion do jogador', () => {
     sim2.restorePlayer(pid2, save);
     expect(sim2.autoPotHpPct()).toBe(0.4); // sobrevive ao serialize -> restore
   });
+
+  it('Fatia 2: bebe Poção de Mana quando o MP cai abaixo do limiar (cooldown compartilhado com o HP)', () => {
+    const sim = new Sim(7); // Espada
+    const pid = sim.localPlayerId()!;
+    const mana = () => sim.inventory().stacks.find((s) => s.itemId === 'mana_potion')?.qty ?? 0;
+    const save = sim.serializePlayer(pid)!;
+    save.level = 7; // Postura Defensiva (slot 2) destravada pra gastar MP
+    save.baseMaxMp = 100;
+    save.bag = [{ itemId: 'mana_potion', rarity: 'normal', plus: 0, qty: 10 }];
+    sim.restorePlayer(pid, save);
+    sim.sendCommand({ t: 'set-auto-pot', mpPct: 0.99 }); // bebe mana abaixo de 99%
+    expect(mana()).toBe(10);
+    sim.sendCommand({ t: 'use-ability', slot: 2 }); // buff self (sem alvo) — gasta 20 MP, derruba abaixo de 99%
+    for (let i = 0; i < 10; i++) sim.step();
+    expect(mana()).toBeLessThan(10); // o auto-pot de MP repôs (bebeu ao menos uma)
+  });
+
+  it('Fatia 2: o limiar de MP também é clampado e persiste; ligar MP não mexe no HP (e vice-versa)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    sim.sendCommand({ t: 'set-auto-pot', hpPct: 0.4 }); // liga só HP
+    sim.step();
+    sim.sendCommand({ t: 'set-auto-pot', mpPct: 7 }); // liga só MP (clampa pra 1) — HP intacto
+    sim.step();
+    expect(sim.autoPotHpPct()).toBe(0.4); // HP preservado
+    expect(sim.autoPotMpPct()).toBe(1); // MP clampado ao teto
+    const save = sim.serializePlayer(pid)!;
+    expect(save.autoPotMpPct).toBe(1); // persiste
+    const sim2 = new Sim(7);
+    sim2.restorePlayer(sim2.localPlayerId()!, save);
+    expect(sim2.autoPotMpPct()).toBe(1);
+    expect(sim2.autoPotHpPct()).toBe(0.4);
+  });
 });
 
 // Drive the player into wolves until it dies once, then wait out the respawn so the

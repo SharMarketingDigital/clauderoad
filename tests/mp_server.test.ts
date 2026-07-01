@@ -106,6 +106,11 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     w.command(a, { t: 'set-auto-pot', hpPct: 9 });
     w.step();
     expect(w.selfState(a).autoPotHpPct).toBe(1);
+    // Fatia 2: o MP viaja no mesmo comando/seam e é espelhado independente do HP
+    w.command(a, { t: 'set-auto-pot', mpPct: 0.5 });
+    w.step();
+    expect(w.selfState(a).autoPotMpPct).toBe(0.5);
+    expect(w.selfState(a).autoPotHpPct).toBe(1); // HP intacto (o comando de MP não o tocou)
   });
 
   it('accepts set-target (combat) and keeps it PER PLAYER', () => {

@@ -35,6 +35,7 @@ export interface PlayerSave {
   petBag: (ItemStack | null)[]; // GDD v0.5 (Pets PET2): the transport pet's portable bag (same sparse model)
   returnCity: string; // GDD v0.5 (teleporte): the registered Return/respawn city id (a known CITIES id)
   autoPotHpPct?: number; // Sistema 15 (QoL): saved auto-pot HP threshold (0..1). Absent/old saves => off.
+  autoPotMpPct?: number; // Sistema 15 (QoL, Fatia 2): saved auto-pot MP threshold (0..1). Absent => off.
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -66,6 +67,7 @@ export function toSave(e: Entity): PlayerSave {
     petBag: trimTrailingNulls((e.petBag ?? []).map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
     returnCity: e.returnCity, // GDD v0.5: persist the registered Return/respawn city
     autoPotHpPct: e.autoPotHpPct, // Sistema 15 (QoL): persist the auto-pot preference (undefined = off, omitted by JSON)
+    autoPotMpPct: e.autoPotMpPct, // Sistema 15 (QoL, Fatia 2): persist the MP auto-pot preference
   };
 }
 
@@ -98,6 +100,9 @@ export function applySave(e: Entity, raw: unknown): void {
   // the fresh-spawn default (undefined = off). Back-compat: old saves with no field simply stay off.
   if (isNum(raw.autoPotHpPct) && raw.autoPotHpPct >= 0 && raw.autoPotHpPct <= 1) {
     e.autoPotHpPct = raw.autoPotHpPct;
+  }
+  if (isNum(raw.autoPotMpPct) && raw.autoPotMpPct >= 0 && raw.autoPotMpPct <= 1) {
+    e.autoPotMpPct = raw.autoPotMpPct;
   }
 }
 
