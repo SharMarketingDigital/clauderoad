@@ -34,6 +34,7 @@ export interface PlayerSave {
   storage: (ItemStack | null)[]; // K5: armazém/banco da cidade (mesmo modelo esparso da bag)
   petBag: (ItemStack | null)[]; // GDD v0.5 (Pets PET2): the transport pet's portable bag (same sparse model)
   returnCity: string; // GDD v0.5 (teleporte): the registered Return/respawn city id (a known CITIES id)
+  autoPotHpPct?: number; // Sistema 15 (QoL): saved auto-pot HP threshold (0..1). Absent/old saves => off.
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -64,6 +65,7 @@ export function toSave(e: Entity): PlayerSave {
     // GDD v0.5 (Pets PET2): persist the transport pet's bag (may be undefined for a player who never used one)
     petBag: trimTrailingNulls((e.petBag ?? []).map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
     returnCity: e.returnCity, // GDD v0.5: persist the registered Return/respawn city
+    autoPotHpPct: e.autoPotHpPct, // Sistema 15 (QoL): persist the auto-pot preference (undefined = off, omitted by JSON)
   };
 }
 
@@ -91,6 +93,11 @@ export function applySave(e: Entity, raw: unknown): void {
   // default ('town'). Back-compat: old saves with no returnCity simply keep that default.
   if (typeof raw.returnCity === 'string' && CITIES.some((c) => c.id === raw.returnCity)) {
     e.returnCity = raw.returnCity;
+  }
+  // Sistema 15 (QoL): restore the auto-pot preference only if it's a valid fraction [0,1]; otherwise leave
+  // the fresh-spawn default (undefined = off). Back-compat: old saves with no field simply stay off.
+  if (isNum(raw.autoPotHpPct) && raw.autoPotHpPct >= 0 && raw.autoPotHpPct <= 1) {
+    e.autoPotHpPct = raw.autoPotHpPct;
   }
 }
 

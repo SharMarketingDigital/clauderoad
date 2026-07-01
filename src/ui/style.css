@@ -159,6 +159,13 @@ html, body {
   font-family: inherit;
 }
 .bot-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
+/* Sistema 15 (QoL): auto-potion toggle — same look as the bot toggle, stacked just below it. */
+.autopot-toggle {
+  position: absolute; top: 150px; left: 16px; padding: 4px 10px; font-size: 12px; pointer-events: auto;
+  color: var(--ink); background: #1c2533; border: 1px solid var(--gold); border-radius: 6px; cursor: pointer;
+  font-family: inherit;
+}
+.autopot-toggle.on { background: #2a3a1c; border-color: #8fd14a; color: #d6f5b0; }
 /* Prominent "the bot is driving" banner, centered at the top. */
 .bot-indicator {
   position: absolute;
@@ -846,7 +853,7 @@ html, body {
 [data-ui="stone"] .hud-tl { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
 [data-ui="stone"] .hud-tl .unit-frame { position: relative; top: auto; left: auto; transform: none; margin: 0; min-width: 248px; }
 [data-ui="stone"] .hud-tl-counters { display: flex; gap: 8px; }
-[data-ui="stone"] .hud-tl .gold, [data-ui="stone"] .hud-tl .sp-line, [data-ui="stone"] .hud-tl .bot-toggle { position: static; top: auto; left: auto; transform: none; margin: 0; }
+[data-ui="stone"] .hud-tl .gold, [data-ui="stone"] .hud-tl .sp-line, [data-ui="stone"] .hud-tl .bot-toggle, [data-ui="stone"] .hud-tl .autopot-toggle { position: static; top: auto; left: auto; transform: none; margin: 0; }
 [data-ui="stone"] .target-frame { top: 16px; left: 300px; }
 /* The character/target frames don't need the doubled panel padding top/bottom — keep them short —
    but the SIDES keep the full panel padding (24px) so the bars get horizontal breathing room and
@@ -896,13 +903,13 @@ html, body {
   border: 1px solid transparent; backdrop-filter: none;
   background: rgba(8, 8, 12, 0.6) padding-box, var(--edge-grad) border-box;
 }
-[data-ui="stone"] .bot-toggle {
+[data-ui="stone"] .bot-toggle, [data-ui="stone"] .autopot-toggle {
   border: 1.5px solid transparent; border-radius: 6px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 80%, #000), var(--bg-3)) padding-box, var(--edge-grad) border-box;
   color: #f3e8cc;
 }
-[data-ui="stone"] .bot-toggle.on { background: linear-gradient(180deg, #2e5a1e, #1c3712) padding-box, #4f7a2e border-box; color: #bfe89a; }
-[data-ui="stone"] .bot-toggle:focus-visible { outline: 2px solid var(--g2); outline-offset: 3px; }
+[data-ui="stone"] .bot-toggle.on, [data-ui="stone"] .autopot-toggle.on { background: linear-gradient(180deg, #2e5a1e, #1c3712) padding-box, #4f7a2e border-box; color: #bfe89a; }
+[data-ui="stone"] .bot-toggle:focus-visible, [data-ui="stone"] .autopot-toggle:focus-visible { outline: 2px solid var(--g2); outline-offset: 3px; }
 
 /* Boss/event announce stays a centered ALERT (no panel) — just a faint arcane backdrop. */
 [data-ui="stone"] .announce { padding: 6px 20px; border-radius: 10px; background: radial-gradient(120% 160% at 50% 0%, rgba(40, 18, 55, 0.5), transparent 70%); }

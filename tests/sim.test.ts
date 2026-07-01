@@ -3491,6 +3491,80 @@ describe('SP and skill ranks', () => {
   });
 });
 
+// Sistema 15 (QoL — auto-potion): um jogador HUMANO com o toggle armado bebe uma Poção de Vida da bolsa
+// quando o HP cai abaixo do limiar, compartilhando o cooldown de poção do bot. Generaliza a lógica de
+// SURVIVE do bot pro humano (bot off). Puro/determinístico; a preferência persiste no save.
+describe('Sistema 15: auto-potion do jogador', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const potions = (sim: Sim) => sim.inventory().stacks.find((s) => s.itemId === 'health_potion')?.qty ?? 0;
+  // Arma o jogador com poções + HP alto (aguenta a surra, isola o efeito), opcionalmente liga o auto-pot a
+  // 99% (bebe após qualquer arranhão), e o faz tomar mordidas SEM revidar.
+  const runTakingBites = (armAutoPot: boolean): Sim => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.baseMaxHp = 1000; // aguenta sem morrer (o off-run não pode morrer, senão a comparação some)
+    save.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 20 }];
+    sim.restorePlayer(pid, save);
+    if (armAutoPot) sim.sendCommand({ t: 'set-auto-pot', hpPct: 0.99 }); // bebe abaixo de 99% (após 1 mordida)
+    approachUntilAggro(sim); // anda até um lobo aggro-ar (determinístico p/ seed 7)
+    sim.sendCommand({ t: 'set-target', id: null }); // não revida — só toma mordida
+    sim.sendCommand({ t: 'stop' });
+    for (let i = 0; i < 200; i++) sim.step();
+    return sim;
+  };
+
+  it('bebe sozinho quando o HP cai abaixo do limiar (consome poção; sustenta a vida)', () => {
+    const sim = runTakingBites(true);
+    expect(potions(sim)).toBeLessThan(20); // o auto-pot bebeu ao menos uma
+    expect(player(sim).hp).toBeGreaterThan(0); // e manteve o jogador vivo
+  });
+
+  it('desligado (default) NÃO bebe — as mesmas mordidas, zero poção gasta', () => {
+    const sim = runTakingBites(false);
+    expect(potions(sim)).toBe(20); // sem o toggle, nada é bebido automaticamente
+  });
+
+  it('o limiar é clampado a [0,1]; o auto-pot é determinístico (mesmo seed => hash idêntico)', () => {
+    const arm = (sim: Sim, pct: number) => { sim.sendCommand({ t: 'set-auto-pot', hpPct: pct }); sim.step(); };
+    const clampSim = new Sim(7);
+    arm(clampSim, 5); // acima de 1
+    expect(clampSim.autoPotHpPct()).toBe(1); // clampado ao teto
+    const neg = new Sim(7);
+    arm(neg, -3);
+    expect(neg.autoPotHpPct()).toBe(0); // clampado ao piso (= desligado)
+
+    const run = (): string => {
+      const sim = new Sim(7);
+      const pid = sim.localPlayerId()!;
+      const save = sim.serializePlayer(pid)!;
+      save.baseMaxHp = 1000;
+      save.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 20 }];
+      sim.restorePlayer(pid, save);
+      sim.sendCommand({ t: 'set-auto-pot', hpPct: 0.99 });
+      approachUntilAggro(sim);
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      for (let i = 0; i < 150; i++) sim.step();
+      return sim.hash();
+    };
+    expect(run()).toBe(run());
+  });
+
+  it('a preferência de auto-pot persiste no save (roundtrip)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    sim.sendCommand({ t: 'set-auto-pot', hpPct: 0.4 });
+    sim.step();
+    const save = sim.serializePlayer(pid)!;
+    expect(save.autoPotHpPct).toBe(0.4);
+    const sim2 = new Sim(7);
+    const pid2 = sim2.localPlayerId()!;
+    sim2.restorePlayer(pid2, save);
+    expect(sim2.autoPotHpPct()).toBe(0.4); // sobrevive ao serialize -> restore
+  });
+});
+
 // Drive the player into wolves until it dies once, then wait out the respawn so the
 // world is back to a live player WITH the death penalty applied.
 function dieOnceAndRespawn(sim: Sim): void {

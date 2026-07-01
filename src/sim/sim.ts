@@ -930,6 +930,15 @@ export class Sim implements IWorld {
     return this.botPlayers.has(id);
   }
 
+  // Sistema 15 (QoL): the local player's auto-pot HP threshold (IWorld autoPotHpPct() uses the local player).
+  autoPotHpPct(): number {
+    return this.autoPotHpPctFor(this.localId);
+  }
+  // A SPECIFIC player's auto-pot HP threshold (the server reads this per client for that player's HUD).
+  autoPotHpPctFor(id: number): number {
+    return this.ents.get(id)?.autoPotHpPct ?? 0;
+  }
+
   // GDD v0.5 (Pets): whether THIS player has a pet summoned (IWorld petActive() uses the local player).
   petActive(): boolean {
     return this.petActiveFor(this.localId);
@@ -1602,6 +1611,7 @@ export class Sim implements IWorld {
       // A bot-driven player: botStep OWNS its movement (it overwrites moveIntents below
       // every tick), so a racing/tampered client move-intent is harmlessly stomped.
       if (this.botPlayers.has(id)) this.botStep(p);
+      else this.tryPlayerAutoPot(p); // Sistema 15 (QoL): human auto-pot (the bot has its own SURVIVE logic)
       this.stepPlayer(p);
     }
     this.stepPets(); // GDD v0.5 (Pets): each summoned pet trails its owner, after the owners moved
@@ -2040,6 +2050,10 @@ export class Sim implements IWorld {
       case 'set-pk': p.pkActive = cmd.on; return;
       // Pets (GDD v0.5): summon/dismiss the owned pet. Pre-gate so a dismiss works even while downed.
       case 'set-pet': if (cmd.on) this.summonPet(p); else this.dismissPet(p); return;
+      // Sistema 15 (QoL): set the auto-pot HP threshold (fraction of maxHp; 0 = off). Pre-gate — it's pure
+      // config, so it applies even while downed/stunned. Clamped to [0,1] so a tampered client can't inject
+      // a threshold > 1 (would auto-drink forever) or negative.
+      case 'set-auto-pot': p.autoPotHpPct = Math.max(0, Math.min(1, cmd.hpPct)); return;
     }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
     switch (cmd.t) {
@@ -2326,7 +2340,7 @@ export class Sim implements IWorld {
 
     // === PRIORITY 1 — SURVIVE =============================================
     if (hpFrac < BOT_HEAL_FRAC) {
-      const drank = this.botDrinkPotion(p);
+      const drank = this.drinkHealthPotion(p);
       if (!drank) {
         // can't heal now (none held, or potion still on cooldown): break off from danger
         const threat = this.nearestEnemyWithin(p, BOT_FLEE_RADIUS);
@@ -2496,13 +2510,22 @@ export class Sim implements IWorld {
     }
   }
 
-  // Drink a Health Potion if we hold one and it's off the shared cooldown. Returns
-  // whether a drink actually happened (so the caller can fall back to fleeing).
-  private botDrinkPotion(p: Entity): boolean {
+  // Drink a Health Potion if we hold one and it's off the shared cooldown. Returns whether a drink
+  // actually happened (so the caller can fall back to fleeing). Reused by BOTH the bot's SURVIVE step and
+  // the player auto-pot toggle (Sistema 15) — the caller decides the %HP threshold, this just drinks.
+  private drinkHealthPotion(p: Entity): boolean {
     const potion = this.bagStack(p, 'health_potion');
     if (!potion || this.tick < p.potionReadyAt) return false; // none held, or potion sickness
     this.applyAction(p, { t: 'use-item', itemId: potion.itemId, rarity: potion.rarity, plus: potion.plus });
     return true;
+  }
+
+  // Sistema 15 (QoL): the player auto-pot — a HUMAN (bot off) with the toggle on drinks a held Health Potion
+  // the moment hp/maxHp dips below their configured threshold, sharing the same potion cooldown as the bot.
+  // Deterministic (threshold compare + the existing use-item path); does nothing when off (undefined/0).
+  private tryPlayerAutoPot(p: Entity): void {
+    const thr = p.autoPotHpPct ?? 0;
+    if (thr > 0 && p.maxHp > 0 && p.hp / p.maxHp < thr) this.drinkHealthPotion(p);
   }
 
   // Worth a trip to the vendor? When the bag is nearly full of sellable surplus, or
@@ -3599,6 +3622,7 @@ export class Sim implements IWorld {
       mix(id); mix(e.x); mix(e.z); mix(e.facing); mix(e.hp);
       mix(e.targetId == null ? 0 : e.targetId);
       mix(e.pkActive ? 1 : 0); // PK livre (GDD v0.5): PvP-eligibility flag — gameplay state, so two hosts must agree
+      mix(Math.round((e.autoPotHpPct ?? 0) * 100)); // Sistema 15 (QoL): auto-pot threshold — drives auto-drinking, so two hosts must agree
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling

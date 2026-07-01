@@ -201,6 +201,11 @@ export class ClientWorld implements IWorld {
     return this.self ? this.self.botActive : false;
   }
 
+  // Sistema 15 (QoL): the local player's auto-pot HP threshold — mirrored from `self`.
+  autoPotHpPct(): number {
+    return this.self ? this.self.autoPotHpPct : 0;
+  }
+
   petActive(): boolean {
     return this.self ? this.self.petActive : false;
   }

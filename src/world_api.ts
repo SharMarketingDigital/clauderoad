@@ -346,6 +346,9 @@ export type Command =
   | { t: 'pet-deposit'; itemId: string; rarity: Rarity; plus: number } // bag -> pet bag
   | { t: 'pet-withdraw'; itemId: string; rarity: Rarity; plus: number } // pet bag -> bag
   | { t: 'set-bot'; on: boolean } // toggle auto-play (the sim drives the player; manual input ignored)
+  // Sistema 15 (QoL): auto-potion — set the HP auto-pot threshold as a fraction of maxHp (0 = off). While
+  // > 0 and the bot is off, the sim drinks a held Health Potion when hp/maxHp falls below it (shared cooldown).
+  | { t: 'set-auto-pot'; hpPct: number }
   // --- party / co-op (GDD B6) ---
   | { t: 'party-create'; exp: PartyExpMode; loot: PartyLootMode } // form a party; you become leader
   | { t: 'party-invite'; name: string } // leader: invite an online player by name
@@ -479,6 +482,9 @@ export interface IWorld {
   // Whether auto-play (bot) mode is on (the sim is driving the player). UI reads
   // this for the indicator + to know manual input is being ignored.
   botActive(): boolean;
+  // Sistema 15 (QoL): the local player's auto-pot HP threshold (fraction of maxHp; 0 = off). The HUD
+  // reads it to show the toggle state and to send the opposite on a click.
+  autoPotHpPct(): number;
   // GDD v0.5 (Pets): whether the local player currently has a pet summoned. UI reads it for the
   // summon/dismiss toggle state; input reads it to send the opposite on the toggle key.
   petActive(): boolean;

@@ -95,6 +95,19 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     expect(w.selfState(a).inventory.stacks.some((s) => s.itemId === 'skill_reset')).toBe(false); // consumido
   });
 
+  it('Sistema 15: o auto-pot atravessa o seam (whitelist) e é espelhado no self state (paridade online)', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    expect(w.selfState(a).autoPotHpPct).toBe(0); // default desligado
+    w.command(a, { t: 'set-auto-pot', hpPct: 0.4 });
+    w.step();
+    expect(w.selfState(a).autoPotHpPct).toBe(0.4); // ligado via comando -> refletido no snapshot pessoal
+    // valor fora de [0,1] é clampado pelo sim (defesa contra cliente adulterado)
+    w.command(a, { t: 'set-auto-pot', hpPct: 9 });
+    w.step();
+    expect(w.selfState(a).autoPotHpPct).toBe(1);
+  });
+
   it('accepts set-target (combat) and keeps it PER PLAYER', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');

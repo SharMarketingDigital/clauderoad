@@ -128,6 +128,7 @@ export interface SelfSnap {
   phyDef: number; // K6: defesa física efetiva (base+gear) do jogador local
   magDef: number; // K6: defesa mágica efetiva (base+gear) do jogador local
   botActive: boolean; // whether this player's auto-play is on
+  autoPotHpPct: number; // Sistema 15 (QoL): this player's auto-pot HP threshold (0..1; 0 = off)
   petActive: boolean; // GDD v0.5 (Pets): whether this player currently has a pet summoned
   abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
   passives: AbilityView[]; // Sistema 2: the player's learnable passive skills (always-on; rank state for the skills panel)

@@ -202,6 +202,13 @@ export class ServerWorld {
       case 'set-pet':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-pet', on: cmd.on });
         return;
+      // Sistema 15 (QoL): the auto-pot HP threshold. Validate a FINITE number and forward; the sim clamps it
+      // to [0,1] (so a tampered value can't force perpetual drinking or a negative threshold).
+      case 'set-auto-pot':
+        if (typeof cmd.hpPct === 'number' && Number.isFinite(cmd.hpPct)) {
+          this.sim.sendCommandFor(id, { t: 'set-auto-pot', hpPct: cmd.hpPct });
+        }
+        return;
       // Stalls (GDD v0.5 §5): rebuild a CLEAN listings array from validated fields; the sim re-checks
       // ownership + a positive-int price. stall-buy validates the seller id + the item ref.
       case 'stall-open': {
@@ -468,7 +475,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, petActive: false, abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
+        botActive: false, petActive: false, autoPotHpPct: 0, abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
@@ -480,6 +487,7 @@ export class ServerWorld {
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
+      autoPotHpPct: this.sim.autoPotHpPctFor(id), // Sistema 15 (QoL): auto-pot threshold for this player's HUD
       petActive: this.sim.petActiveFor(id), // GDD v0.5 (Pets): summon/dismiss state for the HUD toggle
       abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
       matching, partyRequests, myRequestPartyId, duel, duelInvite,
