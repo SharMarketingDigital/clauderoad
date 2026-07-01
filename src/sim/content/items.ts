@@ -29,6 +29,11 @@ export interface ConsumableEffect {
   // rank 1 e zera os ranks de skill. Maestria = arma equipada, então NÃO há reset de maestria (corte
   // consciente). Não cura; ignora o cooldown de poção; recusa (sem consumir) se nada foi investido.
   resetSkills?: boolean;
+  // Sistema 15 (QoL): recall como item consumível (fiel aos ITEM_ETC_SCROLL_RETURN_* / REVERSE do Silkroad).
+  // 'registered' = teleporta pra CIDADE de retorno registrada (como o Return grátis, mas o item é o custo,
+  // sem o cooldown de 120s). 'lastSpot' (Fatia 2) = volta ao ponto de campo anterior. Bloqueado em combate
+  // (não é botão de fuga); instantâneo (sem warm-up — corte consciente).
+  recall?: 'registered' | 'lastSpot';
 }
 
 export interface ItemDef {
@@ -133,6 +138,9 @@ export const ITEMS: Record<string, ItemDef> = {
   // devolve todo o SP investido e zera os ranks, pra re-alocar a build. Análogo fiel ao item de reset do
   // Silkroad (escopo 1828). Preço na loja (vendor.ts) é o "custo" do respec.
   skill_reset: { id: 'skill_reset', name: 'Pergaminho de Reinício', consumable: { resetSkills: true }, value: 60 },
+  // Sistema 15 (QoL): pergaminho de retorno — recall à cidade registrada, consumível. Barato (o Return
+  // grátis já existe com cooldown; o scroll troca o cooldown pelo custo do item). Vendido pelo boticário.
+  return_scroll: { id: 'return_scroll', name: 'Pergaminho de Retorno', consumable: { recall: 'registered' }, value: 15 },
   // GDD v0.5 (Pets): the grab pet — a PERMANENT companion bought from the vendor. Holding the item IS
   // owning the pet; summoning it (tecla P) spawns a follower that auto-collects ground loot. Not
   // equippable/consumable — a plain ownership token kept in the bag (like a Silkroad pet card).

@@ -1988,10 +1988,17 @@ export class Sim implements IWorld {
     if (!dest || dest.id === from.id) return; // unknown destination, or already there
     if (p.gold < TELEPORT_COST) return; // can't afford the trip
     p.gold -= TELEPORT_COST;
-    p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);
-    p.z = clamp(dest.cz, -WORLD_HALF, WORLD_HALF);
+    this.warpTo(p, dest.cx, dest.cz);
+  }
+
+  // Warp a player to a world position, clamped in-bounds, dropping the target + any drift movement intent.
+  // Shared by teleport, the free Return recall, and the return scroll — all pure position writes (no Rng),
+  // so determinism holds and the new position is folded into the hash via the entity.
+  private warpTo(p: Entity, cx: number, cz: number): void {
+    p.x = clamp(cx, -WORLD_HALF, WORLD_HALF);
+    p.z = clamp(cz, -WORLD_HALF, WORLD_HALF);
     p.targetId = null;
-    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-teleport movement intent
+    this.moveIntents.set(p.id, { t: 'stop' });
   }
 
   // Register the city the player is STANDING at (its teleporter NPC) as their Return/respawn city
@@ -2011,10 +2018,7 @@ export class Sim implements IWorld {
     // teleporter view's blocked-reason priority — combat first, then cooldown — matches this gate order)
     const dest = cityById(p.returnCity) ?? cityById('town');
     if (!dest) return; // defensive: registered city unknown and even 'town' missing
-    p.x = clamp(dest.cx, -WORLD_HALF, WORLD_HALF);
-    p.z = clamp(dest.cz, -WORLD_HALF, WORLD_HALF);
-    p.targetId = null;
-    this.moveIntents.set(p.id, { t: 'stop' }); // don't drift from a pre-recall movement intent
+    this.warpTo(p, dest.cx, dest.cz);
     p.returnReadyAt = this.tick + RETURN_COOLDOWN_TICKS;
   }
 
@@ -2304,6 +2308,17 @@ export class Sim implements IWorld {
       p.sp += refunded;
       p.skillRanks = {};
       this.recomputeStats(p); // passives fold by rank -> zerar os ranks derruba-os ao baseline (rank 1)
+      return;
+    }
+    // Sistema 15 (QoL): a recall scroll teleports the player without the free-Return cooldown (the item is
+    // the cost). Blocked in combat (not a flee button), like the free Return; consumes 1. Pure position
+    // write (warpTo) — deterministic. 'lastSpot' (reverse) comes in Fatia 2.
+    if (effect.recall) {
+      if (this.inCombat(p)) return; // fiel: bloqueado em combate — não é fuga instantânea
+      const dest = effect.recall === 'registered' ? (cityById(p.returnCity) ?? cityById('town')) : undefined;
+      if (!dest) return; // destino desconhecido (ou 'lastSpot' antes da Fatia 2) -> no-op, sem consumir
+      if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
+      this.warpTo(p, dest.cx, dest.cz);
       return;
     }
     if (this.tick < p.potionReadyAt) return; // shared potion cooldown still running
