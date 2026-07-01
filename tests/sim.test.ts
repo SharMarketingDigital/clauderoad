@@ -3596,6 +3596,41 @@ describe('Sistema 15: auto-potion do jogador', () => {
     expect(sim2.autoPotMpPct()).toBe(1);
     expect(sim2.autoPotHpPct()).toBe(0.4);
   });
+
+  it('Fatia 2: HP e MP armados juntos bebem no máximo 1 poção por tick (potion-delay compartilhado, HP primeiro)', () => {
+    const sim = new Sim(7); // Espada
+    const pid = sim.localPlayerId()!;
+    const hpPots = () => sim.inventory().stacks.find((s) => s.itemId === 'health_potion')?.qty ?? 0;
+    const mpPots = () => sim.inventory().stacks.find((s) => s.itemId === 'mana_potion')?.qty ?? 0;
+    const save = sim.serializePlayer(pid)!;
+    save.level = 7; // Postura (slot 2) destravada pra gastar MP
+    save.baseMaxHp = 500; // aguenta as mordidas sem morrer
+    save.baseMaxMp = 100;
+    save.bag = [
+      { itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 10 },
+      { itemId: 'mana_potion', rarity: 'normal', plus: 0, qty: 10 },
+    ];
+    sim.restorePlayer(pid, save);
+    // Drena MP (buff self) e HP (mordidas) ANTES de armar — pra os DOIS ficarem < 99% no mesmo tick. Em
+    // combate não há regen, então o MP fica parado em 80% e o HP só cai.
+    sim.sendCommand({ t: 'use-ability', slot: 2 }); // Postura -> MP 80/100
+    sim.step();
+    approachUntilAggro(sim); // toma mordidas -> HP cai
+    sim.sendCommand({ t: 'set-target', id: null });
+    sim.sendCommand({ t: 'stop' });
+    for (let i = 0; i < 40; i++) sim.step();
+    expect(player(sim).hp / player(sim).maxHp).toBeLessThan(0.99); // HP abaixo do limiar
+    expect(player(sim).mp / player(sim).maxMp).toBeLessThan(0.99); // MP abaixo do limiar (sem regen em combate)
+
+    // Arma AMBOS; num ÚNICO tick, só UMA poção é bebida — HP tem prioridade, o MP fica bloqueado pelo
+    // potion-delay compartilhado que a bebida de HP acabou de armar.
+    const hp0 = hpPots();
+    const mp0 = mpPots();
+    sim.sendCommand({ t: 'set-auto-pot', hpPct: 0.99, mpPct: 0.99 });
+    sim.step();
+    expect(hp0 - hpPots()).toBe(1); // HP bebeu exatamente 1
+    expect(mp0 - mpPots()).toBe(0); // MP NÃO bebeu no mesmo tick (cooldown compartilhado)
+  });
 });
 
 // Drive the player into wolves until it dies once, then wait out the respawn so the
