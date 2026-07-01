@@ -1455,6 +1455,48 @@ describe('bow mastery (Arco)', () => {
     expect(amounts.has(Math.round(base * CRIT_MULT))).toBe(true); // and precision crits
   });
 
+  it('Sistema 2: rankear a Precisão (Arco) aumenta os crits no COMBATE (o +crit chega ao dano)', () => {
+    // Conta os crits do player (por valor = round(base×CRIT_MULT)) num farm determinístico, com a Precisão
+    // no rank 1 vs rank 5. O rank fixa a chance de crit por golpe (fold live em critChance): +8% no rank 5 =>
+    // estritamente mais crits. Se o fold fosse REMOVIDO, os dois ranks dariam runs idênticos (r5===r1) e o
+    // teste falharia — é a prova end-to-end de que o +crit da passiva faz algo.
+    const critsAtRank = (precisionRank: number): number => {
+      const sim = new Sim(7);
+      equipBow(sim);
+      const pid = sim.localPlayerId()!;
+      const save = sim.serializePlayer(pid)!;
+      save.level = Math.max(save.level, 2); // destrava a Precisão (nv2)
+      save.baseMaxHp = 4000; // aguenta o farm sem morrer (menos ruído de respawn)
+      save.skillRanks = { ...save.skillRanks, precision: precisionRank };
+      sim.restorePlayer(pid, save);
+      const pp = player(sim);
+      const autoMult = MASTERIES.bow.swingTime / AUTO_DPS_BASE_SWING;
+      const critVal = Math.round(Math.round(meleeDamage(pp.str, pp.weaponDamage) * autoMult) * CRIT_MULT);
+      let crits = 0;
+      let lastSeq = 0;
+      for (let i = 0; i < 3000; i++) {
+        const me = player(sim);
+        const w = nearestWolf(sim);
+        if (w) {
+          sim.sendCommand({ t: 'set-target', id: w.id });
+          sim.sendCommand({ t: 'move', dx: w.x - me.x, dz: w.z - me.z });
+        }
+        sim.step();
+        const myId = player(sim).id;
+        for (const ev of sim.recentEvents()) {
+          if (ev.seq <= lastSeq) continue;
+          lastSeq = ev.seq;
+          if (ev.kind === 'damage' && ev.targetId !== myId && ev.amount === critVal) crits++;
+        }
+      }
+      return crits;
+    };
+    const r1 = critsAtRank(1);
+    const r5 = critsAtRank(5);
+    expect(r1).toBeGreaterThan(0); // baseCrit 0.15 já rende crits no rank 1
+    expect(r5).toBeGreaterThan(r1); // +8% de crit no rank 5 => mais crits (o fold em critChance funciona)
+  });
+
   it('an equipped-bow run is deterministic (same seed => identical world)', () => {
     const run = (seed: number): string => {
       const sim = new Sim(seed);
@@ -3415,6 +3457,15 @@ describe('SP and skill ranks', () => {
     for (let i = 0; i < 4000; i++) sim.step();
     const maxRank = Math.max(...sim.abilities().map((a) => a.rank));
     expect(maxRank).toBeGreaterThan(1); // it spent SP to rank up on its own
+  });
+
+  it('Sistema 2: o bot também ranqueia a PASSIVA (não só as ativas) e não trava', () => {
+    const sim = new Sim(7);
+    sim.sendCommand({ t: 'set-bot', on: true });
+    for (let i = 0; i < 4000; i++) sim.step(); // roda solto — precisa completar (nenhum loop infinito)
+    const ranks = sim.passives().map((a) => a.rank); // passives() NÃO cai na barra, então o teste das ativas não a via
+    expect(ranks.length).toBeGreaterThan(0); // chegou ao nv2 -> a passiva destravou
+    expect(Math.max(...ranks)).toBeGreaterThan(1); // gastou SP na passiva por conta própria
   });
 });
 

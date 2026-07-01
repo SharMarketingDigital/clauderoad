@@ -45,6 +45,25 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     expect(w.selfState(b).targetId).toBeNull();
   });
 
+  it('Sistema 2: espelha as passivas no self state (paridade online) e as mantém FORA da action bar', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    // nv2 destrava a passiva; desarmado => Espada (Corpo de Ferro). SP de sobra pra ranquear.
+    w.restorePlayer(a, {
+      level: 2, xp: 0, attrPoints: 0, baseStr: 20, baseInt: 5, baseMaxHp: 140, baseMaxMp: 60,
+      sp: 500, skillRanks: {}, gold: 0, bag: [], equipment: {},
+    });
+    const s1 = w.selfState(a);
+    expect(s1.passives.map((p) => p.name)).toEqual(['Corpo de Ferro']); // espelhada no snapshot pessoal
+    expect(s1.passives[0].rank).toBe(1);
+    expect(s1.passives[0].slot).toBe(5);
+    expect(s1.abilities.some((ab) => ab.slot === 5)).toBe(false); // NUNCA na action bar (paridade com o offline)
+    // ranquear via comando sobe o rank no self state — o online reflete a mesma mecânica do sim
+    w.command(a, { t: 'rank-up', slot: 5 });
+    w.step();
+    expect(w.selfState(a).passives[0].rank).toBe(2);
+  });
+
   it('accepts set-target (combat) and keeps it PER PLAYER', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
