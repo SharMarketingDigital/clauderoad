@@ -71,6 +71,30 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     expect(w.selfState(a).passives[0].rank).toBe(2);
   });
 
+  it('Sistema 2: o respec (use-item skill_reset) atravessa o seam do ServerWorld — paridade offline/online', () => {
+    // O reset é a mudança mais sensível (muta sp + skillRanks, estado HASHEADO). Guarda de regressão contra a
+    // classe "whitelist K1": se um refactor derrubar o forward de use-item no server, o respec pararia de
+    // funcionar online e o SP/ranks divergiriam do offline SEM nenhum teste falhando.
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    w.restorePlayer(a, {
+      level: 7, xp: 0, attrPoints: 0, baseStr: 20, baseInt: 5, baseMaxHp: 140, baseMaxMp: 60,
+      sp: 500, skillRanks: {}, gold: 0,
+      bag: [{ itemId: 'skill_reset', rarity: 'normal', plus: 0, qty: 1 }], equipment: {},
+    });
+    const sp0 = w.selfState(a).sp;
+    w.command(a, { t: 'rank-up', slot: 1 }); w.step(); // slot 1: rank 1 -> 2
+    w.command(a, { t: 'rank-up', slot: 1 }); w.step(); // -> 3
+    expect(w.selfState(a).sp).toBeLessThan(sp0);
+    expect(w.selfState(a).abilities.find((x) => x.slot === 1)!.rank).toBe(3);
+    // usa o pergaminho PELO seam -> devolve o SP e zera os ranks (idêntico ao Sim offline)
+    w.command(a, { t: 'use-item', itemId: 'skill_reset', rarity: 'normal', plus: 0 });
+    w.step();
+    expect(w.selfState(a).sp).toBe(sp0); // SP de volta ao total
+    expect(w.selfState(a).abilities.find((x) => x.slot === 1)!.rank).toBe(1); // ranks zerados
+    expect(w.selfState(a).inventory.stacks.some((s) => s.itemId === 'skill_reset')).toBe(false); // consumido
+  });
+
   it('accepts set-target (combat) and keeps it PER PLAYER', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');
