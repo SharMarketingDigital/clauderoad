@@ -213,6 +213,13 @@ export class ClientWorld implements IWorld {
     return this.self ? this.self.petActive : false;
   }
 
+  // Sistema 15 (QoL — mounts): mounted state comes from the local player's public EntityView (snapshot),
+  // not `self` — the flag rides in the entity snapshot so every client can render the mount.
+  mountActive(): boolean {
+    const lid = this.localPlayerId();
+    return lid != null && this.entities().some((e) => e.id === lid && e.mounted != null);
+  }
+
   stall(): StallView | null {
     return this.self ? this.self.stall : null; // GDD v0.5 (Stalls): the open stall this player is near
   }
@@ -358,6 +365,7 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
     loot: s.loot ?? null, // GDD v0.5 (loot físico): the dropped stack, so remote ground loot shows its contents (offline parity)
     pkActive: s.pk ?? false, // GDD v0.5 (PK livre): mirror the public PK flag -> the red marker on a dangerous player
     stallOpen: s.stallOpen ?? false, // GDD v0.5 (Stalls): mirror the public stall flag -> buyers can find the seller
+    mounted: s.mounted, // Sistema 15 (QoL — mounts): mirror the public mount id -> the renderer draws the mount
   };
 }
 

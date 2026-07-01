@@ -162,6 +162,11 @@ export interface Entity {
   // return to your grind spot. Undefined until the first recall (no spawn literal changes). Hashed
   // (gameplay state a reverse reads) + persisted (survives reload, like returnCity).
   lastFieldPos?: { x: number; z: number };
+  // Sistema 15 (QoL — mounts): the id of the mount the player is currently riding (a MOUNTS key, e.g.
+  // 'horse'), or undefined on foot. A flag (molde pkActive), NOT a follower entity — the mount IS the player
+  // moving faster. Multiplies movement speed in stepPlayer; auto-DESMONTA on entering combat. Hashed
+  // (gameplay state — affects position) + persisted. Undefined = on foot (no spawn literal changes).
+  mounted?: string;
   // GDD v0.5 (Pets): present ONLY on a kind 'pet' entity — links the companion to the player it follows.
   // undefined for players/enemies/NPCs/loot, so no existing spawn literal changes and the hash fold stays
   // conditional (mirrors `loot?`). The owner's "has a pet" state is derived from the Sim's petOf index.

@@ -202,6 +202,11 @@ export class ServerWorld {
       case 'set-pet':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-pet', on: cmd.on });
         return;
+      // Sistema 15 (QoL — mounts): mount/dismount. Validate the boolean and forward; the sim checks the
+      // player owns a mount token + is out of combat before mounting.
+      case 'set-mount':
+        if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-mount', on: cmd.on });
+        return;
       // Sistema 15 (QoL): the auto-pot HP threshold. Validate a FINITE number and forward; the sim clamps it
       // to [0,1] (so a tampered value can't force perpetual drinking or a negative threshold).
       case 'set-auto-pot': {
@@ -529,6 +534,7 @@ export class ServerWorld {
       // clients can mark the dangerous player. e.pkActive is the EntityView's boolean.
       if (e.pkActive) snap.pk = true;
       if (e.stallOpen) snap.stallOpen = true; // GDD v0.5 (Stalls): only sellers carry the public flag
+      if (e.mounted) snap.mounted = e.mounted; // Sistema 15 (QoL — mounts): only mounted players carry the flag
       entities.push(snap);
     }
     const events: NetEvent[] = [];

@@ -113,6 +113,22 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     expect(w.selfState(a).autoPotHpPct).toBe(1); // HP intacto (o comando de MP não o tocou)
   });
 
+  it('Sistema 15: monta via ServerWorld (whitelist) e o snapshot PÚBLICO carrega o mount (render online)', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    w.restorePlayer(a, {
+      level: 1, gold: 0,
+      bag: [{ itemId: 'mount_horse', rarity: 'normal', plus: 0, qty: 1 }], equipment: {},
+    });
+    expect(selfOf(w, a).mounted).toBeUndefined(); // a pé
+    w.command(a, { t: 'set-mount', on: true });
+    w.step();
+    expect(selfOf(w, a).mounted).toBe('horse'); // o flag público viaja no snapshot -> todo cliente desenha a montaria
+    w.command(a, { t: 'set-mount', on: false });
+    w.step();
+    expect(selfOf(w, a).mounted).toBeUndefined();
+  });
+
   it('accepts set-target (combat) and keeps it PER PLAYER', () => {
     const w = new ServerWorld(1337);
     const a = w.addPlayer('A');

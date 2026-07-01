@@ -37,6 +37,7 @@ export class Input {
   // GDD v0.5 (Pets): one-shot — the P key was pressed; apply() resolves it into a summon/dismiss against
   // the current pet state (world.petActive()), since the toggle's value depends on the world.
   private pendingPetToggle = false;
+  private pendingMountToggle = false; // Sistema 15 (QoL — mounts): the H key toggles mount/dismount
 
   constructor(canvas: HTMLCanvasElement, private renderer: Renderer) {
     window.addEventListener('keydown', (e) => {
@@ -57,6 +58,11 @@ export class Input {
       // (F, not P: P is the party panel — ui/party_hud.ts.)
       if (e.key.toLowerCase() === 'f') {
         if (!e.repeat) this.pendingPetToggle = true;
+        return;
+      }
+      // H — mount/dismount the owned mount (Sistema 15). One-shot; apply() toggles vs world.mountActive().
+      if (e.key.toLowerCase() === 'h') {
+        if (!e.repeat) this.pendingMountToggle = true;
         return;
       }
       // Action-bar slots 1..9 (top-row digits). The sim no-ops empty slots.
@@ -153,6 +159,7 @@ export class Input {
       this.hasLeftClick = false;
       this.uiSelectedPlayerId = null;
       this.pendingPetToggle = false;
+      this.pendingMountToggle = false;
       return;
     }
     // While typing in the chat, the player must NOT move/act: drop queued actions,
@@ -161,6 +168,7 @@ export class Input {
       this.pending.length = 0;
       this.hasLeftClick = false;
       this.pendingPetToggle = false;
+      this.pendingMountToggle = false;
       this.keys.clear();
       world.sendCommand({ t: 'stop' });
       return;
@@ -173,6 +181,12 @@ export class Input {
     if (this.pendingPetToggle) {
       this.pendingPetToggle = false;
       world.sendCommand({ t: 'set-pet', on: !world.petActive() });
+    }
+
+    // Sistema 15 (QoL — mounts): the H key toggles mount/dismount against the CURRENT state.
+    if (this.pendingMountToggle) {
+      this.pendingMountToggle = false;
+      world.sendCommand({ t: 'set-mount', on: !world.mountActive() });
     }
 
     // Resolve the duel SELECTION from the last clean left click — render/UI state only (the sim

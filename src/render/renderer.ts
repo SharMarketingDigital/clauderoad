@@ -123,6 +123,7 @@ export class Renderer {
   // GDD v0.5 (PK livre): a red ground ring under each PK-armed player (public — every client sees the
   // dangerous player). Keyed by entity id; created lazily, hidden/removed when they un-flag or leave.
   private pkRings = new Map<number, THREE.Mesh>();
+  private mountRings = new Map<number, THREE.Mesh>(); // Sistema 15 (QoL — mounts): gold ring under a mounted player
 
   // sky / sun+shadows / undulating ground / grass / fog (all tunable in environment.ts)
   private env: Environment;
@@ -598,6 +599,7 @@ export class Renderer {
       updateDeadFade(m, e);
       updateStatusMarker(m, e);
       this.updatePkRing(e); // GDD v0.5 (PK livre): red ring under a PK-armed player, visible to everyone
+      this.updateMountMarker(e); // Sistema 15 (QoL — mounts): gold ring under a mounted player (offline + online)
       if (e.id === targetId) targetView = e;
     }
     for (const [id, m] of this.meshes) {
@@ -608,6 +610,8 @@ export class Renderer {
         this.playerAvatars.release(id); // dispose a remote Knight if this id was one
         const ring = this.pkRings.get(id); // and its PK ring, if it had one
         if (ring) { this.scene.remove(ring); this.pkRings.delete(id); }
+        const mring = this.mountRings.get(id); // Sistema 15 (QoL — mounts): and its mount ring, if any
+        if (mring) { this.scene.remove(mring); this.mountRings.delete(id); }
       }
     }
     // Park the selection ring under the CURRENT target (ANY kind). localTargetId can be a player in
@@ -646,6 +650,20 @@ export class Renderer {
     if (want) {
       const ip = this.interpPos(e.id, e); // sit under the smoothed position (O1)
       ring.position.set(ip.x, terrainHeight(ip.x, ip.z) + 0.05, ip.z);
+    }
+  }
+
+  // Sistema 15 (QoL — mounts): a gold ground ring under a MOUNTED player (the public "on a mount" cue).
+  // Driven purely by EntityView.mounted, so it works offline AND online with no input/sim coupling.
+  private updateMountMarker(e: EntityView): void {
+    const want = e.kind === 'player' && e.mounted != null;
+    let ring = this.mountRings.get(e.id);
+    if (want && !ring) { ring = makeMountRing(); this.scene.add(ring); this.mountRings.set(e.id, ring); }
+    if (!ring) return;
+    ring.visible = want;
+    if (want) {
+      const ip = this.interpPos(e.id, e);
+      ring.position.set(ip.x, terrainHeight(ip.x, ip.z) + 0.04, ip.z);
     }
   }
 
@@ -969,6 +987,23 @@ function makePkRing(): THREE.Mesh {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.72,
+      depthWrite: false,
+    }),
+  );
+  ring.rotation.x = -Math.PI / 2; // lay flat on the ground
+  ring.renderOrder = 1;
+  return ring;
+}
+
+// Sistema 15 (QoL — mounts): a gold ground ring, a bit wider than the PK ring, under a mounted player.
+function makeMountRing(): THREE.Mesh {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.92, 1.24, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0xffcf5a,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.6,
       depthWrite: false,
     }),
   );

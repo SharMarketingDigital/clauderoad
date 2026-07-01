@@ -39,6 +39,7 @@ import {
   SKILL_MAX_RANK, skillUpgradeCost, skillSpInvested, rankEffectMult,
 } from './content/skill_ranks';
 import { levelUpGold } from './content/gold';
+import { MOUNTS, type MountDef } from './content/mounts';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -947,6 +948,23 @@ export class Sim implements IWorld {
     return this.ents.get(id)?.autoPotMpPct ?? 0;
   }
 
+  // Sistema 15 (QoL — mounts): whether the local player is mounted (IWorld mountActive() uses the local one).
+  mountActive(): boolean {
+    return this.mountActiveFor(this.localId);
+  }
+  mountActiveFor(id: number): boolean {
+    return this.ents.get(id)?.mounted != null;
+  }
+  // The mount the player OWNS (holds its token in the bag), or undefined. MVP: a single mount.
+  private ownedMount(p: Entity): MountDef | undefined {
+    for (const m of Object.values(MOUNTS)) if (p.bag.some((s) => s != null && s.itemId === m.itemId)) return m;
+    return undefined;
+  }
+  // Movement-speed multiplier from the active mount (1.0 = on foot). Pure lookup — deterministic.
+  private mountSpeedMult(p: Entity): number {
+    return p.mounted ? MOUNTS[p.mounted]?.speedMult ?? 1 : 1;
+  }
+
   // GDD v0.5 (Pets): whether THIS player has a pet summoned (IWorld petActive() uses the local player).
   petActive(): boolean {
     return this.petActiveFor(this.localId);
@@ -1565,6 +1583,7 @@ export class Sim implements IWorld {
           : null,
         pkActive: e.pkActive === true, // GDD v0.5 (PK livre): public PK flag -> drives the "dangerous player" marker
         stallOpen: this.stalls.has(e.id), // GDD v0.5 (Stalls): public flag -> buyers/renderer see who has a stall
+        mounted: e.mounted, // Sistema 15 (QoL — mounts): public mount id -> the renderer draws the mount under the player
       });
     }
     return out;
@@ -2070,6 +2089,17 @@ export class Sim implements IWorld {
       case 'set-auto-pot':
         if (cmd.hpPct !== undefined) p.autoPotHpPct = Math.max(0, Math.min(1, cmd.hpPct));
         if (cmd.mpPct !== undefined) p.autoPotMpPct = Math.max(0, Math.min(1, cmd.mpPct));
+        return;
+      // Sistema 15 (QoL — mounts): mount/dismount. Mounting requires OWNING a mount token, being ALIVE and
+      // OUT of combat (combatUntil) — a mount is locomotion, not a combat/escape tool. Dismount always works
+      // (pre-gate). The auto-dismount on ENTERING combat lives in stepPlayer.
+      case 'set-mount':
+        if (cmd.on) {
+          const m = this.ownedMount(p);
+          if (m && this.tick >= p.combatUntil && p.deadUntil === 0) p.mounted = m.id;
+        } else {
+          p.mounted = undefined;
+        }
         return;
     }
     if (p.deadUntil !== 0 || this.isIncapacitated(p)) return; // downed or stunned -> can't act
@@ -3206,12 +3236,15 @@ export class Sim implements IWorld {
   }
 
   private stepPlayer(p: Entity): void {
+    // Sistema 15 (QoL — mounts): a mount is locomotion only — DESMONTA ao entrar em combate (took/dealt
+    // damage recently). Runs before the early-returns so it fires even while stunned/downed in a fight.
+    if (p.mounted && this.tick < p.combatUntil) p.mounted = undefined;
     if (p.deadUntil !== 0) return; // frozen while a spirit
     if (this.isIncapacitated(p) || this.isRooted(p)) return; // can't move while stunned or rooted
     const intent = this.moveIntents.get(p.id);
     if (!intent || intent.t !== 'move') return;
-    // Same integration the server runs (src/sim/movement.ts); slow debuffs cut speed.
-    const m = applyMove(p.x, p.z, intent.dx, intent.dz, PLAYER_SPEED * this.slowFactor(p), DT, WORLD_HALF);
+    // Same integration the server runs (src/sim/movement.ts); slow debuffs cut speed; a mount multiplies it.
+    const m = applyMove(p.x, p.z, intent.dx, intent.dz, PLAYER_SPEED * this.slowFactor(p) * this.mountSpeedMult(p), DT, WORLD_HALF);
     if (!m) return;
     // City wall: can't cross the rampart except through the 4 cardinal gates (slides to a gate
     // when a step would cross elsewhere). Deterministic; player-only.
@@ -3679,6 +3712,7 @@ export class Sim implements IWorld {
       mix(Math.round((e.autoPotMpPct ?? 0) * 100)); // Sistema 15 (QoL): MP auto-pot threshold (same reason)
       mix(e.lastFieldPos ? Math.round(e.lastFieldPos.x) : 0); // Sistema 15 (reverse): recorded grind spot —
       mix(e.lastFieldPos ? Math.round(e.lastFieldPos.z) : 0); // a reverse scroll reads it, so two hosts must agree
+      mix(e.mounted ? Object.keys(MOUNTS).indexOf(e.mounted) + 1 : 0); // Sistema 15 (mounts): mounted state drives speed -> position, so two hosts must agree
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling

@@ -108,6 +108,9 @@ export interface EntityView {
   // GDD v0.5 (Stalls §5): true while this player has a personal shop (barraca) open — public, so buyers
   // can find/target them. Absent/false for everyone else.
   readonly stallOpen?: boolean;
+  // Sistema 15 (QoL — mounts): the mount id this PLAYER is riding (a MOUNTS key, e.g. 'horse'), or absent on
+  // foot. Public so the renderer can draw the mount under any player. Absent for non-players.
+  readonly mounted?: string;
 }
 
 // One stack in the player's bag, with the item's display name resolved.
@@ -380,6 +383,9 @@ export type Command =
   // --- Pets (GDD v0.5 §4): summon/dismiss the owned grab pet (a held-or-toggle companion). The sim
   // validates that the player actually OWNS a pet item before spawning the follower. ---
   | { t: 'set-pet'; on: boolean } // summon (true) / dismiss (false) the player's pet
+  // Sistema 15 (QoL): mount/dismount the owned mount (on = mount, off = on foot). The sim validates the
+  // player owns a mount token; mounting is refused in combat and auto-dismounts on entering it.
+  | { t: 'set-mount'; on: boolean }
   // --- Stalls (GDD v0.5 §5): personal P2P shops. open lists bag items at owner-set prices; buy moves the
   // item + gold ATOMICALLY (the sim validates ownership/gold/room/proximity + anti-duplication). ---
   | { t: 'stall-open'; listings: ReadonlyArray<{ itemId: string; rarity: Rarity; plus: number; price: number }> }
@@ -490,6 +496,9 @@ export interface IWorld {
   // GDD v0.5 (Pets): whether the local player currently has a pet summoned. UI reads it for the
   // summon/dismiss toggle state; input reads it to send the opposite on the toggle key.
   petActive(): boolean;
+  // Sistema 15 (QoL — mounts): whether the local player is currently mounted. Input reads it to send the
+  // opposite on the toggle key; UI can show the state.
+  mountActive(): boolean;
   // GDD v0.5 (Stalls): the open stall the local player is in range of (to browse + buy), or null.
   stall(): StallView | null;
   // Global Marketplace: every active listing (the same board for everyone), to browse + buy from anywhere.

@@ -148,6 +148,10 @@ export const ITEMS: Record<string, ItemDef> = {
   // owning the pet; summoning it (tecla P) spawns a follower that auto-collects ground loot. Not
   // equippable/consumable — a plain ownership token kept in the bag (like a Silkroad pet card).
   pet_grab: { id: 'pet_grab', name: 'Coletor (Pet)', value: 60 },
+  // Sistema 15 (QoL): token de invocação da montaria — comprado uma vez (permanente, como o pet_grab).
+  // Segurá-lo = possuir o cavalo; montar/desmontar com a tecla. Não equipável/consumível (a stat de
+  // velocidade vive em content/mounts.ts). Corte consciente: sem HP/duração/aluguel no MVP.
+  mount_horse: { id: 'mount_horse', name: 'Cavalo (Montaria)', value: 60 },
 };
 
 // Shared cooldown between consumable uses (seconds) — classic "potion sickness",

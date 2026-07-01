@@ -68,6 +68,9 @@ export interface EntitySnap {
   // GDD v0.5 (Stalls §5): true while this player has a personal shop open — PUBLIC, so buyers find/target
   // them. Present ONLY on sellers (snapshot stays lean); absent = no stall.
   stallOpen?: boolean;
+  // Sistema 15 (QoL — mounts): the mount id this player is riding — PUBLIC, so every client draws the mount.
+  // Present ONLY while mounted (snapshot stays lean); absent = on foot.
+  mounted?: string;
 }
 
 // A presentation event forwarded from the server's sim (floating damage numbers, hit
