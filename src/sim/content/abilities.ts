@@ -28,8 +28,9 @@ export interface AbilityDef {
   mpCost: number;
   cooldownSecs: number; // the ability's OWN cooldown (on top of the global one)
   // 'strike': damage on the current enemy target (effects debuff it). 'buff':
-  // self-cast, no target/range — effects apply to the caster.
-  kind: 'strike' | 'buff';
+  // self-cast, no target/range — effects apply to the caster. 'passive': not cast at all —
+  // an always-on bonus (passiveBonus) folded into stats by rank while the mastery is active.
+  kind: 'strike' | 'buff' | 'passive';
   // Strike shape: 'single' hits the target; 'cone' sweeps every enemy in front
   // within reach. Default 'single'.
   shape?: 'single' | 'cone';
@@ -37,6 +38,10 @@ export interface AbilityDef {
   castRange?: number; // charge: max distance to initiate from (units)
   damageMultiplier?: number; // strike: scales the base melee hit so it out-hits the auto-attack
   effects?: AbilityEffectDef[]; // status effects applied on a successful cast
+  // Sistema 2 (kind 'passive'): the always-on bonus this passive grants PER RANK, folded while the
+  // mastery is active and the skill is unlocked — the stat fields into recomputeStats, `crit` into
+  // critChance (adds to the mastery's crit chance, e.g. Arco's Precisão). Ignored for strike/buff.
+  passiveBonus?: ItemStats & { crit?: number };
 }
 
 // ---- Sword / Escudo: durable melee, stun + block (GDD: "Espada → stun e bloqueio")
@@ -91,6 +96,17 @@ const SWORD_ABILITIES: AbilityDef[] = [
     shape: 'cone', // the Sword's only AoE: sweeps every enemy in reach (reuses the cone infra)
     damageMultiplier: 1.3, // per enemy caught — a hair above the spear's sweep, but no bleed
   },
+  {
+    id: 'iron_body',
+    name: 'Corpo de Ferro',
+    slot: 5, // passiva (não ocupa a barra de ação); destrava cedo (nv2) e cresce com SP
+    unlockLevel: 2,
+    icon: '💪', // toughness — the Sword's durability identity (its free mastery.passive is empty)
+    mpCost: 0,
+    cooldownSecs: 0,
+    kind: 'passive',
+    passiveBonus: { maxHp: 12 }, // +12 HP por rank (rank 5 = +60): o guerreiro que aguenta
+  },
 ];
 
 // ---- Lança: high single-target damage, crit, and area sweeps (GDD: "Lança →
@@ -141,6 +157,17 @@ const SPEAR_ABILITIES: AbilityDef[] = [
     kind: 'buff',
     effects: [{ kind: 'crit', durationSecs: 5.0, magnitude: 1.0 }], // +100% crit chance window
   },
+  {
+    id: 'blood_thirst',
+    name: 'Sede de Sangue',
+    slot: 5, // passiva; destrava no nv2 e cresce com SP
+    unlockLevel: 2,
+    icon: '🩸', // blood — the spear's offensive edge (on top of its free +HP mastery.passive)
+    mpCost: 0,
+    cooldownSecs: 0,
+    kind: 'passive',
+    passiveBonus: { weaponDamage: 2 }, // +2 dano de arma por rank (rank 5 = +10): mais mordida
+  },
 ];
 
 // ---- Arco: ranged single-target damage; survives by keeping its distance (GDD:
@@ -189,6 +216,17 @@ const BOW_ABILITIES: AbilityDef[] = [
     kind: 'strike',
     damageMultiplier: 1.0, // modest up-front — the value is the poison over time
     effects: [{ kind: 'dot', durationSecs: 4.0, magnitude: 4, periodSecs: 0.5 }], // 8 ticks × 4 = 32 veneno
+  },
+  {
+    id: 'precision',
+    name: 'Precisão',
+    slot: 5, // passiva; destrava no nv2 e cresce com SP
+    unlockLevel: 2,
+    icon: '👁', // keen eye — deepens the Arco's precision identity (on top of baseCrit 0.15)
+    mpCost: 0,
+    cooldownSecs: 0,
+    kind: 'passive',
+    passiveBonus: { crit: 0.02 }, // +2% de crítico por rank (rank 5 = +10%): tiros mais letais
   },
 ];
 
@@ -240,6 +278,17 @@ const MAGE_ABILITIES: AbilityDef[] = [
     cooldownSecs: 18,
     kind: 'buff', // self-cast, no target/range (reuses the 'defense' effect, like Postura Defensiva)
     effects: [{ kind: 'defense', durationSecs: 5.0, magnitude: 0.5 }],
+  },
+  {
+    id: 'meditation',
+    name: 'Meditação',
+    slot: 5, // passiva; destrava no nv2 e cresce com SP
+    unlockLevel: 2,
+    icon: '🧘', // meditation — a deeper mana pool (on top of the mage's free +MP mastery.passive)
+    mpCost: 0,
+    cooldownSecs: 0,
+    kind: 'passive',
+    passiveBonus: { maxMp: 10 }, // +10 MP por rank (rank 5 = +50): mais feitiços entre descansos
   },
 ];
 

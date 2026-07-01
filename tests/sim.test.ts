@@ -1072,6 +1072,12 @@ describe('spear mastery (Lança)', () => {
   it('the Lança passive raises max HP while the spear is equipped', () => {
     const sim = new Sim(7);
     equipSpear(sim);
+    // Isola o mastery.passive GRÁTIS: no nv1 nenhuma passiva APRENDÍVEL está destravada (nv2), então a
+    // única diferença de HP entre lança e desarmado (Espada) é o +HP grátis da maestria da lança.
+    const pid = sim.localPlayerId()!;
+    const s = sim.serializePlayer(pid)!;
+    s.level = 1;
+    sim.restorePlayer(pid, s);
     const withSpear = player(sim).maxHp;
     sim.sendCommand({ t: 'unequip', slot: 'weapon' });
     sim.step();
@@ -1757,8 +1763,10 @@ describe('progression (XP & levels)', () => {
 
     const pp = player();
     expect(pp.level).toBe(2);
-    expect(pp.maxHp).toBe(hp0 + HP_PER_LEVEL);
-    expect(pp.maxMp).toBe(mp0 + MP_PER_LEVEL);
+    // nv2 sobe o HP do nível E destrava a passiva Espada Corpo de Ferro (+HP rank 1) — as duas somam
+    const ironR1 = MASTERIES.sword.abilities.find((a) => a.id === 'iron_body')!.passiveBonus!.maxHp!;
+    expect(pp.maxHp).toBe(hp0 + HP_PER_LEVEL + ironR1);
+    expect(pp.maxMp).toBe(mp0 + MP_PER_LEVEL); // Espada não tem passiva de MP, então o MP só sobe pelo nível
     expect(pp.attrPoints).toBe(ATTR_POINTS_PER_LEVEL);
     expect(pp.hp).toBe(pp.maxHp); // full restore on ding...
     expect(pp.mp).toBe(pp.maxMp); // ...for MP too
@@ -3178,6 +3186,12 @@ describe('skills destravam por nível (Sistema 1)', () => {
   it('a regra de destrave é 2N−1 por slot (slot1=nv1, slot2=3, slot3=5, slot4=7)', () => {
     for (const m of [MASTERIES.sword, MASTERIES.spear, MASTERIES.bow, MASTERIES.mage]) {
       for (const def of m.abilities) {
+        if (def.kind === 'passive') {
+          // passivas usam unlockLevel explícito (nv2 = fundação cedo), fora da regra 2N−1 das ativas
+          expect(def.unlockLevel).toBe(2);
+          expect(abilityUnlockLevel(def)).toBe(2);
+          continue;
+        }
         expect(abilityUnlockLevel(def)).toBe(2 * def.slot - 1);
       }
     }
@@ -3217,6 +3231,90 @@ describe('skills destravam por nível (Sistema 1)', () => {
     sim.sendCommand({ t: 'rank-up', slot: 3 }); // bloqueada no nv1
     sim.step();
     expect(player(sim).sp).toBe(100); // SP intacto (rank-up recusado)
+  });
+});
+
+// Sistema 2 (Fatia 1.2b): 1 skill PASSIVA por maestria (slot 5), destravada cedo (nv2) e ranqueável
+// com SP — sempre-ativa, dobrada nos stats por rank (Espada +HP, Lança +dano, Arco +crit, Mago +MP).
+// Fora da barra de ação (não se casta). Puro/determinístico; ranks vivem no skillRanks (já salvo).
+describe('Sistema 2: passivas (slot 5)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  // Sobe ao nv2 (destrava a passiva) com SP de sobra, mantendo a arma equipada (equipment vem do save).
+  const prep = (sim: Sim) => {
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.level = Math.max(save.level, 2);
+    save.sp = 500;
+    sim.restorePlayer(pid, save);
+  };
+
+  it('cada maestria tem exatamente 1 passiva (slot 5, destrava nv2, com passiveBonus)', () => {
+    for (const m of [MASTERIES.sword, MASTERIES.spear, MASTERIES.bow, MASTERIES.mage]) {
+      const passives = m.abilities.filter((d) => d.kind === 'passive');
+      expect(passives.length).toBe(1);
+      expect(passives[0].slot).toBe(5);
+      expect(passives[0].unlockLevel).toBe(2);
+      expect(passives[0].passiveBonus).toBeDefined();
+    }
+  });
+
+  it('a passiva NÃO aparece na barra de ação e castá-la é no-op (não é castável)', () => {
+    const sim = new Sim(7); // Espada
+    prep(sim);
+    expect(sim.abilities().some((a) => a.slot === 5)).toBe(false);
+    expect(sim.abilities().some((a) => a.name === 'Corpo de Ferro')).toBe(false);
+    const sp0 = player(sim).sp;
+    sim.sendCommand({ t: 'use-ability', slot: 5 }); // castar a passiva
+    sim.step();
+    expect(player(sim).sp).toBe(sp0); // nada consumido, sem efeito
+  });
+
+  it('Espada · Corpo de Ferro sobe o HP máximo por rank; o SP é gasto', () => {
+    const sim = new Sim(7);
+    prep(sim);
+    const per = MASTERIES.sword.abilities.find((a) => a.id === 'iron_body')!.passiveBonus!.maxHp!;
+    const hp1 = player(sim).maxHp; // rank 1 (grátis ao destravar) já dobrado no maxHp
+    const sp1 = player(sim).sp;
+    sim.sendCommand({ t: 'rank-up', slot: 5 }); // rank 1 -> 2
+    sim.step();
+    expect(player(sim).maxHp).toBe(hp1 + per);
+    expect(player(sim).sp).toBeLessThan(sp1); // SP consumido
+    sim.sendCommand({ t: 'rank-up', slot: 5 }); // -> 3
+    sim.step();
+    expect(player(sim).maxHp).toBe(hp1 + 2 * per);
+  });
+
+  it('Mago · Meditação sobe o MP máximo por rank', () => {
+    const sim = new Sim(7);
+    equipStaff(sim);
+    prep(sim);
+    const per = MASTERIES.mage.abilities.find((a) => a.id === 'meditation')!.passiveBonus!.maxMp!;
+    const mp1 = player(sim).maxMp;
+    sim.sendCommand({ t: 'rank-up', slot: 5 });
+    sim.step();
+    expect(player(sim).maxMp).toBe(mp1 + per);
+  });
+
+  it('Lança · Sede de Sangue sobe o dano de arma por rank', () => {
+    const sim = new Sim(7);
+    equipSpear(sim);
+    prep(sim);
+    const per = MASTERIES.spear.abilities.find((a) => a.id === 'blood_thirst')!.passiveBonus!.weaponDamage!;
+    const wd1 = player(sim).weaponDamage;
+    sim.sendCommand({ t: 'rank-up', slot: 5 });
+    sim.step();
+    expect(player(sim).weaponDamage).toBe(wd1 + per);
+  });
+
+  it('Arco · Precisão é uma passiva de +crit ranqueável (o crit é lido live no combate)', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    prep(sim);
+    const pid = sim.localPlayerId()!;
+    expect(MASTERIES.bow.abilities.find((a) => a.id === 'precision')!.passiveBonus!.crit).toBeGreaterThan(0);
+    sim.sendCommand({ t: 'rank-up', slot: 5 }); // rank 1 -> 2
+    sim.step();
+    expect(sim.serializePlayer(pid)!.skillRanks['precision']).toBe(2); // o rank subiu (o fold é live em critChance)
   });
 });
 

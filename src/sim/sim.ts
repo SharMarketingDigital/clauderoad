@@ -713,8 +713,8 @@ export class Sim implements IWorld {
   abilitiesFor(id: number): ReadonlyArray<AbilityView> {
     const p = this.ents.get(id);
     const kit = p
-      ? this.activeMastery(p).abilities.filter((def) => this.skillUnlocked(p, def)) // só as destravadas (a barra cresce com o nível)
-      : MASTERIES[DEFAULT_MASTERY].abilities;
+      ? this.activeMastery(p).abilities.filter((def) => def.kind !== 'passive' && this.skillUnlocked(p, def)) // só ATIVAS destravadas (a barra cresce; passivas ficam fora)
+      : MASTERIES[DEFAULT_MASTERY].abilities.filter((def) => def.kind !== 'passive');
     return kit.map((def) => {
       const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
       const gcdLeft = p ? Math.max(0, p.gcdUntil - this.tick) : 0;
@@ -2595,6 +2595,7 @@ export class Sim implements IWorld {
     const hurt = p.hp < p.maxHp * BOT_CAUTION_FRAC;
     const targetControlled = target.effects.some((s) => s.kind === 'stun' || s.kind === 'knockdown');
     for (const def of this.activeMastery(p).abilities) {
+      if (def.kind === 'passive') continue; // Sistema 2: passivas não se castam (o bot só ranqueia)
       if (!this.skillUnlocked(p, def)) continue; // só considera skills destravadas
       const fx = (k: StatusKind): boolean => def.effects?.some((e) => e.kind === k) ?? false;
       let want = false;
@@ -2718,6 +2719,9 @@ export class Sim implements IWorld {
     if (cost <= 0 || p.sp < cost) return; // can't afford
     p.sp -= cost;
     p.skillRanks[def.id] = rank + 1;
+    // Sistema 2: a passive's bonus lives in recomputeStats, so a new rank must re-fold it into the
+    // effective stats now (active skills read their rank live in combat, so they need no recompute).
+    if (def.kind === 'passive') this.recomputeStats(p);
   }
 
   // ---------- vendor (shop) ----------
@@ -2851,6 +2855,22 @@ export class Sim implements IWorld {
     bonusWeapon += passive.weaponDamage ?? 0;
     bonusMaxHp += passive.maxHp ?? 0;
     bonusMaxMp += passive.maxMp ?? 0;
+    // Sistema 2: learnable PASSIVE skills of the active mastery (Corpo de Ferro's +HP, etc.), folded
+    // by invested rank — players only, and only once unlocked (its nv de destrave). Rank starts at 1
+    // when unlocked, so the passive grants its base bonus for free and SP grows it. (crit is not a
+    // stored stat: it's folded live in critChance instead.)
+    if (p.kind === 'player') {
+      for (const def of this.activeMastery(p).abilities) {
+        if (def.kind !== 'passive' || !def.passiveBonus || !this.skillUnlocked(p, def)) continue;
+        const r = this.skillRank(p, def);
+        bonusStr += (def.passiveBonus.str ?? 0) * r;
+        bonusWeapon += (def.passiveBonus.weaponDamage ?? 0) * r;
+        bonusMaxHp += (def.passiveBonus.maxHp ?? 0) * r;
+        bonusMaxMp += (def.passiveBonus.maxMp ?? 0) * r;
+        bonusPhyDef += (def.passiveBonus.phyDef ?? 0) * r;
+        bonusMagDef += (def.passiveBonus.magDef ?? 0) * r;
+      }
+    }
     p.str = p.baseStr + bonusStr;
     p.weaponDamage = p.baseWeaponDamage + bonusWeapon;
     // Cadência por arma (feel distinto): a maestria ativa define o ritmo do auto-ataque (Arco 1.5s … Lança
@@ -2899,6 +2919,7 @@ export class Sim implements IWorld {
   private useAbility(p: Entity, slot: number): void {
     const def = this.activeMastery(p).abilities.find((a) => a.slot === slot);
     if (!def) return;
+    if (def.kind === 'passive') return; // Sistema 2: passivas são sempre-ativas, nunca castáveis
     if (!this.skillUnlocked(p, def)) return; // Sistema 1: skill ainda bloqueada (destrava por nível)
     if (this.tick < p.gcdUntil) return; // global cooldown
     if (this.tick < (p.abilityReadyAt[slot] ?? 0)) return; // own cooldown
@@ -3323,6 +3344,14 @@ export class Sim implements IWorld {
   // precision passive) plus any 'crit' buffs (Spear's Fúria), capped at 1.
   private critChance(e: Entity): number {
     let c = this.activeMastery(e).baseCrit ?? 0;
+    // Sistema 2: the learnable +crit passive (Arco's Precisão), by invested rank — players only.
+    if (e.kind === 'player') {
+      for (const def of this.activeMastery(e).abilities) {
+        if (def.kind === 'passive' && def.passiveBonus?.crit && this.skillUnlocked(e, def)) {
+          c += def.passiveBonus.crit * this.skillRank(e, def);
+        }
+      }
+    }
     for (const s of e.effects) if (s.kind === 'crit' && s.magnitude > 0) c += s.magnitude;
     return c > 1 ? 1 : c;
   }
