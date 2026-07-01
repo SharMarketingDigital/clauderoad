@@ -101,6 +101,34 @@ describe('Sistema 15: Pergaminho de Retorno', () => {
     expect(player(sim).z).toBe(z0);
   });
 
+  it('o lastFieldPos sobrevive ao save->restore (o reverse funciona pós-reload)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    // simula um relog: restaura um save com returnCity + lastFieldPos gravados (como após um recall)
+    sim.restorePlayer(pid, {
+      returnCity: 'leste',
+      lastFieldPos: { x: 250, z: 0 },
+      bag: [{ itemId: 'reverse_scroll', rarity: 'normal', plus: 0, qty: 1 }],
+    });
+    // o reverse teleporta pro spot RESTAURADO e consome — se o save perdesse lastFieldPos, isto seria no-op
+    sim.sendCommand({ t: 'use-item', itemId: 'reverse_scroll', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(Math.abs(player(sim).x - 250)).toBeLessThan(5); // warpou pro ponto restaurado
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'reverse_scroll')).toBe(false); // consumido
+  });
+
+  it('serializePlayer carrega o lastFieldPos gravado num recall à cidade', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    armScroll(sim); // gold + return_scroll
+    sim.sendCommand({ t: 'teleport', cityId: 'leste' }); // vai pra (250,0)
+    sim.step();
+    sim.sendCommand({ t: 'use-item', itemId: 'return_scroll', rarity: 'normal', plus: 0 }); // recall -> grava o spot
+    sim.step();
+    const save = sim.serializePlayer(pid)!;
+    expect(save.lastFieldPos).toEqual({ x: 250, z: 0 }); // o spot entra no save (par com returnCity)
+  });
+
   it('é determinístico (mesmo seed + comandos => hash idêntico)', () => {
     const run = (): string => {
       const sim = new Sim(7);
