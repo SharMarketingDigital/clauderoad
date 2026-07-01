@@ -90,6 +90,10 @@ export interface EntityView {
   // later (Gabriel's mitigate()); today they are display-only.
   readonly phyDef: number;
   readonly magDef: number;
+  // Hit × Parry (Fase 3): esquiva efetiva do jogador (soma FLAT das armaduras, por grau). Diferente de
+  // phyDef/magDef, o COMBATE já lê isto: antes da mitigação, o alvo pode esquivar o golpe inteiro. Mobs
+  // carregam 0 (não esquivam). Exposto pela ficha (a par de phyDef/magDef).
+  readonly parry: number;
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly tier: EnemyTierId; // enemy strength tier ('normal' for the player/NPCs); render scales/tints by it
   readonly species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
@@ -447,6 +451,8 @@ export type SimEvent = {
   readonly tick: number;
   // 'damage': amount = hit dealt to targetId; `crit` = the hit was a critical (for a
   //   distinct, bigger pop). 'levelup': amount = new level.
+  // 'miss': the target (a player) ESQUIVOU the incoming hit entirely (Hit × Parry) — amount = 0,
+  //   x/z anchor a "Miss" pop over the target; no HP lost. Only players dodge (mobs have parry 0).
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
   // 'enhance-break': a failed high-"+" attempt destroyed the item; `text` = its name.
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
@@ -456,6 +462,7 @@ export type SimEvent = {
   // targetId is the affected entity; x/z anchors the on-screen effect.
   readonly kind:
     | 'damage'
+    | 'miss'
     | 'levelup'
     | 'enhance-success'
     | 'enhance-fail'

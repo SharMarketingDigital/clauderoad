@@ -68,6 +68,12 @@ export interface Entity {
   magDef: number;
   basePhyDef: number;
   baseMagDef: number;
+  // Sistema Fase 3 (Hit x Parry): parry = esquiva do alvo (soma FLAT das armaduras — propriedade do
+  // material, NAO escala por raridade/+N como phyDef). Combat rola acerto vs parry ANTES da mitigacao (so
+  // quando parry>0). Opcional (undefined=0, molde pkActive): mobs nao tem parry -> nao esquivam; derivado dos
+  // itens ja hasheados, entao nao entra no hash direto. base* p/ um futuro parry inato (0 hoje).
+  parry?: number;
+  baseParry?: number;
   // Intelligence (spent attribute points). Drives max MP. No "effective" gear
   // bonus today, so the view's `int` equals this. Enemies carry 0.
   baseInt: number;

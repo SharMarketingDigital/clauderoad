@@ -366,7 +366,7 @@ function entityView(s: EntitySnap, x: number, z: number, facing: number): Entity
     hp: s.hp, maxHp: s.maxHp, mp: 0, maxMp: 0,
     level: 1, xp: 0, xpToNext: 1, attrPoints: 0,
     gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: s.weaponPlus,
-    phyDef: 0, magDef: 0, // K6: placeholders (defesa de jogadores remotos não é exibida, igual str/int)
+    phyDef: 0, magDef: 0, parry: 0, // K6/Fase 3: placeholders (defesa/esquiva de jogadores remotos não é exibida, igual str/int)
     boss: s.boss, tier: s.tier, species: s.species, hostile: s.hostile, dead: s.dead, statuses: s.statuses,
     mastery: s.mastery, // the remote player's class skin selector (from the snapshot)
     loot: s.loot ?? null, // GDD v0.5 (loot físico): the dropped stack, so remote ground loot shows its contents (offline parity)
@@ -385,7 +385,7 @@ function mergeSelf(v: EntityView, s: SelfSnap): EntityView {
     level: s.level, xp: s.xp, xpToNext: s.xpToNext, attrPoints: s.attrPoints,
     gold: s.gold, sp: s.sp, str: s.str, int: s.int,
     weaponDamage: s.weaponDamage, weaponPlus: s.weaponPlus,
-    phyDef: s.phyDef, magDef: s.magDef, // K6: defesa autoritativa do jogador local (vence o placeholder de entityView)
+    phyDef: s.phyDef, magDef: s.magDef, parry: s.parry, // K6/Fase 3: defesa+esquiva autoritativas do jogador local (vencem os placeholders de entityView)
   };
 }
 

@@ -20,7 +20,7 @@ export class CombatText {
     screenX: number,
     screenY: number,
     text: string,
-    variant: 'damage' | 'levelup' | 'fail' | 'heal' | 'hurt' = 'damage',
+    variant: 'damage' | 'levelup' | 'fail' | 'heal' | 'hurt' | 'miss' = 'damage',
     crit = false, // a critical hit: adds the .fct-crit modifier (bigger, hotter) on top of the variant
   ): void {
     const el = document.createElement('div');

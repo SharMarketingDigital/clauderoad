@@ -181,6 +181,13 @@ export function xpForLevel(level: number): number {
 // grind. Raise this when the map gains rings.
 export const LEVEL_CAP = 10;
 
+// Sistema Fase 3 (Hit x Parry): esquiva por peça de ARMADURA, derivada do GRAU (a inversão de material do
+// SRO: leve esquiva mais, pesado menos). Couro g1 = 3 · malha g2 = 2 · placa g3 = 1, por peça, FLAT (não
+// escala por raridade/+N — é propriedade do material). Só os 5 slots defensivos (escudo dá block, não parry).
+// Números provisórios, tunáveis no rebalance ofensivo.
+const ARMOR_PARRY_SLOTS: ReadonlySet<EquipSlot> = new Set<EquipSlot>(['helmet', 'chest', 'hands', 'legs', 'feet']);
+const ARMOR_PARRY_BY_DEGREE: Record<number, number> = { 1: 3, 2: 2, 3: 1 };
+
 // Party (social) commands — applied even when a player's auto-play (bot) is ON, since
 // auto-play owns only combat + movement, not the player's group membership.
 // Social commands work even while auto-play (bot) is ON — the bot owns only combat + movement.
@@ -1575,6 +1582,7 @@ export class Sim implements IWorld {
         int: e.baseInt,
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva (base+gear) p/ a ficha
+        parry: e.parry ?? 0, // Fase 3 (Hit × Parry): esquiva efetiva (0 p/ mobs) — a ficha exibe, o combate rola contra ela
         boss: e.boss,
         tier: e.tier,
         species: e.species,
@@ -1719,9 +1727,12 @@ export class Sim implements IWorld {
   // hit reaches the duel opponent (hitPlayer, which honors the safe-zone + ends/credits the duel on
   // a down). canAttack already gated WHO is hittable, so a player target here is always the active
   // duel opponent — the routing stays a simple kind switch.
-  private hitTarget(t: Entity, hit: Damage, attacker: Entity): void {
-    if (t.kind === 'player') this.hitPlayer(t, hit, attacker);
-    else this.hitEnemy(t, hit, attacker);
+  // Returns whether the hit LANDED, so a caster can gate an on-hit debuff on it (a dodged PvP cast
+  // grants no stun/slow/bleed — same rule as a dodged mob bite). PvE always connects: mobs carry parry 0.
+  private hitTarget(t: Entity, hit: Damage, attacker: Entity): boolean {
+    if (t.kind === 'player') return this.hitPlayer(t, hit, attacker);
+    this.hitEnemy(t, hit, attacker);
+    return true; // PvE: hitEnemy has no dodge path (mobs never parry), so a hit always connects
   }
 
   // swing every `swingTicks`. The timer is preserved while out of range, so a
@@ -3002,10 +3013,12 @@ export class Sim implements IWorld {
     let bonusMaxMp = 0;
     let bonusPhyDef = 0; // K3: physical defense from gear
     let bonusMagDef = 0; // K3: magical defense from gear
+    let bonusParry = 0; // Fase 3 (Hit x Parry): esquiva FLAT das armaduras (derivada do grau/material)
     for (const slot of EQUIP_SLOTS) {
       const eq = p.equipment[slot];
-      const stats = eq ? ITEMS[eq.itemId]?.stats : undefined;
-      if (!eq || !stats) continue;
+      const def = eq ? ITEMS[eq.itemId] : undefined;
+      const stats = def?.stats;
+      if (!eq || !def || !stats) continue;
       // base -> rarity-scaled -> "+N"-scaled -> durability-scaled. Higher rarity AND
       // higher "+" grow the bonus; worn-down gear (low durability) gives less of it.
       // At full durability the factor is exactly 1, so equipping is unchanged.
@@ -3017,6 +3030,9 @@ export class Sim implements IWorld {
       bonusMaxMp += scale(stats.maxMp ?? 0);
       bonusPhyDef += scale(stats.phyDef ?? 0); // K3: same rarity/+N/durability scale as the stats above
       bonusMagDef += scale(stats.magDef ?? 0); // K3
+      // Fase 3 (Hit x Parry): parry FLAT por peça de armadura, derivado do grau (couro>malha>placa); NÃO
+      // passa por scale() (é do material, não da qualidade); só os 5 slots defensivos.
+      if (ARMOR_PARRY_SLOTS.has(slot)) bonusParry += ARMOR_PARRY_BY_DEGREE[def.degree ?? 1] ?? 0;
     }
     // The active weapon mastery's passive is always on (e.g. Lança's +HP).
     const passive = this.activeMastery(p).passive;
@@ -3052,6 +3068,7 @@ export class Sim implements IWorld {
     // not read these yet; Gabriel's mitigate() will (phyDef reduces physical; magDef adds to Int resist).
     p.phyDef = p.basePhyDef + bonusPhyDef;
     p.magDef = p.baseMagDef + bonusMagDef;
+    p.parry = (p.baseParry ?? 0) + bonusParry; // Fase 3 (Hit x Parry): esquiva efetiva (base + armaduras)
     if (p.hp > p.maxHp) p.hp = p.maxHp;
     if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
@@ -3114,11 +3131,13 @@ export class Sim implements IWorld {
       for (const e of this.enemiesInCone(p)) {
         // One compute() per enemy => one crit roll per enemy, exactly as the old per-enemy
         // rollCrit. Same rng draw order, so the hash is unchanged.
-        this.hitTarget(e, combat.compute({
+        const landed = this.hitTarget(e, combat.compute({
           attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
           critChance: this.critChance(p), rng: this.rng,
         }), p);
-        if (e.hp > 0) this.applyCastEffects(e, def, p);
+        // Debuff só se o golpe CONECTOU (esquiva ⇒ sem on-hit status) e o alvo sobreviveu. Em PvE `landed`
+        // é sempre true (mobs não esquivam), então o hash fica idêntico; o gate só afeta o cast PvP.
+        if (landed && e.hp > 0) this.applyCastEffects(e, def, p);
       }
       return;
     }
@@ -3150,12 +3169,14 @@ export class Sim implements IWorld {
       }
     }
     this.commitCast(p, def, slot);
-    this.hitTarget(t, combat.compute({
+    const landed = this.hitTarget(t, combat.compute({
       attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
       critChance: this.critChance(p), rng: this.rng,
     }), p);
-    // Debuff the target — only if it survived the hit.
-    if (t.hp > 0) this.applyCastEffects(t, def, p);
+    // Debuff the target — only if the hit CONNECTED (a dodge grants no on-hit status, exactly like a
+    // dodged mob bite) and it survived. PvE: `landed` is always true (mobs never dodge), so the hash is
+    // unchanged; the gate only bites the PvP cast path.
+    if (landed && t.hp > 0) this.applyCastEffects(t, def, p);
   }
 
   // Spend MP and start the global + own cooldowns for a committed cast.
@@ -3383,10 +3404,10 @@ export class Sim implements IWorld {
         e.nextSwingAt = this.tick + Math.round(e.swingTicks / this.slowFactor(e)); // slow -> slower bites
         // An enemy bite: a basic physical hit. critChance 0 => no crit roll (enemies never
         // crit today), so it draws NO rng — identical to the old direct meleeDamage call.
-        this.hitPlayer(target, combat.compute({
+        const landed = this.hitPlayer(target, combat.compute({
           attacker: e, rank: 1, damageType: 'physical', critChance: 0, rng: this.rng,
         }));
-        this.applyEnemyOnHit(e, target); // chance to inflict a status (slow / bleed / stun)
+        if (landed) this.applyEnemyOnHit(e, target); // chance to inflict a status (slow / bleed / stun) — só se o golpe conectou
       }
       if (!rooted && !this.isRooted(e) && dist > stopDist) {
         // A rooted boss (and a stunned/rooted enemy) holds position — it only bites in
@@ -3424,11 +3445,35 @@ export class Sim implements IWorld {
   // renderer flashes the player and pops the number), and downs the player when HP hits 0. The
   // optional `attacker` is set for PvP (a duel opponent) so the safe-zone can withhold the blow in
   // town; mob bites pass none (their bite already gates the safe-zone), and a DoT passes its source.
-  private hitPlayer(p: Entity, hit: Damage, attacker?: Entity): void {
-    if (hit.amount <= 0 || p.deadUntil !== 0) return; // ignore hits on an already-downed spirit
+  // Returns whether the hit LANDED (false on an ignored/withheld hit OR a dodge) so the caller can gate
+  // an on-hit status — a dodged bite grants no slow/bleed/stun. `dodgeable` is false for DoT ticks: a
+  // bleed/poison already inside you is NOT evaded (and, gating BEFORE the roll, keeps the DoT path from
+  // ever touching the rng — byte-identical for armored and bare targets alike).
+  private hitPlayer(p: Entity, hit: Damage, attacker?: Entity, dodgeable = true): boolean {
+    if (hit.amount <= 0 || p.deadUntil !== 0) return false; // ignore hits on an already-downed spirit
     // PvP safe-zone sanctuary: a PLAYER attacker deals NO damage while either side stands in the
     // central town, mirroring the mob rule that won't bite a player in the safe-zone.
-    if (attacker?.kind === 'player' && (zoneAt(p.x, p.z).safe || zoneAt(attacker.x, attacker.z).safe)) return;
+    if (attacker?.kind === 'player' && (zoneAt(p.x, p.z).safe || zoneAt(attacker.x, attacker.z).safe)) return false;
+    // Hit × Parry (Fase 3): ANTES de qualquer mitigação, o alvo pode ESQUIVAR o golpe inteiro. O roll é gated
+    // por parry>0 (molde do crit): um alvo sem esquiva NUNCA toca o stream → mundo sem armadura byte-idêntico.
+    // A chance é a do atacante CONECTAR (hitChance); rng.next() >= chance ⇒ esquivou. Mobs têm parry 0, então
+    // só o PLAYER esquiva (farm inalterado). O crit já foi rolado no swing (compute) — um golpe esquivado o
+    // descarta. Uma esquiva ainda conta como combate (segura o regen), igual a um golpe recebido.
+    const parry = p.parry ?? 0;
+    if (dodgeable && parry > 0 && this.rng.next() >= combat.hitChance(combat.BASE_HIT_RATE, parry)) {
+      p.combatUntil = this.tick + REGEN_LINGER_TICKS;
+      if (attacker?.kind === 'player') attacker.combatUntil = p.combatUntil;
+      this.events.push({
+        seq: this.nextEventSeq++,
+        tick: this.tick,
+        kind: 'miss',
+        targetId: p.id,
+        amount: 0,
+        x: p.x,
+        z: p.z,
+      });
+      return false; // esquivou — sem dano, sem on-hit status, sem checagem de morte
+    }
     // Gear/armor mitigation (combat.mitigate): passthrough today (no armor yet), so
     // `incoming` === hit.amount. Then the Postura Defensiva BUFF — a temporary STATUS, not
     // gear — applies here at the apply step (GDD option A), floored at 1 so a mitigated blow
@@ -3449,6 +3494,7 @@ export class Sim implements IWorld {
       crit: hit.crit, // forwarded for the crit pop; the value was already rolled in compute()
     });
     if (p.hp <= 0) this.killPlayer(p, attacker);
+    return true; // landed
   }
 
   // ---------- status effects ----------
@@ -3558,8 +3604,9 @@ export class Sim implements IWorld {
     const hit: Damage = { amount: dmg, type: 'physical', crit: false };
     if (e.kind === 'player') {
       // Pass the source so a PvP bleed (a duel opponent's DoT) honors the safe-zone in hitPlayer
-      // just like a direct hit; a mob's DoT (source is an enemy) skips that PvP-only check.
-      this.hitPlayer(e, hit, this.ents.get(source));
+      // just like a direct hit; a mob's DoT (source is an enemy) skips that PvP-only check. NOT dodgeable
+      // (dodgeable=false): a DoT already inside you can't be evaded — the bleed ticks regardless of parry.
+      this.hitPlayer(e, hit, this.ents.get(source), false);
     } else if (e.kind === 'enemy') {
       // Credit the source if it still exists; otherwise credit no one (use the
       // victim as a non-player "killer" so killEnemy grants no XP/loot) rather

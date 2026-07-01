@@ -700,6 +700,15 @@ html, body {
   text-shadow: 0 0 6px #7a1c1c, 0 1px 2px #000;
 }
 
+/* Esquiva (Hit × Parry): o alvo desviou o golpe. Um pop leve, branco-frio e itálico, menor que um número
+   de dano — lê como "nada te acertou", sem competir com os números vermelhos. */
+.fct-miss {
+  font-size: 17px;
+  font-style: italic;
+  color: #d8e4f0;
+  text-shadow: 0 0 5px #33506e, 0 1px 2px #000;
+}
+
 /* Critical hit: bigger + a stronger glow on top of the variant. Outgoing crits also
    go hot-orange (reserve that color for crits); incoming crits stay red but big. */
 .fct-crit {

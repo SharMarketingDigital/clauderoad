@@ -92,6 +92,21 @@ export function compute(ctx: OffenseContext): Damage {
 // A critical hit deals this multiple (Spear's Fúria buff; the Arco precision crits).
 export const CRIT_MULT = 2.0;
 
+// ---- Hit × Parry (Fase 3): a chance de um golpe CONECTAR, antes do dano ----
+// Compara a precisão do atacante (hitRate) com a esquiva do alvo (parry). PURO — o ROLL fica no SIM (gated
+// por parry>0), preservando o contrato "1 draw gated" de compute() E a ordem canônica miss→crit→block→
+// mitigação. Fiel ao SRO (hit-rate vs parry-ratio) na versão enxuta do doc: clamp(BASE + K·(hit−parry),
+// MIN, MAX). Números provisórios/tunáveis (o rebalance ofensivo calibra contra a sensação real).
+export const HIT_BASE = 0.9;
+export const HIT_K = 0.01;
+export const HIT_MIN = 0.2;
+export const HIT_MAX = 0.98;
+export const BASE_HIT_RATE = 10; // precisão-base do atacante (Fatia 1: constante; hit-rate por-arma/mob vem depois)
+export function hitChance(attackerHitRate: number, targetParry: number): number {
+  const c = HIT_BASE + HIT_K * (attackerHitRate - targetParry);
+  return c < HIT_MIN ? HIT_MIN : c > HIT_MAX ? HIT_MAX : c;
+}
+
 // Provisional melee hit. Grounded loosely in WoW Classic, where a swing deals weapon damage
 // plus a contribution from attack power, and Strength feeds AP (~1 AP per STR for warriors).
 // Simplified to weapon + floor(STR * k). No RNG, so it's deterministic; tune later (GDD §B1).

@@ -63,6 +63,11 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
         if (p.visible) combatText.spawn(p.x, p.y, 'QUEBROU!', 'fail');
         if (ev.targetId === world.localPlayerId()) sfx?.enhanceBreak();
+      } else if (ev.kind === 'miss') {
+        // Hit × Parry (Fase 3): o alvo esquivou o golpe inteiro. Um pop leve "Esquiva!" (sem flash/dano);
+        // só players esquivam, então isto é sempre feedback do jogador local (ou de um par no MP).
+        const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
+        if (p.visible) combatText.spawn(p.x, p.y, 'Esquiva!', 'miss');
       } else if (ev.kind === 'heal') {
         renderer.flash(ev.targetId);
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);

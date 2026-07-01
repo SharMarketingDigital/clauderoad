@@ -130,6 +130,7 @@ export interface SelfSnap {
   weaponPlus: number;
   phyDef: number; // K6: defesa física efetiva (base+gear) do jogador local
   magDef: number; // K6: defesa mágica efetiva (base+gear) do jogador local
+  parry: number; // Fase 3 (Hit × Parry): esquiva efetiva (soma FLAT das armaduras) do jogador local
   botActive: boolean; // whether this player's auto-play is on
   autoPotHpPct: number; // Sistema 15 (QoL): this player's auto-pot HP threshold (0..1; 0 = off)
   autoPotMpPct: number; // Sistema 15 (QoL, Fatia 2): this player's auto-pot MP threshold (0..1; 0 = off)
