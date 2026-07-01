@@ -166,7 +166,10 @@ const SPEAR_ABILITIES: AbilityDef[] = [
     mpCost: 0,
     cooldownSecs: 0,
     kind: 'passive',
-    passiveBonus: { weaponDamage: 2 }, // +2 dano de arma por rank (rank 5 = +10): mais mordida
+    // +1 dano de arma por rank (rank 5 = +5, ~meio grau de arma). Menor que as outras passivas em NÚMERO
+    // de propósito: weaponDamage entra no termo MULTIPLICADO das ativas (dano = meleeDamage × mult), então
+    // escala todo o kit — +1/rank alinha o impacto real com os bônus PLANOS das outras (HP/crit/MP).
+    passiveBonus: { weaponDamage: 1 },
   },
 ];
 
