@@ -25,6 +25,10 @@ export interface ItemStats {
 export interface ConsumableEffect {
   healHp?: number; // restore up to this much HP (clamped to maxHp)
   healMp?: number; // restore up to this much MP (clamped to maxMp) — for a future Mana Potion
+  // Sistema 2 (respec, fiel ao "reset scope 1828" do Silkroad): usar devolve TODO o SP gasto acima do
+  // rank 1 e zera os ranks de skill. Maestria = arma equipada, então NÃO há reset de maestria (corte
+  // consciente). Não cura; ignora o cooldown de poção; recusa (sem consumir) se nada foi investido.
+  resetSkills?: boolean;
 }
 
 export interface ItemDef {
@@ -125,6 +129,10 @@ export const ITEMS: Record<string, ItemDef> = {
   // caps the drop to the floor. A plain material (the flag drives it, not an item field), à
   // la the elixirs (no consumable effect).
   protect_stone: { id: 'protect_stone', name: 'Pedra de Proteção', value: 30 },
+  // Sistema 2 (respec): o pergaminho de reinício de perícias — consumível vendido pelo alquimista. Usar
+  // devolve todo o SP investido e zera os ranks, pra re-alocar a build. Análogo fiel ao item de reset do
+  // Silkroad (escopo 1828). Preço na loja (vendor.ts) é o "custo" do respec.
+  skill_reset: { id: 'skill_reset', name: 'Pergaminho de Reinício', consumable: { resetSkills: true }, value: 60 },
   // GDD v0.5 (Pets): the grab pet — a PERMANENT companion bought from the vendor. Holding the item IS
   // owning the pet; summoning it (tecla P) spawns a follower that auto-collects ground loot. Not
   // equippable/consumable — a plain ownership token kept in the bag (like a Silkroad pet card).

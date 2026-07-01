@@ -24,6 +24,14 @@ export function skillUpgradeCost(rank: number): number {
   return SKILL_SP_COST[rank - 1] ?? 0;
 }
 
+// Total SP invested to reach `rank` from rank 1 (rank 1 => 0; rank 5 => 10+25+45+70 = 150). Exactly what
+// a skill reset (respec) refunds for a skill at this rank — the sum of the per-degrau costs paid. Pure.
+export function skillSpInvested(rank: number): number {
+  let sp = 0;
+  for (let r = 1; r < rank; r++) sp += skillUpgradeCost(r);
+  return sp;
+}
+
 // Damage multiplier for an ability at `rank` (1.0 at rank 1). Pure & deterministic.
 export function rankDamageMult(rank: number): number {
   return 1 + SKILL_DAMAGE_PER_RANK * (Math.max(1, rank) - 1);

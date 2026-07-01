@@ -49,6 +49,9 @@ const ALCHEMIST_STOCK: VendorStockEntry[] = [
   { itemId: 'copper_earring', price: 70 },
   { itemId: 'copper_ring', price: 70 },
   { itemId: 'pet_grab', price: 250 }, // GDD v0.5 (Pets): buy once (permanent), summon/dismiss with F
+  // Sistema 2 (respec): o pergaminho de reinício. Preço meaningful (acima do pet) = o "custo escalado"
+  // do respec do Silkroad, adaptado à nossa economia: um freio pra desencorajar respec casual, não um muro.
+  { itemId: 'skill_reset', price: 300 },
 ];
 
 // The 4 specialized shops, in a small market by the gate. NOTE: the BOTICÁRIO sells potions — the bot's

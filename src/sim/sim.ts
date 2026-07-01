@@ -36,7 +36,7 @@ import {
 } from './content/enhance';
 import { enhanceChance, enhanceStat, resolveEnhance, needsBreakRoll } from './enhance';
 import {
-  SKILL_MAX_RANK, skillUpgradeCost, rankEffectMult,
+  SKILL_MAX_RANK, skillUpgradeCost, skillSpInvested, rankEffectMult,
 } from './content/skill_ranks';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
@@ -2269,6 +2269,19 @@ export class Sim implements IWorld {
   private useItem(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
     const effect = ITEMS[itemId]?.consumable;
     if (!effect) return; // not a consumable
+    // Sistema 2 (respec): a skill-reset scroll refunds ALL SP spent above rank 1 and zeros every rank, to
+    // re-allocate the build. Faithful to Silkroad's reset item (escopo 1828). Not gated by the potion
+    // cooldown; refuses (no consume, no change) when nothing was invested, so it's never wasted. Pure
+    // arithmetic over p.sp/p.skillRanks (both already saved) — deterministic, no Rng.
+    if (effect.resetSkills) {
+      const refunded = Object.values(p.skillRanks).reduce((sp, rank) => sp + skillSpInvested(rank), 0);
+      if (refunded <= 0) return; // nada investido -> não queima o pergaminho
+      if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
+      p.sp += refunded;
+      p.skillRanks = {};
+      this.recomputeStats(p); // passives fold by rank -> zerar os ranks derruba-os ao baseline (rank 1)
+      return;
+    }
     if (this.tick < p.potionReadyAt) return; // shared potion cooldown still running
     // How much it WOULD restore, each capped to the headroom below the max.
     const healHp = effect.healHp ? Math.min(effect.healHp, p.maxHp - p.hp) : 0;
