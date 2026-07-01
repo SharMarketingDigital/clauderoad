@@ -708,60 +708,52 @@ export class Sim implements IWorld {
     return this.abilitiesFor(this.localId);
   }
 
-  // The action bar for a SPECIFIC player (live cooldown/GCD/MP/rank state). The server
-  // queries this per client to build that player's bar; IWorld abilities() uses the local one.
+  // The active-skill list for a SPECIFIC player (live cooldown/GCD/MP/rank state) — the WHOLE kit, locked
+  // and unlocked, each flagged with `unlocked`/`unlockLevel` (Sistema 1). The server queries this per
+  // client; IWorld abilities() uses the local one. The HUD renders only the unlocked ones on the action
+  // bar (the bar grows with level) and previews the locked ones greyed in the skills panel.
   abilitiesFor(id: number): ReadonlyArray<AbilityView> {
     const p = this.ents.get(id);
-    const kit = p
-      ? this.activeMastery(p).abilities.filter((def) => def.kind !== 'passive' && this.skillUnlocked(p, def)) // só ATIVAS destravadas (a barra cresce; passivas ficam fora)
-      : MASTERIES[DEFAULT_MASTERY].abilities.filter((def) => def.kind !== 'passive');
-    return kit.map((def) => {
-      const cdLeft = p ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
-      const gcdLeft = p ? Math.max(0, p.gcdUntil - this.tick) : 0;
-      const ready = !!p && cdLeft === 0 && gcdLeft === 0 && p.mp >= def.mpCost;
-      const rank = p ? this.skillRank(p, def) : 1;
-      return {
-        slot: def.slot,
-        name: def.name,
-        icon: def.icon,
-        mpCost: def.mpCost,
-        ready,
-        cooldownRemaining: cdLeft * DT, // ticks -> seconds
-        cooldownTotal: def.cooldownSecs,
-        rank,
-        maxRank: SKILL_MAX_RANK,
-        rankCost: skillUpgradeCost(rank),
-      };
-    });
+    const src = p ? this.activeMastery(p).abilities : MASTERIES[DEFAULT_MASTERY].abilities;
+    return src.filter((def) => def.kind !== 'passive').map((def) => this.projectSkill(p, def));
   }
 
   passives(): ReadonlyArray<AbilityView> {
     return this.passivesFor(this.localId);
   }
 
-  // The learnable PASSIVE skills for a SPECIFIC player (Sistema 2) — the active mastery's unlocked
-  // passives, with live rank/cost so the skills panel can show + rank them. NEVER the action bar
-  // (those come from abilitiesFor); passives are always-on and never cast.
+  // The learnable PASSIVE skills for a SPECIFIC player (Sistema 2) — the active mastery's passives (locked
+  // AND unlocked, flagged), so the skills panel can preview + rank them. NEVER the action bar (abilitiesFor);
+  // passives are always-on and never cast.
   passivesFor(id: number): ReadonlyArray<AbilityView> {
     const p = this.ents.get(id);
-    const kit = p
-      ? this.activeMastery(p).abilities.filter((def) => def.kind === 'passive' && this.skillUnlocked(p, def))
-      : MASTERIES[DEFAULT_MASTERY].abilities.filter((def) => def.kind === 'passive');
-    return kit.map((def) => {
-      const rank = p ? this.skillRank(p, def) : 1;
-      return {
-        slot: def.slot,
-        name: def.name,
-        icon: def.icon,
-        mpCost: 0, // passives cost no MP and have no cooldown — they're always on
-        ready: true,
-        cooldownRemaining: 0,
-        cooldownTotal: 0,
-        rank,
-        maxRank: SKILL_MAX_RANK,
-        rankCost: skillUpgradeCost(rank),
-      };
-    });
+    const src = p ? this.activeMastery(p).abilities : MASTERIES[DEFAULT_MASTERY].abilities;
+    return src.filter((def) => def.kind === 'passive').map((def) => this.projectSkill(p, def));
+  }
+
+  // Project one ability/passive def into its live AbilityView (or the default kit when p is undefined).
+  // Carries the destrave flags (Sistema 1: unlocked/unlockLevel) so the HUD can grow the action bar and
+  // preview locked skills. A locked or passive skill is never "ready" to cast.
+  private projectSkill(p: Entity | undefined, def: AbilityDef): AbilityView {
+    const passive = def.kind === 'passive';
+    const unlocked = p ? this.skillUnlocked(p, def) : true;
+    const cdLeft = p && !passive ? Math.max(0, (p.abilityReadyAt[def.slot] ?? 0) - this.tick) : 0;
+    const gcdLeft = p && !passive ? Math.max(0, p.gcdUntil - this.tick) : 0;
+    const rank = p ? this.skillRank(p, def) : 1;
+    return {
+      slot: def.slot,
+      name: def.name,
+      icon: def.icon,
+      mpCost: passive ? 0 : def.mpCost,
+      ready: passive ? unlocked : unlocked && !!p && cdLeft === 0 && gcdLeft === 0 && p.mp >= def.mpCost,
+      cooldownRemaining: cdLeft * DT, // ticks -> seconds (0 for passives / no player)
+      cooldownTotal: passive ? 0 : def.cooldownSecs,
+      rank,
+      maxRank: SKILL_MAX_RANK,
+      rankCost: skillUpgradeCost(rank),
+      unlocked,
+      unlockLevel: abilityUnlockLevel(def),
+    };
   }
 
   inventory(): InventoryView {

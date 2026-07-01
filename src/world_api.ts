@@ -403,6 +403,12 @@ export interface AbilityView {
   readonly rank: number;
   readonly maxRank: number;
   readonly rankCost: number;
+  // Sistema 1 (destrave por nível): whether the player's level has reached this skill's unlock, and the
+  // level it unlocks at. abilities()/passives() return the FULL kit (locked + unlocked); the HUD renders
+  // only unlocked skills on the action bar (the bar grows) and previews the locked ones greyed in the
+  // skills panel ("Destrava no nv X"). Everything on the bar is unlocked:true.
+  readonly unlocked: boolean;
+  readonly unlockLevel: number;
 }
 
 // Transient things that happened inside a tick, for presentation only (floating

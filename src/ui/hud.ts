@@ -401,7 +401,7 @@ export class Hud {
     this.goldAmt.textContent = String(p.gold);
     this.spAmt.textContent = String(p.sp);
 
-    this.updateActionBar(world.abilities());
+    this.updateActionBar(world.abilities().filter((a) => a.unlocked)); // a barra cresce: só as destravadas
     if (this.bagOpen) this.updateBag(world.inventory(), p);
     if (this.alchemyOpen) this.updateAlchemy(world.inventory());
     if (this.shopOpen) this.updateShop(world, p);
@@ -413,23 +413,31 @@ export class Hud {
   // Skills panel (GDD B4): each ability's rank + the SP cost to raise it, with a
   // "Subir" button gated on SP and the rank cap. Rebuilt only when something changed.
   private updateSkills(world: IWorld, p: EntityView): void {
-    const abilities = world.abilities();
-    const passives = world.passives(); // Sistema 2: always-on skills, ranked with SP (never on the bar)
+    const abilities = world.abilities(); // TODAS as ativas (destravadas + bloqueadas), com flag de destrave
+    const passives = world.passives(); // Sistema 2: always-on skills (também com o flag); nunca na barra
     this.skillsSp.textContent = String(p.sp);
-    const rowSig = (a: AbilityView) => `${a.slot}:${a.name}:${a.rank}:${a.maxRank}:${a.rankCost}`;
+    const rowSig = (a: AbilityView) =>
+      `${a.slot}:${a.name}:${a.rank}:${a.maxRank}:${a.rankCost}:${a.unlocked ? 1 : 0}:${a.unlockLevel}`;
     const sig =
       `${p.sp}|` + abilities.map(rowSig).join(',') + '|P|' + passives.map(rowSig).join(',');
     if (sig === this.lastSkillsSig) return; // nothing changed -> don't thrash the DOM
     this.lastSkillsSig = sig;
 
     this.skillsList.textContent = '';
-    // One row per skill: name (+ "passiva" tag) | rank, and a "Subir" button gated on SP / the cap.
-    // The rank-up command routes by slot, so passives (slot 5) rank up through the same path.
+    // One row per skill. UNLOCKED: name (+ "passiva") | rank, with a "Subir" button gated on SP / the cap
+    // (rank-up routes by slot, so passives at slot 5 rank up the same way). LOCKED (Sistema 1): a greyed
+    // preview "Destrava no nível X" with no button — the anticipation of what the next levels bring.
     const addRow = (a: AbilityView, passive: boolean) => {
       const row = document.createElement('div');
+      const tag = passive ? ' · passiva' : '';
+      if (!a.unlocked) {
+        row.className = 'skill-row skill-row-locked';
+        row.append(makeSpan('skill-info', `${a.name}${tag} — Destrava no nível ${a.unlockLevel}`));
+        this.skillsList.appendChild(row);
+        return;
+      }
       row.className = 'skill-row';
-      const label = `${a.name}${passive ? ' · passiva' : ''} | Rank ${a.rank}/${a.maxRank}`;
-      const info = makeSpan('skill-info', label);
+      const info = makeSpan('skill-info', `${a.name}${tag} | Rank ${a.rank}/${a.maxRank}`);
       const btn = document.createElement('button');
       btn.className = 'skill-up-btn';
       if (a.rank >= a.maxRank) {

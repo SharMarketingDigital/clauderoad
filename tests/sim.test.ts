@@ -3239,16 +3239,35 @@ describe('skills destravam por nível (Sistema 1)', () => {
     }
   });
 
-  it('a action bar começa só com o slot 1 e CRESCE conforme o nível', () => {
+  it('a action bar (destravadas) começa só com o slot 1 e CRESCE conforme o nível; o kit completo vem flagueado', () => {
     const sim = new Sim(7); // Espada (default)
+    // abilities() SEMPRE devolve o kit completo (4 ativas); é o flag `unlocked` que cresce. A HUD renderiza
+    // na barra só as destravadas — aqui reproduzo esse filtro.
+    const bar = () => sim.abilities().filter((a) => a.unlocked).map((a) => a.slot);
     setLevel(sim, 1);
-    expect(sim.abilities().map((a) => a.slot)).toEqual([1]); // só Golpe Forte
+    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3, 4]); // kit completo, sempre presente
+    expect(bar()).toEqual([1]); // barra: só Golpe Forte destravado
     setLevel(sim, 3);
-    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2]); // + Postura Defensiva
+    expect(bar()).toEqual([1, 2]); // + Postura Defensiva
     setLevel(sim, 5);
-    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3]); // + Atordoamento
+    expect(bar()).toEqual([1, 2, 3]); // + Atordoamento
     setLevel(sim, 7);
-    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3, 4]); // + Corte Amplo (kit completo da Espada: 4 slots)
+    expect(bar()).toEqual([1, 2, 3, 4]); // + Corte Amplo (kit completo destravado)
+  });
+
+  it('Sistema 1 (HUD do destrave): abilities() flagueia as bloqueadas com o nível de destrave (2N−1)', () => {
+    const sim = new Sim(7); // Espada
+    setLevel(sim, 1);
+    const bySlot = new Map(sim.abilities().map((a) => [a.slot, a]));
+    expect(bySlot.get(1)!.unlocked).toBe(true); // slot 1 destravado no nv1
+    expect(bySlot.get(1)!.unlockLevel).toBe(1);
+    expect(bySlot.get(2)!.unlocked).toBe(false); // slot 2 bloqueado, previsualizado
+    expect(bySlot.get(2)!.unlockLevel).toBe(3);
+    expect(bySlot.get(3)!.unlockLevel).toBe(5);
+    expect(bySlot.get(4)!.unlockLevel).toBe(7);
+    setLevel(sim, 5);
+    expect(sim.abilities().find((a) => a.slot === 3)!.unlocked).toBe(true); // agora destravada
+    expect(sim.abilities().find((a) => a.slot === 4)!.unlocked).toBe(false); // slot 4 ainda no nv7
   });
 
   it('uma skill bloqueada NÃO casta (slot 2 no nível 1 é no-op; destrava no nível certo)', () => {
@@ -3300,17 +3319,20 @@ describe('Sistema 2: passivas (slot 5)', () => {
     }
   });
 
-  it('passives() lista a passiva só quando destravada (nv2), com rank — nunca na barra de ação', () => {
+  it('passives() lista a passiva sempre (previsualizada), flagueando o destrave no nv2 — nunca na barra', () => {
     const sim = new Sim(7); // Espada
     const pid = sim.localPlayerId()!;
     const at = (level: number) => { const s = sim.serializePlayer(pid)!; s.level = level; sim.restorePlayer(pid, s); };
-    at(1); // nv1: passiva bloqueada (destrava no nv2)
-    expect(sim.passives().length).toBe(0);
+    at(1); // nv1: passiva BLOQUEADA, mas previsualizada (Sistema 1: HUD do destrave)
+    const p1 = sim.passives();
+    expect(p1.map((a) => a.name)).toEqual(['Corpo de Ferro']);
+    expect(p1[0].unlocked).toBe(false); // bloqueada
+    expect(p1[0].unlockLevel).toBe(2); // destrava no nv2
     at(2); // nv2: destravada, rank 1
-    const ps = sim.passives();
-    expect(ps.map((a) => a.name)).toEqual(['Corpo de Ferro']);
-    expect(ps[0].rank).toBe(1);
-    expect(ps[0].slot).toBe(5);
+    const p2 = sim.passives();
+    expect(p2[0].unlocked).toBe(true);
+    expect(p2[0].rank).toBe(1);
+    expect(p2[0].slot).toBe(5);
     expect(sim.abilities().some((a) => a.slot === 5)).toBe(false); // a barra nunca mostra passiva
   });
 

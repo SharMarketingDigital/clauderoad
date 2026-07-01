@@ -57,7 +57,14 @@ describe('ServerWorld — Layer 1: combat commands + personal HUD', () => {
     expect(s1.passives.map((p) => p.name)).toEqual(['Corpo de Ferro']); // espelhada no snapshot pessoal
     expect(s1.passives[0].rank).toBe(1);
     expect(s1.passives[0].slot).toBe(5);
+    expect(s1.passives[0].unlocked).toBe(true); // Sistema 1: flag de destrave também no online (nv2)
     expect(s1.abilities.some((ab) => ab.slot === 5)).toBe(false); // NUNCA na action bar (paridade com o offline)
+    // Sistema 1 (HUD do destrave): o kit completo trafega com o flag — o slot 4 (Corte Amplo, nv7) chega ao
+    // cliente BLOQUEADO (unlocked:false) pra o painel de skills previsualizar. Paridade offline/online.
+    const s4 = s1.abilities.find((ab) => ab.slot === 4);
+    expect(s4).toBeDefined();
+    expect(s4!.unlocked).toBe(false);
+    expect(s4!.unlockLevel).toBe(7);
     // ranquear via comando sobe o rank no self state — o online reflete a mesma mecânica do sim
     w.command(a, { t: 'rank-up', slot: 5 });
     w.step();
