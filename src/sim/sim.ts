@@ -2836,6 +2836,12 @@ export class Sim implements IWorld {
     if (!shop) return; // not near any shop NPC
     const entry = shop.stock.find((s) => s.itemId === itemId);
     if (!entry || p.gold < entry.price) return; // not sold by this shop, or can't afford
+    // Sistema 20 (gate de compra por nível, fiel ao refaccesspermissionofshop do SR): não vender gear acima
+    // do reqLevel do comprador — mesmo gate do equip (equipLevelReq), aplicado só a EQUIPÁVEIS (consumíveis
+    // não têm slot -> nunca gated). Defesa em profundidade: hoje o estoque é todo grau-1, então é uma
+    // pré-condição pra quando gear com reqLevel voltar à loja. Puro (comparação inteira, sem Rng).
+    const def = ITEMS[itemId];
+    if (def && def.slot != null && p.level < equipLevelReq(def)) return; // bloqueado: nível insuficiente
     if (!addToBag(p.bag, itemId, 'normal', 0, 1)) return; // bag full -> no purchase, no charge
     p.gold -= entry.price;
   }
