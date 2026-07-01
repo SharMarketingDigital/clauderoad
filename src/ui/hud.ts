@@ -414,17 +414,22 @@ export class Hud {
   // "Subir" button gated on SP and the rank cap. Rebuilt only when something changed.
   private updateSkills(world: IWorld, p: EntityView): void {
     const abilities = world.abilities();
+    const passives = world.passives(); // Sistema 2: always-on skills, ranked with SP (never on the bar)
     this.skillsSp.textContent = String(p.sp);
+    const rowSig = (a: AbilityView) => `${a.slot}:${a.name}:${a.rank}:${a.maxRank}:${a.rankCost}`;
     const sig =
-      `${p.sp}|` + abilities.map((a) => `${a.slot}:${a.name}:${a.rank}:${a.maxRank}:${a.rankCost}`).join(',');
+      `${p.sp}|` + abilities.map(rowSig).join(',') + '|P|' + passives.map(rowSig).join(',');
     if (sig === this.lastSkillsSig) return; // nothing changed -> don't thrash the DOM
     this.lastSkillsSig = sig;
 
     this.skillsList.textContent = '';
-    for (const a of abilities) {
+    // One row per skill: name (+ "passiva" tag) | rank, and a "Subir" button gated on SP / the cap.
+    // The rank-up command routes by slot, so passives (slot 5) rank up through the same path.
+    const addRow = (a: AbilityView, passive: boolean) => {
       const row = document.createElement('div');
       row.className = 'skill-row';
-      const info = makeSpan('skill-info', `${a.name} | Rank ${a.rank}/${a.maxRank}`);
+      const label = `${a.name}${passive ? ' · passiva' : ''} | Rank ${a.rank}/${a.maxRank}`;
+      const info = makeSpan('skill-info', label);
       const btn = document.createElement('button');
       btn.className = 'skill-up-btn';
       if (a.rank >= a.maxRank) {
@@ -437,7 +442,9 @@ export class Hud {
       }
       row.append(info, btn);
       this.skillsList.appendChild(row);
-    }
+    };
+    for (const a of abilities) addRow(a, false);
+    for (const a of passives) addRow(a, true);
   }
 
   // Vendor shop: lists what the vendor sells (buy buttons, gated on gold) and the

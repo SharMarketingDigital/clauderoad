@@ -171,6 +171,11 @@ export class ClientWorld implements IWorld {
     return this.self ? this.self.abilities : EMPTY_ABILITIES;
   }
 
+  // Sistema 2: the local player's learnable passive skills (always-on; rank state) — mirrored from `self`.
+  passives(): ReadonlyArray<AbilityView> {
+    return this.self ? this.self.passives : EMPTY_ABILITIES;
+  }
+
   // The local player's bag/equipment and the vendor view — streamed in `self`.
   inventory(): InventoryView {
     return this.self ? this.self.inventory : EMPTY_INVENTORY;

@@ -130,6 +130,7 @@ export interface SelfSnap {
   botActive: boolean; // whether this player's auto-play is on
   petActive: boolean; // GDD v0.5 (Pets): whether this player currently has a pet summoned
   abilities: AbilityView[]; // the action bar with live cooldown/MP/rank state
+  passives: AbilityView[]; // Sistema 2: the player's learnable passive skills (always-on; rank state for the skills panel)
   inventory: InventoryView; // the player's bag + equipped gear (loot lands here)
   shop: ShopView; // the vendor storefront + whether this player is in range to trade
   storage: StorageView; // K5: the player's warehouse (armazém) contents + whether in range

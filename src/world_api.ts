@@ -457,6 +457,9 @@ export interface IWorld {
   recentEvents(): ReadonlyArray<SimEvent>;
   // The local player's action bar (icons + live cooldown/readiness) for the HUD.
   abilities(): ReadonlyArray<AbilityView>;
+  // The local player's learnable PASSIVE skills (Sistema 2) — always-on, ranked with SP, never cast.
+  // Separate from the action bar; the skills panel lists these with a rank-up button (no cast slot).
+  passives(): ReadonlyArray<AbilityView>;
   // The local player's bag (resolved item names + capacity) for the HUD window.
   inventory(): InventoryView;
   // The vendor's storefront (stock + whether the player is in range) for the shop.

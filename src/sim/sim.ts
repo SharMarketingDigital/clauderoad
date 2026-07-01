@@ -735,6 +735,35 @@ export class Sim implements IWorld {
     });
   }
 
+  passives(): ReadonlyArray<AbilityView> {
+    return this.passivesFor(this.localId);
+  }
+
+  // The learnable PASSIVE skills for a SPECIFIC player (Sistema 2) — the active mastery's unlocked
+  // passives, with live rank/cost so the skills panel can show + rank them. NEVER the action bar
+  // (those come from abilitiesFor); passives are always-on and never cast.
+  passivesFor(id: number): ReadonlyArray<AbilityView> {
+    const p = this.ents.get(id);
+    const kit = p
+      ? this.activeMastery(p).abilities.filter((def) => def.kind === 'passive' && this.skillUnlocked(p, def))
+      : MASTERIES[DEFAULT_MASTERY].abilities.filter((def) => def.kind === 'passive');
+    return kit.map((def) => {
+      const rank = p ? this.skillRank(p, def) : 1;
+      return {
+        slot: def.slot,
+        name: def.name,
+        icon: def.icon,
+        mpCost: 0, // passives cost no MP and have no cooldown — they're always on
+        ready: true,
+        cooldownRemaining: 0,
+        cooldownTotal: 0,
+        rank,
+        maxRank: SKILL_MAX_RANK,
+        rankCost: skillUpgradeCost(rank),
+      };
+    });
+  }
+
   inventory(): InventoryView {
     return this.inventoryFor(this.localId);
   }

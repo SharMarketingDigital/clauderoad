@@ -3258,6 +3258,20 @@ describe('Sistema 2: passivas (slot 5)', () => {
     }
   });
 
+  it('passives() lista a passiva só quando destravada (nv2), com rank — nunca na barra de ação', () => {
+    const sim = new Sim(7); // Espada
+    const pid = sim.localPlayerId()!;
+    const at = (level: number) => { const s = sim.serializePlayer(pid)!; s.level = level; sim.restorePlayer(pid, s); };
+    at(1); // nv1: passiva bloqueada (destrava no nv2)
+    expect(sim.passives().length).toBe(0);
+    at(2); // nv2: destravada, rank 1
+    const ps = sim.passives();
+    expect(ps.map((a) => a.name)).toEqual(['Corpo de Ferro']);
+    expect(ps[0].rank).toBe(1);
+    expect(ps[0].slot).toBe(5);
+    expect(sim.abilities().some((a) => a.slot === 5)).toBe(false); // a barra nunca mostra passiva
+  });
+
   it('a passiva NÃO aparece na barra de ação e castá-la é no-op (não é castável)', () => {
     const sim = new Sim(7); // Espada
     prep(sim);

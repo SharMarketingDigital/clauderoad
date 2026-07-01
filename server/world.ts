@@ -442,6 +442,8 @@ export class ServerWorld {
   // inventory/shop join in a later layer.
   selfState(id: number): SelfSnap {
     const abilities = [...this.sim.abilitiesFor(id)];
+    const passives = [...this.sim.passivesFor(id)]; // Sistema 2: the player's learnable passive skills
+
     const inventory = this.sim.inventoryFor(id); // this player's own bag + gear (its loot)
     const shop = this.sim.shopFor(id); // the vendor view (inRange depends on this player)
     const storage = this.sim.storageFor(id); // K5: the player's warehouse view (inRange too)
@@ -466,7 +468,7 @@ export class ServerWorld {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
         phyDef: 0, magDef: 0,
-        botActive: false, petActive: false, abilities, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
+        botActive: false, petActive: false, abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
     }
@@ -479,7 +481,7 @@ export class ServerWorld {
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       botActive: this.sim.botActiveFor(id),
       petActive: this.sim.petActiveFor(id), // GDD v0.5 (Pets): summon/dismiss state for the HUD toggle
-      abilities, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
+      abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
       matching, partyRequests, myRequestPartyId, duel, duelInvite,
     };
   }
