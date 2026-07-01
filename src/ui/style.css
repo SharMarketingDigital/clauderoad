@@ -709,6 +709,13 @@ html, body {
   text-shadow: 0 0 5px #33506e, 0 1px 2px #000;
 }
 
+/* Block (Fatia 2): o escudo amorteceu o golpe. Aço-ciano com brilho frio — lê como "defendido", distinto
+   do vermelho de dano cheio e do branco-frio itálico da esquiva. O número é o dano JÁ reduzido. */
+.fct-block {
+  color: #7ec8e3;
+  text-shadow: 0 0 6px #2a6f8f, 0 1px 2px #000;
+}
+
 /* Critical hit: bigger + a stronger glow on top of the variant. Outgoing crits also
    go hot-orange (reserve that color for crits); incoming crits stay red but big. */
 .fct-crit {

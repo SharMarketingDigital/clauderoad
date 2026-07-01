@@ -47,6 +47,10 @@ export interface ItemDef {
   // --- K2 degrees (graus por faixa de nível) — campos INTRÍNSECOS à definição do item ---
   degree?: number; // grau do equipamento (1..N); ausente => grau 1 (linha base legada)
   reqLevel?: number; // nível mínimo p/ EQUIPAR; ausente => derivado do grau (degrees.ts), senão 0
+  // Sistema Fase 3 (Hit × Parry, Fatia 2 — Block): chance (0..1) de BLOQUEAR um golpe que conectou —
+  // exclusiva de ESCUDOS (SRO: Block Ratio %, cols 74–78 do escudo). Intrínseca ao item (como degree), FLAT:
+  // NÃO escala por raridade/+N/durabilidade. Ausente/0 => sem block. O par do parry: leve esquiva, pesado bloqueia.
+  blockRatio?: number;
 }
 
 export const ITEMS: Record<string, ItemDef> = {
@@ -65,7 +69,7 @@ export const ITEMS: Record<string, ItemDef> = {
   leather_gloves: { id: 'leather_gloves', name: 'Luvas de Couro', slot: 'hands', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, value: 5 },
   leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14, phyDef: 2, magDef: 1 }, value: 7 },
   leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, value: 5 },
-  wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', stats: { maxHp: 18, phyDef: 2, magDef: 2 }, value: 10 },
+  wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', blockRatio: 0.10, stats: { maxHp: 18, phyDef: 2, magDef: 2 }, value: 10 },
   copper_necklace: { id: 'copper_necklace', name: 'Colar de Cobre', slot: 'necklace', stats: { maxMp: 12 }, value: 12 },
   copper_earring: { id: 'copper_earring', name: 'Brinco de Cobre', slot: 'earring', stats: { str: 1 }, value: 12 },
   copper_ring: { id: 'copper_ring', name: 'Anel de Cobre', slot: 'ring', stats: { str: 1 }, value: 12 },
@@ -116,8 +120,8 @@ export const ITEMS: Record<string, ItemDef> = {
   chain_boots:     { id: 'chain_boots',     name: 'Botas de Malha (2º Grau)',     slot: 'feet',     degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, value: 10 },
   plate_boots:     { id: 'plate_boots',     name: 'Botas de Placas (3º Grau)',    slot: 'feet',     degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, value: 18 },
   // shield (base wooden_shield: maxHp 18 / phyDef 2 / magDef 2)
-  iron_shield:     { id: 'iron_shield',     name: 'Escudo de Ferro (2º Grau)',    slot: 'shield',   degree: 2, reqLevel: 4, stats: { maxHp: 25, phyDef: 3, magDef: 3 }, value: 20 },
-  tower_shield:    { id: 'tower_shield',    name: 'Escudo Torre (3º Grau)',       slot: 'shield',   degree: 3, reqLevel: 8, stats: { maxHp: 32, phyDef: 4, magDef: 4 }, value: 35 },
+  iron_shield:     { id: 'iron_shield',     name: 'Escudo de Ferro (2º Grau)',    slot: 'shield',   degree: 2, reqLevel: 4, blockRatio: 0.15, stats: { maxHp: 25, phyDef: 3, magDef: 3 }, value: 20 },
+  tower_shield:    { id: 'tower_shield',    name: 'Escudo Torre (3º Grau)',       slot: 'shield',   degree: 3, reqLevel: 8, blockRatio: 0.20, stats: { maxHp: 32, phyDef: 4, magDef: 4 }, value: 35 },
   // necklace (base copper_necklace: maxMp 12)
   silver_necklace: { id: 'silver_necklace', name: 'Colar de Prata (2º Grau)',     slot: 'necklace', degree: 2, reqLevel: 4, stats: { maxMp: 17 }, value: 24 },
   gold_necklace:   { id: 'gold_necklace',   name: 'Colar de Ouro (3º Grau)',      slot: 'necklace', degree: 3, reqLevel: 8, stats: { maxMp: 22 }, value: 42 },

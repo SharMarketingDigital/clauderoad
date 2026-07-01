@@ -85,6 +85,7 @@ export interface NetEvent {
   z: number;
   text?: string;
   crit?: boolean; // 'damage' only: the hit was a critical (for a distinct on-screen pop)
+  blocked?: boolean; // 'damage' only: the target's shield blocked (softened) the hit — presentation flag
 }
 
 // One party registered in the PUBLIC matching list ("looking for members"). This is
@@ -131,6 +132,7 @@ export interface SelfSnap {
   phyDef: number; // K6: defesa física efetiva (base+gear) do jogador local
   magDef: number; // K6: defesa mágica efetiva (base+gear) do jogador local
   parry: number; // Fase 3 (Hit × Parry): esquiva efetiva (soma FLAT das armaduras) do jogador local
+  blockRatio: number; // Fase 3 (Block): chance de bloqueio do escudo (0..1) do jogador local
   botActive: boolean; // whether this player's auto-play is on
   autoPotHpPct: number; // Sistema 15 (QoL): this player's auto-pot HP threshold (0..1; 0 = off)
   autoPotMpPct: number; // Sistema 15 (QoL, Fatia 2): this player's auto-pot MP threshold (0..1; 0 = off)

@@ -65,7 +65,7 @@ export class CharacterSheet {
   update(p: EntityView): void {
     const sig = [
       p.name, p.level, p.hp, p.maxHp, Math.round(p.mp), p.maxMp, p.str, p.int,
-      p.weaponDamage, p.weaponPlus, p.phyDef, p.magDef, p.parry, p.attrPoints, p.sp, p.gold,
+      p.weaponDamage, p.weaponPlus, p.phyDef, p.magDef, p.parry, p.blockRatio, p.attrPoints, p.sp, p.gold,
       Math.round(p.xp), p.xpToNext,
     ].join('|');
     if (sig === this.lastSig) return; // nada mudou -> não martela o DOM
@@ -89,6 +89,7 @@ export class CharacterSheet {
     this.body.append(row('Defesa física', String(p.phyDef)));
     this.body.append(row('Defesa mágica', String(p.magDef)));
     this.body.append(row('Esquiva', String(p.parry))); // Fase 3 (Hit × Parry): chance de esquivar golpes cresce com este valor
+    this.body.append(row('Bloqueio', `${Math.round(p.blockRatio * 100)}%`)); // Fase 3 (Block): chance do escudo amortecer um golpe
     // Atributos (só leitura; distribuir pontos é na bolsa, o emissor único)
     this.body.append(section('Atributos'));
     this.body.append(row('Força', String(p.str)));

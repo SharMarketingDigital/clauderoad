@@ -94,6 +94,9 @@ export interface EntityView {
   // phyDef/magDef, o COMBATE já lê isto: antes da mitigação, o alvo pode esquivar o golpe inteiro. Mobs
   // carregam 0 (não esquivam). Exposto pela ficha (a par de phyDef/magDef).
   readonly parry: number;
+  // Block (Fase 3, Fatia 2): chance efetiva (0..1) de o ESCUDO bloquear (amortecer) um golpe que conectou.
+  // 0 sem escudo / para mobs. Exposto pela ficha como % (o par do parry: leve esquiva, pesado bloqueia).
+  readonly blockRatio: number;
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly tier: EnemyTierId; // enemy strength tier ('normal' for the player/NPCs); render scales/tints by it
   readonly species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
@@ -453,6 +456,8 @@ export type SimEvent = {
   //   distinct, bigger pop). 'levelup': amount = new level.
   // 'miss': the target (a player) ESQUIVOU the incoming hit entirely (Hit × Parry) — amount = 0,
   //   x/z anchor a "Miss" pop over the target; no HP lost. Only players dodge (mobs have parry 0).
+  // 'damage' + `blocked`: the target's SHIELD blocked the hit (Fatia 2) — the hit still landed but its
+  //   damage was absorbed (reduced); `amount` is the ALREADY-reduced HP lost. Presentation flag only.
   // 'enhance-success'/'enhance-fail': amount = the item's new "+" level.
   // 'enhance-break': a failed high-"+" attempt destroyed the item; `text` = its name.
   // 'heal': amount = HP/MP restored to targetId (drawn as a green number).
@@ -480,6 +485,7 @@ export type SimEvent = {
   readonly z: number;
   readonly text?: string; // optional label (e.g. a boss name for announcements)
   readonly crit?: boolean; // 'damage' only: the hit was a critical — presentation flag for a distinct number
+  readonly blocked?: boolean; // 'damage' only: the target's shield blocked (softened) the hit — presentation flag
 };
 
 export interface IWorld {

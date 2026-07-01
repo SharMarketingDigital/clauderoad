@@ -31,9 +31,15 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
         const p = renderer.project(ev.x, FCT_WORLD_Y, ev.z);
         if (p.visible) {
           const incoming = ev.targetId === world.localPlayerId();
-          // A crit pops bigger/hotter and gets a "!" — the payoff of the crit roll.
-          const text = ev.crit ? `${ev.amount}!` : String(ev.amount);
-          combatText.spawn(p.x, p.y, text, incoming ? 'hurt' : 'damage', ev.crit ?? false);
+          if (ev.blocked) {
+            // Block (Fase 3): o escudo amorteceu — o número (já reduzido) pop com marca de escudo e estilo
+            // próprio, pra ler distinto da esquiva (que não tira HP). Um bloqueio crítico ainda ganha o "!".
+            combatText.spawn(p.x, p.y, `🛡 ${ev.amount}${ev.crit ? '!' : ''}`, 'block', ev.crit ?? false);
+          } else {
+            // A crit pops bigger/hotter and gets a "!" — the payoff of the crit roll.
+            const text = ev.crit ? `${ev.amount}!` : String(ev.amount);
+            combatText.spawn(p.x, p.y, text, incoming ? 'hurt' : 'damage', ev.crit ?? false);
+          }
         }
         // A subtle camera kick on a crit that involves ME (I landed it on my target, or I took it).
         const mine = ev.targetId === world.localPlayerId() || ev.targetId === world.localTargetId();

@@ -107,6 +107,12 @@ export function hitChance(attackerHitRate: number, targetParry: number): number 
   return c < HIT_MIN ? HIT_MIN : c > HIT_MAX ? HIT_MAX : c;
 }
 
+// ---- Block (Fase 3, Fatia 2): o ESCUDO amortece um golpe que conectou ----
+// Distinto da esquiva: a esquiva ANULA o golpe (miss), o block o AMORTECE — o golpe ainda conecta (dá dano
+// reduzido, ainda aplica on-hit status), mas o escudo absorve a maior parte. Fração provisória (tunável no
+// rebalance). O ROLL (gated por blockRatio>0) e a ordem (miss→crit→block→mitigação) ficam no SIM.
+export const BLOCK_DMG_MULT = 0.25; // um golpe bloqueado entrega 25% do dano (o escudo absorve 75%)
+
 // Provisional melee hit. Grounded loosely in WoW Classic, where a swing deals weapon damage
 // plus a contribution from attack power, and Strength feeds AP (~1 AP per STR for warriors).
 // Simplified to weapon + floor(STR * k). No RNG, so it's deterministic; tune later (GDD §B1).

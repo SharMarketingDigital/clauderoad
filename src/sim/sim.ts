@@ -1583,6 +1583,7 @@ export class Sim implements IWorld {
         weaponPlus: e.equipment.weapon?.plus ?? 0,
         phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva (base+gear) p/ a ficha
         parry: e.parry ?? 0, // Fase 3 (Hit × Parry): esquiva efetiva (0 p/ mobs) — a ficha exibe, o combate rola contra ela
+        blockRatio: e.blockRatio ?? 0, // Fase 3 (Block): chance de bloqueio do escudo (0 p/ mobs)
         boss: e.boss,
         tier: e.tier,
         species: e.species,
@@ -3014,6 +3015,7 @@ export class Sim implements IWorld {
     let bonusPhyDef = 0; // K3: physical defense from gear
     let bonusMagDef = 0; // K3: magical defense from gear
     let bonusParry = 0; // Fase 3 (Hit x Parry): esquiva FLAT das armaduras (derivada do grau/material)
+    let bonusBlock = 0; // Fase 3 (Block): chance de bloqueio FLAT do escudo equipado (uma peça só)
     for (const slot of EQUIP_SLOTS) {
       const eq = p.equipment[slot];
       const def = eq ? ITEMS[eq.itemId] : undefined;
@@ -3033,6 +3035,9 @@ export class Sim implements IWorld {
       // Fase 3 (Hit x Parry): parry FLAT por peça de armadura, derivado do grau (couro>malha>placa); NÃO
       // passa por scale() (é do material, não da qualidade); só os 5 slots defensivos.
       if (ARMOR_PARRY_SLOTS.has(slot)) bonusParry += ARMOR_PARRY_BY_DEGREE[def.degree ?? 1] ?? 0;
+      // Fase 3 (Block): a chance de bloqueio é intrínseca ao ESCUDO (def.blockRatio); FLAT, sem scale() —
+      // como o parry, é propriedade do item, não da qualidade. Só escudos têm; há um slot de escudo só.
+      bonusBlock += def.blockRatio ?? 0;
     }
     // The active weapon mastery's passive is always on (e.g. Lança's +HP).
     const passive = this.activeMastery(p).passive;
@@ -3069,6 +3074,8 @@ export class Sim implements IWorld {
     p.phyDef = p.basePhyDef + bonusPhyDef;
     p.magDef = p.baseMagDef + bonusMagDef;
     p.parry = (p.baseParry ?? 0) + bonusParry; // Fase 3 (Hit x Parry): esquiva efetiva (base + armaduras)
+    // Fase 3 (Block): chance efetiva de bloqueio (base + escudo), teto em 1 (uma chance não passa de 100%).
+    p.blockRatio = Math.min(1, (p.baseBlockRatio ?? 0) + bonusBlock);
     if (p.hp > p.maxHp) p.hp = p.maxHp;
     if (p.mp > p.maxMp) p.mp = p.maxMp;
   }
@@ -3474,11 +3481,18 @@ export class Sim implements IWorld {
       });
       return false; // esquivou — sem dano, sem on-hit status, sem checagem de morte
     }
-    // Gear/armor mitigation (combat.mitigate): passthrough today (no armor yet), so
-    // `incoming` === hit.amount. Then the Postura Defensiva BUFF — a temporary STATUS, not
-    // gear — applies here at the apply step (GDD option A), floored at 1 so a mitigated blow
-    // still registers; the event shows the ACTUAL HP lost.
-    const incoming = combat.mitigate({ hit, target: p });
+    // Block (Fase 3, Fatia 2): um golpe que CONECTOU (não esquivado) pode ser BLOQUEADO pelo escudo. O roll é
+    // gated por blockRatio>0 (mundo sem escudo byte-idêntico) e só em golpes esquiváveis (dodgeable) — um DoT
+    // já dentro de você não se bloqueia. Diferente da esquiva, o golpe AINDA conecta: dá dano REDUZIDO (o
+    // escudo absorve a maior parte) e ainda aplica on-hit status. Vem DEPOIS da esquiva (ordem canônica
+    // miss→crit→block→mitigação); o crit já está embutido em hit.amount (rolado no swing).
+    const blockRatio = p.blockRatio ?? 0;
+    const blocked = dodgeable && blockRatio > 0 && this.rng.next() < blockRatio;
+    const working = blocked ? { ...hit, amount: Math.round(hit.amount * combat.BLOCK_DMG_MULT) } : hit;
+    // Gear/armor mitigation (combat.mitigate) roda sobre o golpe (já amortecido, se bloqueou). Depois a
+    // Postura Defensiva BUFF (status, não gear) no apply-step; tudo floored em 1 (um golpe que conectou
+    // registra ≥1); o evento mostra o HP realmente perdido.
+    const incoming = combat.mitigate({ hit: working, target: p });
     const taken = Math.max(1, Math.round(incoming * this.defenseFactor(p)));
     p.hp = Math.max(0, p.hp - taken);
     p.combatUntil = this.tick + REGEN_LINGER_TICKS; // taking damage holds off regen
@@ -3492,6 +3506,7 @@ export class Sim implements IWorld {
       x: p.x,
       z: p.z,
       crit: hit.crit, // forwarded for the crit pop; the value was already rolled in compute()
+      blocked, // Fase 3 (Block): o escudo amorteceu o golpe — o renderer marca o número (menor + escudo)
     });
     if (p.hp <= 0) this.killPlayer(p, attacker);
     return true; // landed

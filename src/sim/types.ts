@@ -74,6 +74,12 @@ export interface Entity {
   // itens ja hasheados, entao nao entra no hash direto. base* p/ um futuro parry inato (0 hoje).
   parry?: number;
   baseParry?: number;
+  // Sistema Fase 3 (Hit x Parry, Fatia 2 — Block): blockRatio = chance (0..1) de BLOQUEAR um golpe que
+  // conectou, derivada do ESCUDO equipado (FLAT, uma peca so — nao soma). O roll de block vem DEPOIS do de
+  // esquiva (ordem miss->crit->block->mitigacao) e so quando blockRatio>0 (mundo sem escudo byte-identico).
+  // Mobs nao tem escudo -> nao bloqueiam. Opcional (undefined=0); derivado dos itens ja hasheados.
+  blockRatio?: number;
+  baseBlockRatio?: number;
   // Intelligence (spent attribute points). Drives max MP. No "effective" gear
   // bonus today, so the view's `int` equals this. Enemies carry 0.
   baseInt: number;

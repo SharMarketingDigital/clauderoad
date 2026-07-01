@@ -486,7 +486,7 @@ export class ServerWorld {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
-        phyDef: 0, magDef: 0, parry: 0,
+        phyDef: 0, magDef: 0, parry: 0, blockRatio: 0,
         botActive: false, petActive: false, autoPotHpPct: 0, autoPotMpPct: 0, abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
@@ -499,6 +499,7 @@ export class ServerWorld {
       weaponDamage: e.weaponDamage, weaponPlus: e.weaponPlus,
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       parry: e.parry ?? 0, // Fase 3 (Hit × Parry): esquiva efetiva autoritativa
+      blockRatio: e.blockRatio ?? 0, // Fase 3 (Block): chance de bloqueio autoritativa
       botActive: this.sim.botActiveFor(id),
       autoPotHpPct: this.sim.autoPotHpPctFor(id), // Sistema 15 (QoL): HP auto-pot threshold for this player's HUD
       autoPotMpPct: this.sim.autoPotMpPctFor(id), // Sistema 15 (QoL, Fatia 2): MP auto-pot threshold
@@ -556,6 +557,7 @@ export class ServerWorld {
         z: round(ev.z),
         text: ev.text,
         crit: ev.crit, // forward the crit flag so the client can pop a distinct crit number
+        blocked: ev.blocked, // Fase 3 (Block): forward the shield-block flag for the distinct block pop
       });
     }
     // Time-of-day + rain INTENSITY (0..1), both rounded — the same for every client, so
