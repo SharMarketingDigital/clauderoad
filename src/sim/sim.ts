@@ -2906,9 +2906,13 @@ export class Sim implements IWorld {
     const shop = this.nearestShop(p);
     if (!shop || shop.npc.species !== 'alchemist') return; // reciclagem só no alquimista (o NPC de alquimia)
     if (this.botCount(p, r.input) < r.inputQty) return; // não tem os inputs
-    if (!canAccept(p.bag, r.output, 'normal', 0, BAG_SLOTS)) return; // sem espaço pro output -> aborta (sem consumir)
+    // Remove os inputs PRIMEIRO (libera slots), depois adiciona o output — assim uma bolsa cheia cujo próprio
+    // slot do input seria liberado ainda recicla (checar espaço ANTES falharia falsamente). Se mesmo após
+    // liberar não couber, restaura o input: nunca estado parcial, nunca perde item.
     removeFromBag(p.bag, r.input, 'normal', 0, r.inputQty);
-    addToBag(p.bag, r.output, 'normal', 0, r.outputQty);
+    if (!addToBag(p.bag, r.output, 'normal', 0, r.outputQty)) {
+      addToBag(p.bag, r.input, 'normal', 0, r.inputQty); // sem espaço nem após liberar -> desfaz
+    }
   }
 
   // K5: bank a whole bag stack into the player's own warehouse. Requires being near the

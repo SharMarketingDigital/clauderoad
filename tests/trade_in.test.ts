@@ -59,6 +59,38 @@ describe('Sistema 20: trade-in (reciclagem)', () => {
     expect(count(sim, 'protect_stone')).toBe(0);
   });
 
+  it('NÃO recicla numa loja que não é o alquimista (só o alquimista recicla)', () => {
+    const sim = new Sim(7);
+    moveNear(sim, 16, 6); // armadureiro (16,6), a 4 unidades do alquimista -> nearestShop = armadureiro
+    armElixirs(sim, 3);
+    sim.sendCommand({ t: 'redeem', recipe: 0 });
+    sim.step();
+    expect(count(sim, 'elixir_weapon')).toBe(3); // intacto (gate species !== 'alchemist')
+    expect(count(sim, 'protect_stone')).toBe(0);
+  });
+
+  it('recicla com a bolsa CHEIA quando o slot do input se libera (sem falso-bloqueio)', () => {
+    const sim = new Sim(7);
+    moveNear(sim, ALCH_X, ALCH_Z);
+    const pid = sim.localPlayerId()!;
+    // 20 slots (bolsa cheia): slot 0 = 3 elixir_weapon; os outros 19 = itens distintos SEM protect_stone.
+    const filler = ['leather_cap', 'wolf_leather', 'leather_gloves', 'leather_pants', 'leather_boots',
+      'wooden_shield', 'copper_necklace', 'copper_earring', 'copper_ring', 'iron_spear', 'short_bow',
+      'apprentice_staff', 'mana_potion', 'health_potion', 'elixir_armor', 'pet_grab', 'mount_horse',
+      'skill_reset', 'return_scroll'];
+    const save = sim.serializePlayer(pid)!;
+    save.bag = [
+      { itemId: 'elixir_weapon', rarity: 'normal', plus: 0, qty: 3 },
+      ...filler.map((id) => ({ itemId: id, rarity: 'normal' as const, plus: 0, qty: 1 })),
+    ];
+    sim.restorePlayer(pid, save);
+    expect(sim.inventory().stacks.length).toBe(20); // bolsa cheia (20/20)
+    sim.sendCommand({ t: 'redeem', recipe: 0 });
+    sim.step();
+    expect(count(sim, 'elixir_weapon')).toBe(0); // consumidos -> o slot se liberou
+    expect(count(sim, 'protect_stone')).toBe(1); // e o output coube no slot liberado (o fix)
+  });
+
   it('índice de receita inválido é no-op', () => {
     const sim = new Sim(7);
     moveNear(sim, ALCH_X, ALCH_Z);
