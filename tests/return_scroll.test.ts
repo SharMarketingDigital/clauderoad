@@ -57,9 +57,48 @@ describe('Sistema 15: Pergaminho de Retorno', () => {
     expect(hasScroll(sim)).toBe(true); // bloqueado -> o pergaminho NÃO é gasto
   });
 
-  it('o boticário vende o Pergaminho de Retorno', () => {
+  it('o boticário vende os pergaminhos de Retorno e Reverso', () => {
     const apoth = TOWN_SHOPS.find((s) => s.species === 'apothecary')!;
     expect(apoth.stock.some((e) => e.itemId === 'return_scroll')).toBe(true);
+    expect(apoth.stock.some((e) => e.itemId === 'reverse_scroll')).toBe(true);
+  });
+
+  it('o Reverso volta ao ponto de campo anterior (gravado no último recall à cidade)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.gold = 1000;
+    save.bag = [
+      { itemId: 'return_scroll', rarity: 'normal', plus: 0, qty: 1 },
+      { itemId: 'reverse_scroll', rarity: 'normal', plus: 0, qty: 1 },
+    ];
+    sim.restorePlayer(pid, save);
+    sim.sendCommand({ t: 'teleport', cityId: 'leste' }); // vai pra Leste (250,0) — o "ponto de campo"
+    sim.step();
+    // recall à cidade (town) via return scroll -> grava lastFieldPos = (250,0)
+    sim.sendCommand({ t: 'use-item', itemId: 'return_scroll', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(Math.abs(player(sim).x) + Math.abs(player(sim).z)).toBeLessThan(5); // em town
+    // reverse -> volta pro ponto de campo (250,0)
+    sim.sendCommand({ t: 'use-item', itemId: 'reverse_scroll', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(Math.abs(player(sim).x - 250)).toBeLessThan(5); // de volta ao grind
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'reverse_scroll')).toBe(false); // consumido
+  });
+
+  it('o Reverso SEM recall prévio é no-op (não teleporta nem consome)', () => {
+    const sim = new Sim(7);
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.bag = [{ itemId: 'reverse_scroll', rarity: 'normal', plus: 0, qty: 1 }];
+    sim.restorePlayer(pid, save);
+    const x0 = player(sim).x;
+    const z0 = player(sim).z;
+    sim.sendCommand({ t: 'use-item', itemId: 'reverse_scroll', rarity: 'normal', plus: 0 });
+    sim.step();
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'reverse_scroll')).toBe(true); // não gasto
+    expect(player(sim).x).toBe(x0); // não moveu (sem lastFieldPos)
+    expect(player(sim).z).toBe(z0);
   });
 
   it('é determinístico (mesmo seed + comandos => hash idêntico)', () => {

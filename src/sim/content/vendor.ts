@@ -41,6 +41,7 @@ const APOTHECARY_STOCK: VendorStockEntry[] = [
   { itemId: 'health_potion', price: 25 },
   { itemId: 'mana_potion', price: 25 }, // caster sustain (alongside the out-of-combat regen)
   { itemId: 'return_scroll', price: 50 }, // Sistema 15 (QoL): recall à cidade sem esperar o cooldown do Return grátis
+  { itemId: 'reverse_scroll', price: 50 }, // Sistema 15 (QoL): volta ao ponto de campo anterior (pós-recall)
 ];
 const ALCHEMIST_STOCK: VendorStockEntry[] = [
   { itemId: 'elixir_weapon', price: 40 },

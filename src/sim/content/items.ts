@@ -141,6 +141,9 @@ export const ITEMS: Record<string, ItemDef> = {
   // Sistema 15 (QoL): pergaminho de retorno — recall à cidade registrada, consumível. Barato (o Return
   // grátis já existe com cooldown; o scroll troca o cooldown pelo custo do item). Vendido pelo boticário.
   return_scroll: { id: 'return_scroll', name: 'Pergaminho de Retorno', consumable: { recall: 'registered' }, value: 15 },
+  // Sistema 15 (QoL): pergaminho de reverso — volta ao ponto de campo anterior (antes do último recall à
+  // cidade). Útil pra voltar ao grind depois de dar um pulo na cidade. Consumível, vendido pelo boticário.
+  reverse_scroll: { id: 'reverse_scroll', name: 'Pergaminho de Reverso', consumable: { recall: 'lastSpot' }, value: 15 },
   // GDD v0.5 (Pets): the grab pet — a PERMANENT companion bought from the vendor. Holding the item IS
   // owning the pet; summoning it (tecla P) spawns a follower that auto-collects ground loot. Not
   // equippable/consumable — a plain ownership token kept in the bag (like a Silkroad pet card).

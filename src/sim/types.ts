@@ -157,6 +157,11 @@ export interface Entity {
   // Same model as autoPotHpPct — when > 0 and the bot is off, the sim drinks a held Mana Potion below it,
   // sharing the SAME potion cooldown (so HP+MP never stack in one tick — faithful to the SRO potion delay).
   autoPotMpPct?: number;
+  // Sistema 15 (QoL — reverse scroll): the field position the player was at BEFORE their last recall to a
+  // city (free Return or a return scroll). A reverse scroll warps back here, so you can pop to town and
+  // return to your grind spot. Undefined until the first recall (no spawn literal changes). Hashed
+  // (gameplay state a reverse reads) + persisted (survives reload, like returnCity).
+  lastFieldPos?: { x: number; z: number };
   // GDD v0.5 (Pets): present ONLY on a kind 'pet' entity — links the companion to the player it follows.
   // undefined for players/enemies/NPCs/loot, so no existing spawn literal changes and the hash fold stays
   // conditional (mirrors `loot?`). The owner's "has a pet" state is derived from the Sim's petOf index.

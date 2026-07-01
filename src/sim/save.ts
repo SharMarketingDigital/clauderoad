@@ -36,6 +36,7 @@ export interface PlayerSave {
   returnCity: string; // GDD v0.5 (teleporte): the registered Return/respawn city id (a known CITIES id)
   autoPotHpPct?: number; // Sistema 15 (QoL): saved auto-pot HP threshold (0..1). Absent/old saves => off.
   autoPotMpPct?: number; // Sistema 15 (QoL, Fatia 2): saved auto-pot MP threshold (0..1). Absent => off.
+  lastFieldPos?: { x: number; z: number }; // Sistema 15 (reverse scroll): recorded grind spot. Absent => none.
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -68,6 +69,8 @@ export function toSave(e: Entity): PlayerSave {
     returnCity: e.returnCity, // GDD v0.5: persist the registered Return/respawn city
     autoPotHpPct: e.autoPotHpPct, // Sistema 15 (QoL): persist the auto-pot preference (undefined = off, omitted by JSON)
     autoPotMpPct: e.autoPotMpPct, // Sistema 15 (QoL, Fatia 2): persist the MP auto-pot preference
+    // Sistema 15 (reverse scroll): persist the recorded grind spot (deep-copied; undefined = none, omitted by JSON).
+    lastFieldPos: e.lastFieldPos ? { x: e.lastFieldPos.x, z: e.lastFieldPos.z } : undefined,
   };
 }
 
@@ -103,6 +106,11 @@ export function applySave(e: Entity, raw: unknown): void {
   }
   if (isNum(raw.autoPotMpPct) && raw.autoPotMpPct >= 0 && raw.autoPotMpPct <= 1) {
     e.autoPotMpPct = raw.autoPotMpPct;
+  }
+  // Sistema 15 (reverse scroll): restore the recorded grind spot only if it's a valid {x,z} of finite
+  // numbers; otherwise leave it unset. Back-compat: old saves with no field simply have no reverse target.
+  if (isObj(raw.lastFieldPos) && isNum(raw.lastFieldPos.x) && isNum(raw.lastFieldPos.z)) {
+    e.lastFieldPos = { x: raw.lastFieldPos.x, z: raw.lastFieldPos.z };
   }
 }
 

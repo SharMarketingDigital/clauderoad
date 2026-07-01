@@ -2018,6 +2018,7 @@ export class Sim implements IWorld {
     // teleporter view's blocked-reason priority — combat first, then cooldown — matches this gate order)
     const dest = cityById(p.returnCity) ?? cityById('town');
     if (!dest) return; // defensive: registered city unknown and even 'town' missing
+    p.lastFieldPos = { x: p.x, z: p.z }; // Sistema 15 (reverse): remember the grind spot before recalling
     this.warpTo(p, dest.cx, dest.cz);
     p.returnReadyAt = this.tick + RETURN_COOLDOWN_TICKS;
   }
@@ -2315,10 +2316,23 @@ export class Sim implements IWorld {
     // write (warpTo) — deterministic. 'lastSpot' (reverse) comes in Fatia 2.
     if (effect.recall) {
       if (this.inCombat(p)) return; // fiel: bloqueado em combate — não é fuga instantânea
-      const dest = effect.recall === 'registered' ? (cityById(p.returnCity) ?? cityById('town')) : undefined;
-      if (!dest) return; // destino desconhecido (ou 'lastSpot' antes da Fatia 2) -> no-op, sem consumir
+      // 'registered' -> cidade de retorno; 'lastSpot' (reverse) -> ponto de campo anterior. Resolve o destino
+      // (x,z), recusando (sem consumir) se não houver — ex.: reverse antes de qualquer recall.
+      let tx: number;
+      let tz: number;
+      if (effect.recall === 'registered') {
+        const city = cityById(p.returnCity) ?? cityById('town');
+        if (!city) return;
+        tx = city.cx;
+        tz = city.cz;
+      } else {
+        if (!p.lastFieldPos) return; // reverse sem recall prévio -> no-op, sem gastar
+        tx = p.lastFieldPos.x;
+        tz = p.lastFieldPos.z;
+      }
       if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
-      this.warpTo(p, dest.cx, dest.cz);
+      if (effect.recall === 'registered') p.lastFieldPos = { x: p.x, z: p.z }; // grava o spot antes de ir pra cidade
+      this.warpTo(p, tx, tz);
       return;
     }
     if (this.tick < p.potionReadyAt) return; // shared potion cooldown still running
@@ -3655,6 +3669,8 @@ export class Sim implements IWorld {
       mix(e.pkActive ? 1 : 0); // PK livre (GDD v0.5): PvP-eligibility flag — gameplay state, so two hosts must agree
       mix(Math.round((e.autoPotHpPct ?? 0) * 100)); // Sistema 15 (QoL): HP auto-pot threshold — drives auto-drinking, so two hosts must agree
       mix(Math.round((e.autoPotMpPct ?? 0) * 100)); // Sistema 15 (QoL): MP auto-pot threshold (same reason)
+      mix(e.lastFieldPos ? Math.round(e.lastFieldPos.x) : 0); // Sistema 15 (reverse): recorded grind spot —
+      mix(e.lastFieldPos ? Math.round(e.lastFieldPos.z) : 0); // a reverse scroll reads it, so two hosts must agree
       mix(e.nextSwingAt);
       mix(e.homeX); mix(e.homeZ); // leash anchor (aggro/chase state)
       mix(e.targetX); mix(e.targetZ); mix(e.repickAt); // wander/leash-return scheduling
