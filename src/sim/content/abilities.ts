@@ -80,6 +80,17 @@ const SWORD_ABILITIES: AbilityDef[] = [
     damageMultiplier: 1.0, // a control tool, not a nuke — the value is the stun
     effects: [{ kind: 'stun', durationSecs: 1.0 }],
   },
+  {
+    id: 'wide_cleave',
+    name: 'Corte Amplo',
+    slot: 4, // destrava no nv7 (2N−1) — a resposta da Espada a ser cercada
+    icon: '🗡', // dagger — a wide arcing cleave that hits everything in front
+    mpCost: 22,
+    cooldownSecs: 9,
+    kind: 'strike',
+    shape: 'cone', // the Sword's only AoE: sweeps every enemy in reach (reuses the cone infra)
+    damageMultiplier: 1.3, // per enemy caught — a hair above the spear's sweep, but no bleed
+  },
 ];
 
 // ---- Lança: high single-target damage, crit, and area sweeps (GDD: "Lança →
@@ -168,6 +179,17 @@ const BOW_ABILITIES: AbilityDef[] = [
     damageMultiplier: 1.5,
     effects: [{ kind: 'slow', durationSecs: 3.0, magnitude: 0.5 }], // GDD: "Arco → slow (kiting)"
   },
+  {
+    id: 'poison_arrow',
+    name: 'Flecha Envenenada',
+    slot: 4, // destrava no nv7 (2N−1) — o dano-por-tempo que faltava ao kite do Arco
+    icon: '🧪', // vial — a light hit that leaves a strong lingering poison
+    mpCost: 18,
+    cooldownSecs: 8,
+    kind: 'strike',
+    damageMultiplier: 1.0, // modest up-front — the value is the poison over time
+    effects: [{ kind: 'dot', durationSecs: 4.0, magnitude: 4, periodSecs: 0.5 }], // 8 ticks × 4 = 32 veneno
+  },
 ];
 
 // ---- Mago / Cajado: ranged MAGICAL damage scaling with Intelligence (G1). The first
@@ -208,6 +230,16 @@ const MAGE_ABILITIES: AbilityDef[] = [
     kind: 'strike',
     damageMultiplier: 1.5,
     effects: [{ kind: 'slow', durationSecs: 3.0, magnitude: 0.5 }], // chill -> kiting
+  },
+  {
+    id: 'ice_barrier',
+    name: 'Barreira de Gelo',
+    slot: 4, // destrava no nv7 (2N−1) — a defensiva de sobrevivência do caster frágil
+    icon: '🧊', // ice block — a self shield that halves incoming damage for a window
+    mpCost: 25,
+    cooldownSecs: 18,
+    kind: 'buff', // self-cast, no target/range (reuses the 'defense' effect, like Postura Defensiva)
+    effects: [{ kind: 'defense', durationSecs: 5.0, magnitude: 0.5 }],
   },
 ];
 

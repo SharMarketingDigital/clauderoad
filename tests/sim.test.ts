@@ -898,7 +898,8 @@ describe('status effects', () => {
 
 // The full Sword kit on a multi-slot bar: Golpe Forte (slot 1, covered by the
 // status tests above), Postura Defensiva (slot 2, a self-buff), Atordoamento
-// (slot 3, the stun — its freeze is covered by the status 'stun' test).
+// (slot 3, the stun — its freeze is covered by the status 'stun' test), and
+// Corte Amplo (slot 4, the cone cleave — covered in "Sistema 2: ativas novas").
 describe('sword kit (multi-slot abilities)', () => {
   const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
 
@@ -906,8 +907,8 @@ describe('sword kit (multi-slot abilities)', () => {
     const sim = new Sim(7);
     unlockSkills(sim); // Sistema 1: a barra completa exige o nível de destrave
     const bar = sim.abilities();
-    expect(bar.map((a) => a.slot)).toEqual([1, 2, 3]);
-    expect(bar.map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    expect(bar.map((a) => a.slot)).toEqual([1, 2, 3, 4]);
+    expect(bar.map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento', 'Corte Amplo']);
   });
 
   it('Postura Defensiva: a self-buff (no target) lasting its full duration, then expiring', () => {
@@ -955,6 +956,71 @@ describe('sword kit (multi-slot abilities)', () => {
   });
 });
 
+// Sistema 2 (Fatia 1.2a): a 4ª ativa das classes de 3 skills — Espada AoE (Corte Amplo), Arco DoT
+// (Flecha Envenenada), Mago defesa (Barreira de Gelo). Slot 4 => destrava no nv7 (regra 2N−1).
+// Reusam a infra já testada (cone/dot/defense) — aqui só provamos que a skill nova castá + aplica efeito.
+describe('Sistema 2: ativas novas (slot 4)', () => {
+  const player = (sim: Sim) => sim.entities().find((e) => e.kind === 'player')!;
+  const wolfById = (sim: Sim, id: number) => sim.entities().find((e) => e.id === id);
+  const nearestMinion = (sim: Sim) => {
+    const p = player(sim);
+    const ws = sim.entities().filter((e) => e.kind === 'enemy' && !e.boss && e.hp > 0 && e.species === 'skeleton_minion');
+    ws.sort((a, b) => (a.x - p.x) ** 2 + (a.z - p.z) ** 2 - ((b.x - p.x) ** 2 + (b.z - p.z) ** 2));
+    return ws[0];
+  };
+
+  it('Espada · Corte Amplo (slot 4, cone): destrava no nv7 e dá dano ao alvo à frente', () => {
+    const sim = new Sim(7); // Espada (default, desarmado)
+    unlockSkills(sim); // nv7 -> slot 4 destravado
+    let hit = false;
+    for (let i = 0; i < 3000 && !hit; i++) {
+      const w = nearestMinion(sim);
+      if (!w) { sim.step(); continue; }
+      const p = player(sim);
+      if (Math.hypot(w.x - p.x, w.z - p.z) > MELEE_RANGE) {
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); // aproxima SEM alvo (sem auto-ataque no caminho)
+        sim.step();
+        continue;
+      }
+      const hp0 = w.hp;
+      sim.sendCommand({ t: 'set-target', id: w.id }); // o cone ancora (e vira pra) este alvo
+      sim.sendCommand({ t: 'use-ability', slot: 4 }); // Corte Amplo
+      sim.sendCommand({ t: 'set-target', id: null });
+      sim.sendCommand({ t: 'stop' });
+      sim.step();
+      const cw = wolfById(sim, w.id);
+      if (cw && cw.hp < hp0) hit = true; // o cone conectou no alvo à frente
+    }
+    expect(hit).toBe(true);
+  });
+
+  it('Arco · Flecha Envenenada (slot 4): destrava no nv7 e aplica veneno (dot) que drena HP', () => {
+    const sim = new Sim(7);
+    equipBow(sim);
+    unlockSkills(sim); // nv7 -> slot 4 destravado
+    const wid = castWolf(sim, 4); // Flecha Envenenada -> o alvo ganha 'dot'
+    expect(wid).not.toBeNull();
+    expect(wolfById(sim, wid!)!.statuses).toContain('dot');
+    const hp0 = wolfById(sim, wid!)!.hp;
+    for (let i = 0; i < 15; i++) sim.step(); // deixa o veneno tiquetear (player sem alvo -> não bate mais)
+    expect(wolfById(sim, wid!)!.hp).toBeLessThan(hp0); // só o veneno pôde drenar HP
+  });
+
+  it('Mago · Barreira de Gelo (slot 4, buff): destrava no nv7 e aplica defesa ao próprio caster', () => {
+    const sim = new Sim(7);
+    equipStaff(sim);
+    unlockSkills(sim); // nv7 -> slot 4 destravado
+    for (let i = 0; i < 60; i++) { // foge pra um canto vazio; o buff é self (sem alvo/alcance)
+      const p = player(sim);
+      sim.sendCommand({ t: 'move', dx: WORLD_HALF - p.x, dz: WORLD_HALF - p.z });
+      sim.step();
+    }
+    sim.sendCommand({ t: 'use-ability', slot: 4 }); // Barreira de Gelo
+    sim.step();
+    expect(player(sim).statuses).toContain('defense');
+  });
+});
+
 // Buy the Lança de Ferro from the vendor (it isn't a drop) and equip it, switching
 // the character to the Spear mastery. Farms the gold first; all deterministic.
 function equipSpear(sim: Sim): void {
@@ -994,13 +1060,13 @@ describe('spear mastery (Lança)', () => {
   it('equipping a spear swaps the action bar to the Lança kit; unequipping restores the sword', () => {
     const sim = new Sim(7);
     unlockSkills(sim); // Sistema 1: a barra completa (todos os slots) exige o nível de destrave
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento', 'Corte Amplo']);
     equipSpear(sim);
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('iron_spear');
     expect(sim.abilities().map((a) => a.name)).toEqual(['Estocada', 'Varredura', 'Investida', 'Fúria']);
     sim.sendCommand({ t: 'unequip', slot: 'weapon' });
     sim.step();
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento', 'Corte Amplo']);
   });
 
   it('the Lança passive raises max HP while the spear is equipped', () => {
@@ -1262,7 +1328,7 @@ describe('bow mastery (Arco)', () => {
     equipBow(sim);
     unlockSkills(sim); // Sistema 1: a barra completa exige o nível de destrave
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('short_bow');
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento', 'Flecha Envenenada']);
   });
 
   it('the auto-shot is ranged: it strikes from well beyond melee range', () => {
@@ -3124,7 +3190,9 @@ describe('skills destravam por nível (Sistema 1)', () => {
     setLevel(sim, 3);
     expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2]); // + Postura Defensiva
     setLevel(sim, 5);
-    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3]); // + Atordoamento (kit completo da Espada)
+    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3]); // + Atordoamento
+    setLevel(sim, 7);
+    expect(sim.abilities().map((a) => a.slot)).toEqual([1, 2, 3, 4]); // + Corte Amplo (kit completo da Espada: 4 slots)
   });
 
   it('uma skill bloqueada NÃO casta (slot 2 no nível 1 é no-op; destrava no nível certo)', () => {
@@ -3452,13 +3520,13 @@ describe('mage mastery (Mago) — magical damage (Int)', () => {
   it('equipping the staff swaps the action bar to the Mago kit; unequipping restores the sword', () => {
     const sim = new Sim(7);
     unlockSkills(sim); // Sistema 1: a barra completa exige o nível de destrave
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento', 'Corte Amplo']);
     equipStaff(sim);
     expect(sim.inventory().equipment.find((e) => e.slot === 'weapon')!.itemId).toBe('apprentice_staff');
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Bola de Fogo', 'Onda de Chamas', 'Lança de Gelo']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Bola de Fogo', 'Onda de Chamas', 'Lança de Gelo', 'Barreira de Gelo']);
     sim.sendCommand({ t: 'unequip', slot: 'weapon' });
     sim.step();
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Golpe Forte', 'Postura Defensiva', 'Atordoamento', 'Corte Amplo']);
   });
 
   it('Bola de Fogo deals magical (Int-scaled) damage in-game, distinct from the physical (Str) formula', () => {
@@ -3536,15 +3604,15 @@ describe('class selection (G1)', () => {
     sim.sendCommand({ t: 'select-class', classId: 'archer' });
     sim.step();
     expect(weaponOf(sim)).toBe('short_bow');
-    expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento']);
+    expect(sim.abilities().map((a) => a.name)).toEqual(['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento', 'Flecha Envenenada']);
   });
 
   it('each class maps to its mastery kit', () => {
     const kits: Record<string, string[]> = {
-      swordshield: ['Golpe Forte', 'Postura Defensiva', 'Atordoamento'],
+      swordshield: ['Golpe Forte', 'Postura Defensiva', 'Atordoamento', 'Corte Amplo'],
       spear: ['Estocada', 'Varredura', 'Investida', 'Fúria'],
-      archer: ['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento'],
-      mage: ['Bola de Fogo', 'Onda de Chamas', 'Lança de Gelo'],
+      archer: ['Tiro Carregado', 'Tiro Múltiplo', 'Tiro Lento', 'Flecha Envenenada'],
+      mage: ['Bola de Fogo', 'Onda de Chamas', 'Lança de Gelo', 'Barreira de Gelo'],
     };
     for (const [classId, names] of Object.entries(kits)) {
       const sim = new Sim(7);
