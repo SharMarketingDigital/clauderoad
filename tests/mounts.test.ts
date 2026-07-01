@@ -79,6 +79,19 @@ describe('Sistema 15: Mounts', () => {
     expect(sim.mountActive()).toBe(false); // desmontou ao entrar em combate
   });
 
+  it('DESMONTA ao perder o token (vender/listar) — não fica montado 1.5× sem a montaria', () => {
+    const sim = new Sim(7);
+    withMount(sim);
+    sim.sendCommand({ t: 'set-mount', on: true });
+    sim.step();
+    expect(sim.mountActive()).toBe(true);
+    // lista o token no mercado global (remove do bag) -> perde a posse da montaria
+    sim.sendCommand({ t: 'market-list', itemId: 'mount_horse', rarity: 'normal', plus: 0, price: 100 });
+    sim.step();
+    expect(sim.inventory().stacks.some((s) => s.itemId === 'mount_horse')).toBe(false); // token saiu do bag
+    expect(sim.mountActive()).toBe(false); // e o sim desmontou (a re-checagem de posse no stepPlayer)
+  });
+
   it('o alquimista vende a montaria', () => {
     const alch = TOWN_SHOPS.find((s) => s.species === 'alchemist')!;
     expect(alch.stock.some((e) => e.itemId === 'mount_horse')).toBe(true);

@@ -168,6 +168,18 @@ export interface InventoryView {
   readonly equipment: ReadonlyArray<EquipView>;
 }
 
+// Sistema 20 (trade-in): one recycling recipe as the HUD sees it — N input items -> M output items, with
+// resolved names. Static (same for everyone); the HUD shows them in the shop and gates the button on the
+// player actually holding the inputs (read from inventory()).
+export interface RecipeView {
+  readonly input: string;
+  readonly inputName: string;
+  readonly inputQty: number;
+  readonly output: string;
+  readonly outputName: string;
+  readonly outputQty: number;
+}
+
 // One item the vendor sells (to BUY), with its resolved name and gold price.
 export interface ShopEntryView {
   readonly itemId: string;
@@ -341,6 +353,9 @@ export type Command =
   | { t: 'rank-up'; slot: number } // spend SP to raise the rank of the ability in this action-bar slot
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
   | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
+  // Sistema 20 (trade-in): redeem a recycling recipe by index (RECIPES) — trades N input items for M output
+  // items at the alchemist. The sim validates proximity to the alchemist + holding the inputs + bag room.
+  | { t: 'redeem'; recipe: number }
   | { t: 'select-class'; classId: string } // pick a starter class on entry — equips its weapon/kit when unarmed (GDD G1)
   | { t: 'deposit'; itemId: string; rarity: Rarity; plus: number } // K5: bank a whole bag stack (near the warehouse)
   | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number } // K5: take a whole stack back from the warehouse
@@ -480,6 +495,8 @@ export interface IWorld {
   inventory(): InventoryView;
   // The vendor's storefront (stock + whether the player is in range) for the shop.
   shop(): ShopView;
+  // Sistema 20 (trade-in): the recycling recipes (static list with resolved names) for the shop panel.
+  recipes(): ReadonlyArray<RecipeView>;
   // The local player's warehouse (armazém) contents + whether in range to deposit/withdraw.
   storage(): StorageView;
   // GDD v0.5 (Pets PET2): the transport pet's portable bag (contents + whether a pet is summoned).

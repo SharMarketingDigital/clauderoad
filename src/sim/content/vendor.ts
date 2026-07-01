@@ -2,6 +2,9 @@
 // SPECIALIZED shop NPCs (ferreiro/armas, armadureiro/armadura+escudo, boticário/poções, alquimista/
 // elixires+acessórios+pet) — each a fixed NPC selling a slice of the catalog. The player must be within
 // VENDOR_INTERACT_RANGE to trade; selling TO a shop is generic (any item with a `value`, rarity-scaled).
+import type { RecipeView } from '../../world_api';
+import { ITEMS } from './items';
+
 export interface VendorStockEntry {
   itemId: string; // an id in ITEMS
   price: number; // gold to BUY one (the item is added Normal, +0)
@@ -72,6 +75,35 @@ export const TOWN_SHOPS: ShopDef[] = [
 // The union of every shop's stock — the fallback catalog (shown greyed when not near a shop) AND the bot's
 // price lookup. Selling/back-compat code reads this.
 export const VENDOR_STOCK: VendorStockEntry[] = TOWN_SHOPS.flatMap((s) => s.stock);
+
+// Sistema 20 (trade-in package<->scrap): receitas de RECICLAGEM — troca N do input por M do output (itens,
+// NÃO gold), feita no ALQUIMISTA. Fiel à ponte refscrapofpackageitem do Silkroad ("abrir a embalagem": dá o
+// package, recebe o scrap). Aqui: converte materiais de alquimia comuns (elixires, que dropam) na Pedra de
+// Proteção (escassa, cara — 75 gold — e muito usada no "+N" alto). Ratio 3:1 ancorado no uso (não no `value`
+// cru): dá um caminho pra reciclar excedente numa material valiosa. Data-as-code, determinístico (sem Rng).
+export interface RecipeDef {
+  input: string; // itemId consumido (Normal, +0)
+  inputQty: number; // quantos do input
+  output: string; // itemId produzido
+  outputQty: number; // quantos do output
+}
+export const RECIPES: RecipeDef[] = [
+  { input: 'elixir_weapon', inputQty: 3, output: 'protect_stone', outputQty: 1 },
+  { input: 'elixir_armor', inputQty: 3, output: 'protect_stone', outputQty: 1 },
+];
+
+// Resolve RECIPES to the seam's RecipeView (with display names). Static — shared by the offline Sim and the
+// online ClientWorld so recipes() is identical everywhere (no per-player state -> no snapshot needed).
+export function resolveRecipes(): RecipeView[] {
+  return RECIPES.map((r) => ({
+    input: r.input,
+    inputName: ITEMS[r.input]?.name ?? r.input,
+    inputQty: r.inputQty,
+    output: r.output,
+    outputName: ITEMS[r.output]?.name ?? r.output,
+    outputQty: r.outputQty,
+  }));
+}
 
 // Reserved entity-id base for the shop NPCs: above the warehouse (1e9) and the teleporters (1e9+1.., one
 // per city), with plenty of room. Fixed ids -> adding shops never perturbs the nextId-allocated player

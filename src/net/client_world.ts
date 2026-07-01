@@ -10,8 +10,9 @@
 // The server is authoritative for everything; this only mirrors and renders.
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ShopView, StorageView, TeleporterView,
-  PartyView, PartyInviteView, DuelView, DuelInviteView, StallView, PetBagView, MarketView,
+  PartyView, PartyInviteView, DuelView, DuelInviteView, StallView, PetBagView, MarketView, RecipeView,
 } from '../world_api';
+import { resolveRecipes } from '../sim/content/vendor';
 import type {
   ClientMessage, ServerMessage, EntitySnap, SelfSnap, ChatLine, ChatChannel,
   MatchingEntryView, MatchingRequestView,
@@ -183,6 +184,12 @@ export class ClientWorld implements IWorld {
 
   shop(): ShopView {
     return this.self ? this.self.shop : EMPTY_SHOP;
+  }
+
+  // Sistema 20 (trade-in): the recycling recipes — STATIC (same for everyone), so the client resolves them
+  // directly (no snapshot needed), identical to the offline Sim.recipes().
+  recipes(): ReadonlyArray<RecipeView> {
+    return resolveRecipes();
   }
 
   storage(): StorageView {

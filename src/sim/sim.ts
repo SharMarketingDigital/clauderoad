@@ -17,6 +17,7 @@ import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, PetBagView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView, MarketView, MarketListingView,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
+  RecipeView,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
 import {
@@ -60,6 +61,7 @@ import { toSave, applySave, type PlayerSave } from './save';
 import {
   VENDOR_NAME, VENDOR_INTERACT_RANGE, VENDOR_STOCK,
   TOWN_SHOPS, shopEntityId, type VendorStockEntry,
+  RECIPES, resolveRecipes,
 } from './content/vendor';
 
 // Fresh, fully-populated equipment record (every slot null). One source so every
@@ -813,6 +815,11 @@ export class Sim implements IWorld {
 
   shop(): ShopView {
     return this.shopFor(this.localId);
+  }
+
+  // Sistema 20 (trade-in): the recycling recipes (static list with resolved names) for the shop panel.
+  recipes(): ReadonlyArray<RecipeView> {
+    return resolveRecipes();
   }
 
   // The storefront for a SPECIFIC player: the NEAREST shop NPC in range and ITS stock (`inRange`
@@ -2090,9 +2097,10 @@ export class Sim implements IWorld {
         if (cmd.hpPct !== undefined) p.autoPotHpPct = Math.max(0, Math.min(1, cmd.hpPct));
         if (cmd.mpPct !== undefined) p.autoPotMpPct = Math.max(0, Math.min(1, cmd.mpPct));
         return;
-      // Sistema 15 (QoL — mounts): mount/dismount. Mounting requires OWNING a mount token, being ALIVE and
-      // OUT of combat (combatUntil) — a mount is locomotion, not a combat/escape tool. Dismount always works
-      // (pre-gate). The auto-dismount on ENTERING combat lives in stepPlayer.
+      // Sistema 15 (QoL — mounts): mount/dismount. Mounting requires OWNING a mount token, being ALIVE, and
+      // not having taken/dealt damage recently (combatUntil) — you dismount when combat CONNECTS, mas montar
+      // pra fugir antes do 1º hit é permitido (fiel ao SRO; combatUntil, não o aggro). Dismount always works
+      // (pre-gate). The auto-dismount (on damage OR losing the token) lives in stepPlayer.
       case 'set-mount':
         if (cmd.on) {
           const m = this.ownedMount(p);
@@ -2142,6 +2150,9 @@ export class Sim implements IWorld {
         break;
       case 'sell':
         this.sell(p, cmd.itemId, cmd.rarity, cmd.plus);
+        break;
+      case 'redeem':
+        this.redeem(p, cmd.recipe);
         break;
       case 'select-class':
         this.selectClass(p, cmd.classId);
@@ -2886,6 +2897,20 @@ export class Sim implements IWorld {
     p.gold += value;
   }
 
+  // Sistema 20 (trade-in): recycle N of a recipe's input into M of its output, at the ALCHEMIST. Requires
+  // holding the inputs + bag room for the output. Refuses (no change) otherwise — never partial. Pure item
+  // moves (no gold, no Rng) via the same removeFromBag/addToBag path buy/sell use — deterministic.
+  private redeem(p: Entity, recipeIndex: number): void {
+    const r = RECIPES[recipeIndex];
+    if (!r) return; // unknown recipe
+    const shop = this.nearestShop(p);
+    if (!shop || shop.npc.species !== 'alchemist') return; // reciclagem só no alquimista (o NPC de alquimia)
+    if (this.botCount(p, r.input) < r.inputQty) return; // não tem os inputs
+    if (!canAccept(p.bag, r.output, 'normal', 0, BAG_SLOTS)) return; // sem espaço pro output -> aborta (sem consumir)
+    removeFromBag(p.bag, r.input, 'normal', 0, r.inputQty);
+    addToBag(p.bag, r.output, 'normal', 0, r.outputQty);
+  }
+
   // K5: bank a whole bag stack into the player's own warehouse. Requires being near the
   // warehouse NPC; the pure helper handles capacity + the non-destructive put-back on a full bank.
   private deposit(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
@@ -3236,9 +3261,11 @@ export class Sim implements IWorld {
   }
 
   private stepPlayer(p: Entity): void {
-    // Sistema 15 (QoL — mounts): a mount is locomotion only — DESMONTA ao entrar em combate (took/dealt
-    // damage recently). Runs before the early-returns so it fires even while stunned/downed in a fight.
-    if (p.mounted && this.tick < p.combatUntil) p.mounted = undefined;
+    // Sistema 15 (QoL — mounts): a mount is locomotion — DESMONTA quando o combate CONECTA (took/dealt damage
+    // -> combatUntil), como o vSRO (montar-pra-fugir ANTES do 1º hit é permitido, fiel ao SRO). TAMBÉM
+    // desmonta se o jogador perdeu o token (vendeu/depositou/listou) — senão ficaria montado pra sempre sem
+    // possuir a montaria. Roda antes dos early-returns, então dispara mesmo stunned/downed num confronto.
+    if (p.mounted && (this.tick < p.combatUntil || !this.ownedMount(p))) p.mounted = undefined;
     if (p.deadUntil !== 0) return; // frozen while a spirit
     if (this.isIncapacitated(p) || this.isRooted(p)) return; // can't move while stunned or rooted
     const intent = this.moveIntents.get(p.id);

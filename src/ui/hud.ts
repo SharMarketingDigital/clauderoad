@@ -89,6 +89,7 @@ export class Hud {
   private shopBuy: HTMLDivElement;
   private shopSell: HTMLDivElement;
   private shopRepair: HTMLDivElement; // vendor repair buttons for worn equipped gear (GDD B8)
+  private shopRecipes: HTMLDivElement; // Sistema 20 (trade-in): recycling recipe buttons (alchemist only)
   private shopOpen = false;
   // Buy/sell/repair buttons are built ONCE and updated in place (the same robust pattern
   // as the bag), so a refresh never destroys a button mid-click and the player's clicks
@@ -97,6 +98,7 @@ export class Hud {
   private shopBuyCells: HTMLButtonElement[] = [];
   private shopSellCells: HTMLButtonElement[] = [];
   private shopRepairCells: HTMLButtonElement[] = [];
+  private shopRecipeCells: HTMLButtonElement[] = []; // Sistema 20 (trade-in): one button per recipe
   private lastShopStock: ShopView['stock'] | null = null;
   // SP wallet + skills panel (toggled with K): spend SP to rank up abilities (GDD B4)
   private spAmt: HTMLSpanElement;
@@ -184,6 +186,7 @@ export class Hud {
         <div class="shop-hint"></div>
         <div class="shop-repair"></div>
         <div class="shop-buy"></div>
+        <div class="shop-recipes"></div>
         <div class="shop-sell"></div>
       </div>
       <div class="skills" hidden>
@@ -231,6 +234,7 @@ export class Hud {
     this.shopBuy = this.root.querySelector('.shop-buy') as HTMLDivElement;
     this.shopSell = this.root.querySelector('.shop-sell') as HTMLDivElement;
     this.shopRepair = this.root.querySelector('.shop-repair') as HTMLDivElement;
+    this.shopRecipes = this.root.querySelector('.shop-recipes') as HTMLDivElement;
     this.equipColLeft = this.root.querySelector('.equip-col-left') as HTMLDivElement;
     this.equipColRight = this.root.querySelector('.equip-col-right') as HTMLDivElement;
     this.charViewport = this.root.querySelector('.char-viewport') as HTMLDivElement;
@@ -568,6 +572,34 @@ export class Hud {
         btn.style.display = 'none';
       }
     }
+
+    // Sistema 20 (trade-in): recycling recipes — one button per recipe, ONLY at the alchemist (where the sim
+    // gates redeem). Enabled when the player holds enough of the input. recipes() is static (offline/online).
+    const recipes = world.recipes();
+    const atAlchemist = s.name === 'Alquimista'; // near is guaranteed here (updateShop returns early otherwise)
+    this.shopRecipes.style.display = atAlchemist ? '' : 'none';
+    if (atAlchemist) {
+      while (this.shopRecipeCells.length < recipes.length) {
+        const i = this.shopRecipeCells.length;
+        const btn = document.createElement('button');
+        btn.className = 'shop-btn';
+        btn.addEventListener('click', () => this.onShopRedeemClick(i));
+        this.shopRecipes.appendChild(btn);
+        this.shopRecipeCells.push(btn);
+      }
+      for (let i = 0; i < this.shopRecipeCells.length; i++) {
+        const r = recipes[i];
+        const btn = this.shopRecipeCells[i];
+        if (r) {
+          btn.style.display = '';
+          const have = inv.stacks.find((st) => st.itemId === r.input)?.qty ?? 0;
+          btn.textContent = `Reciclar ${r.inputQty}× ${r.inputName} → ${r.outputQty}× ${r.outputName}`;
+          btn.disabled = have < r.inputQty;
+        } else {
+          btn.style.display = 'none';
+        }
+      }
+    }
   }
 
   // Click a vendor button -> send the trade. Each reads the CURRENT data by index
@@ -582,6 +614,10 @@ export class Hud {
     if (st && st.sellValue > 0 && this.world) {
       this.world.sendCommand({ t: 'sell', itemId: st.itemId, rarity: st.rarity, plus: st.plus });
     }
+  }
+  // Sistema 20 (trade-in): redeem the recipe at this index. The sim re-validates proximity/inputs/room.
+  private onShopRedeemClick(i: number): void {
+    if (this.world) this.world.sendCommand({ t: 'redeem', recipe: i });
   }
   private onShopRepairClick(j: number): void {
     const eq = this.lastInv?.equipment[j];

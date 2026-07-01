@@ -158,6 +158,11 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
         }
         return;
+      // Sistema 20 (trade-in): redeem a recycling recipe by index. Validate an integer; the sim re-checks
+      // the recipe exists + proximity to the alchemist + the inputs + bag room.
+      case 'redeem':
+        if (Number.isInteger(cmd.recipe)) this.sim.sendCommandFor(id, { t: 'redeem', recipe: cmd.recipe });
+        return;
       case 'select-class':
         // The sim resolves the class -> starter weapon and only applies it to a fresh
         // (unarmed) character, so this can't be abused to re-roll an equipped weapon.
