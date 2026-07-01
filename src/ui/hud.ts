@@ -378,10 +378,13 @@ export class Hud {
     this.mpText.textContent = `${Math.round(p.mp)} / ${p.maxMp}`;
 
     this.levelBadge.textContent = `Nv ${p.level}`;
-    const xpPct = p.xpToNext > 0 ? Math.max(0, Math.min(1, p.xp / p.xpToNext)) : 0;
+    // xpToNext === 0 is the level-cap sentinel: bar full, "MÁX" instead of a fraction.
+    const atCap = p.xpToNext <= 0;
+    const xpPct = atCap ? 1 : Math.max(0, Math.min(1, p.xp / p.xpToNext));
     this.xpFill.style.width = `${xpPct * 100}%`;
     this.xpText.textContent =
-      `XP ${Math.round(p.xp)} / ${p.xpToNext}` + (p.attrPoints > 0 ? ` · ${p.attrPoints} pts` : '');
+      (atCap ? 'XP MÁX' : `XP ${Math.round(p.xp)} / ${p.xpToNext}`) +
+      (p.attrPoints > 0 ? ` · ${p.attrPoints} pts` : '');
 
     const tid = world.localTargetId();
     const t = tid != null ? ents.find((e) => e.id === tid) : undefined;

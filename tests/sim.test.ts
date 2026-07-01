@@ -21,6 +21,7 @@ import {
   POTION_COOLDOWN_TICKS,
   DEATH_RESPAWN_TICKS,
   xpForLevel,
+  LEVEL_CAP,
   HP_PER_LEVEL,
   MP_PER_LEVEL,
   ATTR_POINTS_PER_LEVEL,
@@ -1706,6 +1707,31 @@ describe('progression (XP & levels)', () => {
     expect(after.level).toBe(2);
     expect(after.xp).toBe(ENEMY_TEMPLATE.xp); // 25 progress into level 2
     expect(after.xpToNext).toBe(xpForLevel(2)); // still 150 to reach level 3
+  });
+
+  it('o nível trava no cap (LEVEL_CAP=10): cruzar o teto zera a barra e o XP para de acumular', () => {
+    const sim = new Sim(7);
+    const player = () => sim.entities().find((e) => e.kind === 'player')!;
+    // Restaura nível 9 a 1 XP do teto, robusto pra vencer o kill (HP alto + poções).
+    const pid = sim.localPlayerId()!;
+    const save = sim.serializePlayer(pid)!;
+    save.level = LEVEL_CAP - 1;
+    save.xp = xpForLevel(LEVEL_CAP - 1) - 1; // 1 XP pra dingar em 10
+    save.baseMaxHp = 4000;
+    save.bag = [{ itemId: 'health_potion', rarity: 'normal', plus: 0, qty: 40 }];
+    sim.restorePlayer(pid, save);
+
+    // Um kill cruza pro cap; o overshoot é DESCARTADO (barra zera) e o nível trava em 10.
+    expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
+    expect(player().level).toBe(LEVEL_CAP);
+    expect(player().xp).toBe(0); // overshoot descartado — nada de barra pendurada no cap
+    expect(player().xpToNext).toBe(0); // sentinela de cap (a HUD mostra "MÁX")
+    expect(sim.recentEvents().some((e) => e.kind === 'levelup' && e.amount === LEVEL_CAP)).toBe(true);
+
+    // No cap, matar mais mobs NÃO sobe nível nem acumula XP (mas ainda dropa ouro/loot).
+    expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
+    expect(player().level).toBe(LEVEL_CAP);
+    expect(player().xp).toBe(0);
   });
 
   it('the level-up path is deterministic (same seed => identical hash)', () => {

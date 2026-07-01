@@ -170,6 +170,13 @@ export function xpForLevel(level: number): number {
   return 25 * level * (level + 1);
 }
 
+// Level cap. The ceiling follows the CONTENT: the deepest zone is ring10 (level-10 mobs), so
+// leveling stops at 10 — the Silkroad principle of a cap that tracks the top zone and rises with
+// each world expansion (80→90→100→110), scaled to our compact world. Below the cap everything
+// lands (gear reqLevel ≤ 8, skills unlock ≤ nv 7), leaving the 8→10 climb as the at-cap endgame
+// grind. Raise this when the map gains rings.
+export const LEVEL_CAP = 10;
+
 // Party (social) commands — applied even when a player's auto-play (bot) is ON, since
 // auto-play owns only combat + movement, not the player's group membership.
 // Social commands work even while auto-play (bot) is ON — the bot owns only combat + movement.
@@ -1498,7 +1505,7 @@ export class Sim implements IWorld {
         id: e.id, kind: e.kind, name: e.name,
         x: e.x, z: e.z, facing: e.facing, hp: e.hp, maxHp: e.maxHp,
         mp: e.mp, maxMp: e.maxMp,
-        level: e.level, xp: e.xp, xpToNext: xpForLevel(e.level), attrPoints: e.attrPoints,
+        level: e.level, xp: e.xp, xpToNext: e.level >= LEVEL_CAP ? 0 : xpForLevel(e.level), attrPoints: e.attrPoints,
         gold: e.gold,
         sp: e.sp,
         str: e.str, weaponDamage: e.weaponDamage,
@@ -1880,11 +1887,13 @@ export class Sim implements IWorld {
   // Award XP and level up across as many thresholds as it crosses (carrying the
   // remainder), so a big XP gain can grant multiple levels at once.
   private gainXp(p: Entity, amount: number): void {
+    if (p.level >= LEVEL_CAP) return; // capped — XP is frozen at the content ceiling
     p.xp += amount;
-    while (p.xp >= xpForLevel(p.level)) {
+    while (p.level < LEVEL_CAP && p.xp >= xpForLevel(p.level)) {
       p.xp -= xpForLevel(p.level);
       this.levelUp(p);
     }
+    if (p.level >= LEVEL_CAP) p.xp = 0; // hit the cap this call — no dangling partial bar
   }
 
   private levelUp(p: Entity): void {
