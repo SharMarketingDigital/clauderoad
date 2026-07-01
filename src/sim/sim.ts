@@ -38,6 +38,7 @@ import { enhanceChance, enhanceStat, resolveEnhance, needsBreakRoll } from './en
 import {
   SKILL_MAX_RANK, skillUpgradeCost, skillSpInvested, rankEffectMult,
 } from './content/skill_ranks';
+import { levelUpGold } from './content/gold';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -1942,6 +1943,7 @@ export class Sim implements IWorld {
     p.hp = p.maxHp; // ding! restore to full — rewarding, gentle pacing
     p.mp = p.maxMp;
     p.attrPoints += ATTR_POINTS_PER_LEVEL;
+    p.gold += levelUpGold(p.level); // Gold por nível: beat de recompensa ao dingar (piso da faixa da levelgold, atrás da curva de poder)
     // Presentation event for the level-up effect (amount = the new level).
     this.events.push({
       seq: this.nextEventSeq++,

@@ -34,6 +34,7 @@ import {
   STARTING_ENEMY_COUNT,
 } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
+import { levelUpGold } from '../src/sim/content/gold';
 import { ENEMY_TEMPLATE, ENEMY_TIERS, ENEMY_SPECIES, ROGUE_TEMPLATE, levelHpMult } from '../src/sim/content/enemies';
 import { CLASSES } from '../src/sim/content/classes';
 import { ABILITIES, MASTERIES, abilityUnlockLevel } from '../src/sim/content/abilities';
@@ -1848,6 +1849,17 @@ describe('progression (XP & levels)', () => {
     expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
     expect(player().level).toBe(LEVEL_CAP);
     expect(player().xp).toBe(0);
+  });
+
+  it('Gold por nível: subir de nível credita o bônus de ouro do nível (o ouro salta pelo menos o bônus)', () => {
+    const sim = new Sim(7);
+    const player = () => sim.entities().find((e) => e.kind === 'player')!;
+    const gold0 = player().gold;
+    const kills = Math.ceil(xpForLevel(1) / ENEMY_TEMPLATE.xp); // cruza o nível 1 -> 2
+    for (let i = 0; i < kills; i++) expect(killNearestEnemy(sim, 'skeleton_minion')).toBe(true);
+    expect(player().level).toBe(2);
+    // o ouro ganho = drops dos kills + o bônus de nível; então é NO MÍNIMO o bônus (drops só somam)
+    expect(player().gold - gold0).toBeGreaterThanOrEqual(levelUpGold(2));
   });
 
   it('the level-up path is deterministic (same seed => identical hash)', () => {
