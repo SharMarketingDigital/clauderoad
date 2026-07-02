@@ -35,6 +35,8 @@ export class Hud {
   private hpText: HTMLSpanElement;
   private mpFill: HTMLDivElement;
   private mpText: HTMLSpanElement;
+  private berserkFill: HTMLDivElement; // Sistema 2 (Berserk): o medidor de fúria
+  private berserkText: HTMLSpanElement;
   private levelBadge: HTMLSpanElement;
   private playerName: HTMLSpanElement; // the local player's name shown in the unit frame
   private xpFill: HTMLDivElement;
@@ -132,6 +134,7 @@ export class Hud {
             <span class="name player-name"></span><span class="level"></span>
             <div class="hp"><div class="hp-fill"></div><span class="hp-text"></span></div>
             <div class="mp"><div class="mp-fill"></div><span class="mp-text"></span></div>
+            <div class="berserk"><div class="berserk-fill"></div><span class="berserk-text"></span></div>
             <div class="xp"><div class="xp-fill"></div><span class="xp-text"></span></div>
           </div>
         </div>
@@ -193,7 +196,7 @@ export class Hud {
         <div class="skills-title">Habilidades | SP: <span class="skills-sp">0</span></div>
         <div class="skills-list"></div>
       </div>
-      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1–9 habilidades &middot; I bolsa &middot; G pegar loot &middot; <b>? controles</b></div>
+      <div class="hint">WASD mover &middot; Tab/clique alvo &middot; 1–9 habilidades &middot; R fúria &middot; I bolsa &middot; G pegar loot &middot; <b>? controles</b></div>
       <div class="announce"></div>
     `;
     document.body.appendChild(this.root);
@@ -201,6 +204,8 @@ export class Hud {
     this.hpText = this.root.querySelector('.hp-text') as HTMLSpanElement;
     this.mpFill = this.root.querySelector('.mp-fill') as HTMLDivElement;
     this.mpText = this.root.querySelector('.mp-text') as HTMLSpanElement;
+    this.berserkFill = this.root.querySelector('.berserk-fill') as HTMLDivElement;
+    this.berserkText = this.root.querySelector('.berserk-text') as HTMLSpanElement;
     this.levelBadge = this.root.querySelector('.level') as HTMLSpanElement;
     this.playerName = this.root.querySelector('.player-name') as HTMLSpanElement;
     this.xpFill = this.root.querySelector('.xp-fill') as HTMLDivElement;
@@ -407,6 +412,12 @@ export class Hud {
     const mpPct = p.maxMp > 0 ? Math.max(0, Math.min(1, p.mp / p.maxMp)) : 0;
     this.mpFill.style.width = `${mpPct * 100}%`;
     this.mpText.textContent = `${Math.round(p.mp)} / ${p.maxMp}`;
+    // Sistema 2 (Berserk): o medidor de fúria (0..1). >=33% fica "pronto" (.ready) e o texto convida o "R".
+    const bg = Math.max(0, Math.min(1, p.berserkGauge));
+    this.berserkFill.style.width = `${bg * 100}%`;
+    const berserkReady = bg >= 0.33;
+    this.berserkFill.classList.toggle('ready', berserkReady);
+    this.berserkText.textContent = berserkReady ? `Fúria ${Math.round(bg * 100)}% · R` : `Fúria ${Math.round(bg * 100)}%`;
 
     this.levelBadge.textContent = `Nv ${p.level}`;
     // xpToNext === 0 is the level-cap sentinel: bar full, "MÁX" instead of a fraction.

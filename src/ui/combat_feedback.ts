@@ -54,6 +54,13 @@ export function makeCombatFeedback(renderer: Renderer, combatText: CombatText, a
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
         if (p.visible) combatText.spawn(p.x, p.y, `NÍVEL ${ev.amount}!`, 'levelup');
         if (ev.targetId === world.localPlayerId()) sfx?.levelUp();
+      } else if (ev.kind === 'berserk') {
+        // Sistema 2 (Berserk/Hwan): o jogador ativou o burst — banner "BERSERK N!" (reusa o dourado do
+        // level-up) + um som de power-up. amount = o nível (1..3); o buff em si aparece como aura/statuses.
+        renderer.flash(ev.targetId);
+        const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);
+        if (p.visible) combatText.spawn(p.x, p.y, `BERSERK ${ev.amount}!`, 'levelup');
+        if (ev.targetId === world.localPlayerId()) sfx?.levelUp();
       } else if (ev.kind === 'enhance-success') {
         renderer.flash(ev.targetId);
         const p = renderer.project(ev.x, FCT_WORLD_Y + 0.6, ev.z);

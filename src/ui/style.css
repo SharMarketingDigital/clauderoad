@@ -105,6 +105,38 @@ html, body {
   text-shadow: 0 1px 2px #000;
 }
 
+/* Berserk/Hwan meter (Sistema 2) — a fury bar under MP; enche por combate, laranja-quente. .ready (>=33%)
+   pulsa pra convidar o "R" de ativação. */
+.berserk {
+  position: relative;
+  height: 9px;
+  margin-top: 3px;
+  background: #2a1206;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.berserk-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(180deg, #ff9a3c, #e0491f);
+  transition: width 0.15s ease-out;
+}
+.berserk-fill.ready {
+  box-shadow: 0 0 8px 1px rgba(255, 120, 40, 0.7);
+  animation: berserk-pulse 1s ease-in-out infinite;
+}
+@keyframes berserk-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
+.berserk-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #ffe0c0;
+  text-shadow: 0 1px 2px #000;
+}
+
 /* XP bar — thin gold bar under HP/MP. */
 .xp {
   position: relative;

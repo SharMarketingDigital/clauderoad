@@ -65,6 +65,11 @@ export class Input {
         if (!e.repeat) this.pendingMountToggle = true;
         return;
       }
+      // R — ativar o Berserk/Hwan (Sistema 2). One-shot; o sim deriva o nível da barra e recusa (no-op) < 33%.
+      if (e.key.toLowerCase() === 'r') {
+        if (!e.repeat) this.pending.push({ t: 'activate-berserk' });
+        return;
+      }
       // Action-bar slots 1..9 (top-row digits). The sim no-ops empty slots.
       if (e.key.length === 1 && e.key >= '1' && e.key <= '9') {
         if (!e.repeat) this.pending.push({ t: 'use-ability', slot: Number(e.key) });
