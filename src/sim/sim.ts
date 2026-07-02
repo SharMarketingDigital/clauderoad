@@ -3141,6 +3141,8 @@ export class Sim implements IWorld {
           case 'mp': bonusMaxMp += amt; break;
           case 'phyDef': bonusPhyDef += amt; break;
           case 'magDef': bonusMagDef += amt; break;
+          // 'crit' é DE PROPÓSITO ausente: crit não é stat armazenado (não há e.crit) — é resolvido LIVE em
+          // critChance() a partir dos azuis da arma, junto do baseCrit/passiva/buff. Aqui ele cai fora (no-op).
         }
       }
     }
@@ -3739,6 +3741,11 @@ export class Sim implements IWorld {
       }
     }
     for (const s of e.effects) if (s.kind === 'crit' && s.magnitude > 0) c += s.magnitude;
+    // Sistema 3 (azul de CRIT — o eixo multiplicativo): a ARMA equipada pode carregar linhas 'crit' que somam
+    // FLAT à chance (perLevel × level via blueAmount), no mesmo eixo LIVE do baseCrit. Só a arma (elegibilidade),
+    // então basta olhar o slot weapon. O clamp <=1 abaixo mantém o teto; a magnitude é conservadora (ver BLUES).
+    const wpn = e.equipment.weapon;
+    if (wpn?.blues) for (const b of wpn.blues) if (b.id === 'crit') c += blueAmount(b);
     return c > 1 ? 1 : c;
   }
 

@@ -145,8 +145,11 @@ describe('Blues — roll no drop (rollBlues, determinístico e gated)', () => {
     expect(new Set(s.map((b) => b.id)).size).toBe(s.length); // sem duplicata de id
     for (const b of s) { expect(b.level).toBeGreaterThanOrEqual(1); expect(b.level).toBeLessThanOrEqual(2); }
   });
-  it('slot sem azul elegível (arma hoje) => [] (o azul de arma é crit, fatia futura)', () => {
-    expect(rollBlues(new Rng(1), 'weapon', 'sun', 3)).toEqual([]);
+  it('a ARMA rola o azul de CRIT (o eixo de arma chegou): 1 linha crit (único elegível, distinto)', () => {
+    const s = rollBlues(new Rng(1), 'weapon', 'sun', 3);
+    expect(s.length).toBe(1); // só 'crit' é elegível à arma -> mesmo no SUN (2-3) sai 1 linha (distintos)
+    expect(s[0].id).toBe('crit');
+    expect(s[0].level).toBeGreaterThanOrEqual(1);
   });
 });
 

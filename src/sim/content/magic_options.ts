@@ -26,12 +26,19 @@ const ARMOR: readonly EquipSlot[] = ['helmet', 'chest', 'hands', 'legs', 'feet',
 const VITALS: readonly EquipSlot[] = ['chest', 'legs']; // HP/MP só em "mail/pants", como o SRO
 const STR_SLOTS: readonly EquipSlot[] = ['helmet', 'chest', 'hands', 'legs', 'feet', 'shield', 'necklace', 'earring', 'ring'];
 
+const WEAPON: readonly EquipSlot[] = ['weapon']; // o eixo de arma — hoje só o azul de CRIT
+
 export const BLUES: Record<BlueId, BlueDef> = {
   str: { id: 'str', name: 'Força', perLevel: 1, maxLevel: 6, slots: STR_SLOTS },
   hp: { id: 'hp', name: 'Vida', perLevel: 8, maxLevel: 6, slots: VITALS },
   mp: { id: 'mp', name: 'Mana', perLevel: 6, maxLevel: 6, slots: VITALS },
   phyDef: { id: 'phyDef', name: 'Defesa Física', perLevel: 1, maxLevel: 6, slots: ARMOR },
   magDef: { id: 'magDef', name: 'Defesa Mágica', perLevel: 1, maxLevel: 6, slots: ARMOR },
+  // ⚠️ CRIT — o azul PERIGOSO: MULTIPLICATIVO (soma chance de crítico, e crit = CRIT_MULT× dano), então
+  // fecha o teto OFENSIVO. Só em arma. perLevel dimensionado à escala 0..1 do critChance (o mapa lista o
+  // "fator" 1 do Silkroad; aqui 0.01 = +1% de crit por opt-level -> máx +5% num arma g3). DELIBERADAMENTE
+  // conservador até a rebalance (Sistema 5) validar o teto contra a curva de HP-de-mob × dano-g3.
+  crit: { id: 'crit', name: 'Crítico', perLevel: 0.01, maxLevel: 5, slots: WEAPON },
 };
 
 export const MAX_BLUES = 3; // teto de linhas azuis por item (dimensionado ao cap ~10)
@@ -60,7 +67,7 @@ export function blueLevelCap(def: BlueDef, degree: number): number {
 
 // A ordem estável de iteração do catálogo (Object.keys em ordem de inserção; fixada aqui pra o drop ser
 // determinístico independentemente de mexidas futuras no literal acima).
-const BLUE_ORDER: readonly BlueId[] = ['str', 'hp', 'mp', 'phyDef', 'magDef'];
+const BLUE_ORDER: readonly BlueId[] = ['str', 'hp', 'mp', 'phyDef', 'magDef', 'crit'];
 
 // A magnitude FLAT de uma linha azul: perLevel × level (linear no opt-level, como o ref data).
 export function blueAmount(b: BlueLine): number {

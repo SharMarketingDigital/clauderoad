@@ -48,7 +48,7 @@ export type EnemyTierId = 'normal' | 'champion' | 'elite';
 // Definida no SEAM porque faz parte da IDENTIDADE do item: o Command a carrega para referenciar a STACK certa
 // (dois itens com azuis diferentes são itens distintos) e o ItemStackView a expõe. O catálogo (magnitudes/
 // slots) e os helpers vivem em src/sim/content/magic_options.ts (que importa estes tipos daqui).
-export type BlueId = 'str' | 'hp' | 'mp' | 'phyDef' | 'magDef';
+export type BlueId = 'str' | 'hp' | 'mp' | 'phyDef' | 'magDef' | 'crit';
 export interface BlueLine {
   id: BlueId;
   level: number;
