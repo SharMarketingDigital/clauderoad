@@ -1764,6 +1764,7 @@ export class Sim implements IWorld {
     this.hitTarget(t, combat.compute({
       attacker: p, rank: 1, damageType: this.damageTypeOf(p), critChance: this.critChance(p), rng: this.rng,
       autoMult: this.activeMastery(p).swingTime / AUTO_DPS_BASE_SWING, // Opção A: faster weapon hits softer, slower harder
+      damageMult: this.attackFactor(p), // Sistema 2 (Berserk): o burst multiplica o dano de saída (1 sem buff)
     }), p);
   }
 
@@ -3141,6 +3142,7 @@ export class Sim implements IWorld {
         const landed = this.hitTarget(e, combat.compute({
           attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
           critChance: this.critChance(p), rng: this.rng,
+          damageMult: this.attackFactor(p), // Sistema 2 (Berserk): o burst multiplica o dano de saída
         }), p);
         // Debuff só se o golpe CONECTOU (esquiva ⇒ sem on-hit status) e o alvo sobreviveu. Em PvE `landed`
         // é sempre true (mobs não esquivam), então o hash fica idêntico; o gate só afeta o cast PvP.
@@ -3179,6 +3181,7 @@ export class Sim implements IWorld {
     const landed = this.hitTarget(t, combat.compute({
       attacker: p, ability: def, rank: this.skillRank(p, def), damageType: this.damageTypeOf(p),
       critChance: this.critChance(p), rng: this.rng,
+      damageMult: this.attackFactor(p), // Sistema 2 (Berserk): o burst multiplica o dano de saída
     }), p);
     // Debuff the target — only if the hit CONNECTED (a dodge grants no on-hit status, exactly like a
     // dodged mob bite) and it survived. PvE: `landed` is always true (mobs never dodge), so the hash is
@@ -3573,6 +3576,15 @@ export class Sim implements IWorld {
     for (const s of e.effects) {
       if (s.kind === 'defense' && s.magnitude > 0 && s.magnitude < f) f = s.magnitude;
     }
+    return f;
+  }
+  // Sistema 2 (Berserk/Hwan): OUTGOING-damage multiplier from active 'berserk' buffs — the burst's damage
+  // axis, the offense mirror of defenseFactor. magnitude = the +fraction (0.20 => ×1.20); applyStatus doesn't
+  // stack a kind, so at most one is active. Passed as compute()'s damageMult on the PLAYER's swings only.
+  // No buff => 1, so compute() multiplies by 1 and an un-bersered world stays byte-identical.
+  private attackFactor(e: Entity): number {
+    let f = 1;
+    for (const s of e.effects) if (s.kind === 'berserk' && s.magnitude > 0) f += s.magnitude;
     return f;
   }
   // Active crit chance (0..1): the active mastery's always-on baseCrit (Arco's

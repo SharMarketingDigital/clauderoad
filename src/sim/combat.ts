@@ -50,6 +50,11 @@ export interface OffenseContext {
   // keeping auto-DPS equal across archetypes (Opção A — só o feel muda). Default 1 => abilities and mobs are
   // byte-identical (they never pass it). The crit ROLL is unaffected — it's gated by critChance, not this.
   autoMult?: number;
+  // Sistema 2 (Berserk/Hwan): OUTGOING damage multiplier — the burst's damage axis (the sim's attackFactor
+  // sums active 'berserk' buffs). Multiplies `base` for BOTH auto-attacks and abilities, BEFORE the crit roll.
+  // Default 1 (absent) => byte-identical: ×1 leaves the rounded base unchanged, so an un-bersered world — and
+  // every mob, which never passes it — is untouched. This is the offense mirror of mitigate's defense factor.
+  damageMult?: number;
 }
 
 // Generate one outgoing hit. The PHYSICAL path mirrors the old inline code exactly
@@ -63,18 +68,19 @@ export interface OffenseContext {
 export function compute(ctx: OffenseContext): Damage {
   const { attacker, ability, rank, damageType, critChance, rng } = ctx;
   const magical = damageType === 'magical';
+  const berserk = ctx.damageMult ?? 1; // Sistema 2: outgoing burst multiplier (1 when unbuffed => byte-identical)
   const base = ability
     ? Math.round(
         (magical
           ? spellAbilityDamage(ability, attacker.baseInt, attacker.weaponDamage)
           : abilityDamage(ability, attacker.str, attacker.weaponDamage)
-        ) * rankDamageMult(rank),
+        ) * rankDamageMult(rank) * berserk,
       )
     : Math.round(
         (magical
           ? spellDamage(attacker.baseInt, attacker.weaponDamage)
           : meleeDamage(attacker.str, attacker.weaponDamage)
-        ) * (ctx.autoMult ?? 1), // auto-attack: scale per-hit by swingTime/baseline so auto-DPS stays equal
+        ) * (ctx.autoMult ?? 1) * berserk, // auto: scale per-hit by swingTime/baseline; berserk boosts both
       );
   // Crit: draw from the main rng ONLY when there's a chance (so an unbuffed world never
   // touches the stream — the determinism invariant). Identical to the old `rollCrit`.

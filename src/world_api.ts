@@ -49,7 +49,10 @@ export type EnemyTierId = 'normal' | 'champion' | 'elite';
 // takes reduced incoming damage — Sword's Postura Defensiva), crit (raised crit
 // chance — Spear's Fúria). Defined at the seam so the sim, content and renderer
 // agree; render shows a marker by kind.
-export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense' | 'crit';
+// berserk (Sistema 2 — Hwan): raises OUTGOING damage (the burst's damage axis; magnitude = the +fraction,
+// e.g. 0.20 => ×1.20). Read by the sim's attackFactor and passed as compute()'s damageMult. Mirror of the
+// 'defense' buff but on dealt damage; the piece the offense side was missing.
+export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense' | 'crit' | 'berserk';
 
 // GDD v0.5 (loot físico): the stack lying on the ground for a kind 'loot' entity, so render/UI can show
 // what it is and the pickup knows the contents. Present only on loot entities; null/absent otherwise.
