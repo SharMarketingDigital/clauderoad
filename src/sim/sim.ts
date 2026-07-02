@@ -42,6 +42,7 @@ import {
 import { levelUpGold } from './content/gold';
 import { MOUNTS, type MountDef } from './content/mounts';
 import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_DECAY, BERSERK_LEVELS, berserkLevel } from './content/berserk';
+import { rollBlues, blueAmount, bluesKey, type BlueLine } from './content/magic_options';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -1060,7 +1061,7 @@ export class Sim implements IWorld {
       const dx = pet.x - e.x, dz = pet.z - e.z;
       if (dx * dx + dz * dz > PET_GRAB_RADIUS * PET_GRAB_RADIUS) continue; // out of the pet's reach
       const s = e.loot.stack;
-      if (!addToBag(owner.bag, s.itemId, s.rarity, s.plus, s.qty)) continue; // bag full -> leave it on the ground
+      if (!addToBag(owner.bag, s.itemId, s.rarity, s.plus, s.qty, BAG_SLOTS, s.blues)) continue; // bag full -> leave it (blues preservados)
       this.ents.delete(lootId);
       this.lootIds.delete(lootId);
     }
@@ -1945,9 +1946,18 @@ export class Sim implements IWorld {
       // First decide if the item drops at all, then roll HOW rare it is. Only equippable gear has a
       // meaningful rarity; materials/consumables drop as plain Normal. Everything drops un-enhanced (+0).
       if (this.rng.next() < drop.chance) {
-        const equippable = ITEMS[drop.itemId]?.slot != null;
+        const def = ITEMS[drop.itemId];
+        const equippable = def?.slot != null;
         const rarity = equippable ? rollRarity(this.rng, rarities) : 'normal';
-        this.spawnGroundLoot(dead.x, dead.z, { itemId: drop.itemId, rarity, plus: 0, qty: 1 });
+        // Sistema 3 (azuis): depois da raridade, rola as linhas azuis (gated por raridade — NORMAL não saca
+        // RNG, então um drop comum é byte-idêntico ao stream pré-azuis; só SoS+ sacam). Gate de opt-level pelo
+        // grau do item, como o req min/max do ref data. Um item sem slot (material) nunca chega aqui.
+        const stack: ItemStack = { itemId: drop.itemId, rarity, plus: 0, qty: 1 };
+        if (equippable && def.slot) {
+          const blues = rollBlues(this.rng, def.slot, rarity, def.degree ?? 1);
+          if (blues.length > 0) stack.blues = blues;
+        }
+        this.spawnGroundLoot(dead.x, dead.z, stack);
       }
     }
   }
@@ -3049,6 +3059,18 @@ export class Sim implements IWorld {
       // Fase 3 (Block): a chance de bloqueio é intrínseca ao ESCUDO (def.blockRatio); FLAT, sem scale() —
       // como o parry, é propriedade do item, não da qualidade. Só escudos têm; há um slot de escudo só.
       bonusBlock += def.blockRatio ?? 0;
+      // Sistema 3 (azuis): as linhas azuis do item somam FLAT (perLevel × level via blueAmount) — NÃO passam
+      // por scale() (o opt-level já É a magnitude, como no ref data). Cada azul cai no seu acumulador.
+      for (const b of eq.blues ?? []) {
+        const amt = blueAmount(b);
+        switch (b.id) {
+          case 'str': bonusStr += amt; break;
+          case 'hp': bonusMaxHp += amt; break;
+          case 'mp': bonusMaxMp += amt; break;
+          case 'phyDef': bonusPhyDef += amt; break;
+          case 'magDef': bonusMagDef += amt; break;
+        }
+      }
     }
     // The active weapon mastery's passive is always on (e.g. Lança's +HP).
     const passive = this.activeMastery(p).passive;
@@ -3749,7 +3771,7 @@ export class Sim implements IWorld {
     const dx = p.x - e.x, dz = p.z - e.z;
     if (dx * dx + dz * dz > LOOT_PICKUP_RANGE * LOOT_PICKUP_RANGE) return; // too far to reach it
     const s = e.loot.stack;
-    if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty)) return; // bag full -> leave it on the ground
+    if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty, BAG_SLOTS, s.blues)) return; // bag full -> leave it on the ground (blues preservados)
     this.ents.delete(lootId);
     this.lootIds.delete(lootId);
   }
@@ -3852,6 +3874,12 @@ export class Sim implements IWorld {
         h = Math.imul(h, 16777619) >>> 0;
       }
     };
+    // Sistema 3 (azuis): os azuis são IDENTIDADE do item — folda a chave canônica, mas SÓ quando há linhas
+    // (senão um mix extra quebraria a byte-identidade de todo mundo sem azul). Item azul hasheia diferente
+    // de um sem; azuis diferentes hasheiam diferente; azuis iguais, igual.
+    const mixBlues = (blues?: readonly BlueLine[]): void => {
+      if (blues && blues.length > 0) mix(strHash(bluesKey(blues)));
+    };
     const ids = [...this.ents.keys()].sort((a, b) => a - b);
     for (const id of ids) {
       const e = this.ents.get(id)!;
@@ -3884,19 +3912,19 @@ export class Sim implements IWorld {
       mix(e.gold);
       for (const s of e.bag) {
         if (s == null) continue; // empty slot (hole) — contributes nothing
-        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty); mixBlues(s.blues);
       }
       // K5: armazém do jogador (mesmo fold esparso da bag). Storage vazio => 0 iterações => FNV
       // intocado => hash byte-idêntico para todos os mundos que não usam o armazém.
       for (const s of e.storage) {
         if (s == null) continue;
-        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty); mixBlues(s.blues);
       }
       // GDD v0.5 (Pets PET2): the transport pet's bag — same sparse fold as storage. Absent/empty => 0
       // iterations => byte-identical to a world that never used a pet bag.
       if (e.petBag) for (const s of e.petBag) {
         if (s == null) continue;
-        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty);
+        mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty); mixBlues(s.blues);
       }
       // Equipped gear (effective str/weaponDamage/maxHp derive from these + base).
       for (const slot of EQUIP_SLOTS) {
@@ -3904,6 +3932,7 @@ export class Sim implements IWorld {
         mix(strHash(eq ? `${eq.itemId}:${eq.rarity}` : ''));
         mix(eq ? eq.plus : -1);
         mix(eq ? eq.durability : -1); // durability is gameplay state (it scales the bonus)
+        mixBlues(eq?.blues); // Sistema 3 (azuis): identidade do item equipado
       }
       mix(strHash(e.tier)); // enemy strength tier (scales hp/damage/reward)
       // Active status effects (kind + timing/magnitude/source all drive future behavior).
@@ -3916,6 +3945,7 @@ export class Sim implements IWorld {
       if (e.loot) {
         mix(strHash(e.loot.stack.itemId)); mix(strHash(e.loot.stack.rarity));
         mix(e.loot.stack.plus); mix(e.loot.stack.qty); mix(e.loot.despawnAt);
+        mixBlues(e.loot.stack.blues); // Sistema 3 (azuis): identidade do item no chão
       }
       // GDD v0.5 (Pets): the companion's owner link (only kind 'pet' sets it; absent => byte-identical).
       if (e.pet) mix(e.pet.ownerId);

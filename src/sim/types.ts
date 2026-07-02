@@ -1,4 +1,5 @@
 import type { EntityKind, EquipSlot, Rarity, StatusKind, EnemyTierId } from '../world_api';
+import type { BlueLine } from './content/magic_options';
 
 // One active status effect on an entity (see the sim's status system).
 export interface StatusEffect {
@@ -18,6 +19,10 @@ export interface ItemStack {
   rarity: Rarity;
   plus: number; // enhancement level (0..MAX_PLUS)
   qty: number;
+  // Sistema 3 (azuis): as linhas azuis roladas neste item (0..MAX_BLUES). PARTE DA IDENTIDADE DO ITEM: a
+  // chave de stack (sameStack/bluesKey) as inclui, então dois itens com azuis diferentes NÃO empilham.
+  // Ausente/vazio = sem azul (empilha como sempre). Item empilhável comum (poção) nunca tem.
+  blues?: BlueLine[];
 }
 
 // GDD v0.5 (loot físico): a stack lying on the ground as a pickup-able world object. Carried ONLY by
@@ -36,6 +41,9 @@ export interface EquippedItem {
   rarity: Rarity;
   plus: number;
   durability: number;
+  // Sistema 3 (azuis): as linhas azuis deste item, foldadas FLAT no recomputeStats (perLevel × level, sem
+  // escalar por raridade/+N). Preservadas ao equipar/desequipar (o item volta pra bolsa com seus azuis).
+  blues?: BlueLine[];
 }
 
 // Internal mutable entity. The sim owns these; the outside world only ever

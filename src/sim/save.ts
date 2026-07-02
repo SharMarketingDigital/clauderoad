@@ -11,6 +11,11 @@ import type { Entity, ItemStack, EquippedItem } from './types';
 import type { EquipSlot, Rarity } from '../world_api';
 import { ITEMS } from './content/items';
 import { BERSERK_MAX } from './content/berserk';
+import { sanitizeBlues, type BlueLine } from './content/magic_options';
+
+// Deep-copy JSON-safe das linhas azuis (undefined quando não há) — o save nunca aliasa os arrays da entidade.
+const copyBlues = (blues?: BlueLine[]): BlueLine[] | undefined =>
+  blues && blues.length > 0 ? blues.map((b) => ({ id: b.id, level: b.level })) : undefined;
 import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS } from './inventory';
 import { MAX_PLUS } from './content/enhance';
 import { SKILL_MAX_RANK } from './content/skill_ranks';
@@ -47,7 +52,7 @@ export function toSave(e: Entity): PlayerSave {
   const equipment = {} as Record<EquipSlot, EquippedItem | null>;
   for (const slot of EQUIP_SLOTS) {
     const it = e.equipment[slot];
-    equipment[slot] = it ? { ...it } : null;
+    equipment[slot] = it ? { ...it, blues: copyBlues(it.blues) } : null; // deep-copia os azuis (não aliasa)
   }
   return {
     level: e.level,
@@ -63,11 +68,11 @@ export function toSave(e: Entity): PlayerSave {
     // SPARSE bags: preserve each item's POSITION (holes = null), trimming trailing nulls so an
     // empty bag round-trips to [] and a packed bag to a plain list (back-compat with old saves).
     // map por-campo (NÃO spread) p/ preservar o deep-copy: nunca aliasa os stacks da entidade.
-    bag: trimTrailingNulls(e.bag.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
+    bag: trimTrailingNulls(e.bag.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty, blues: copyBlues(s.blues) } : null))),
     equipment,
-    storage: trimTrailingNulls(e.storage.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
+    storage: trimTrailingNulls(e.storage.map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty, blues: copyBlues(s.blues) } : null))),
     // GDD v0.5 (Pets PET2): persist the transport pet's bag (may be undefined for a player who never used one)
-    petBag: trimTrailingNulls((e.petBag ?? []).map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty } : null))),
+    petBag: trimTrailingNulls((e.petBag ?? []).map((s) => (s ? { itemId: s.itemId, rarity: s.rarity, plus: s.plus, qty: s.qty, blues: copyBlues(s.blues) } : null))),
     returnCity: e.returnCity, // GDD v0.5: persist the registered Return/respawn city
     autoPotHpPct: e.autoPotHpPct, // Sistema 15 (QoL): persist the auto-pot preference (undefined = off, omitted by JSON)
     autoPotMpPct: e.autoPotMpPct, // Sistema 15 (QoL, Fatia 2): persist the MP auto-pot preference
@@ -174,7 +179,10 @@ function sanitizeStack(raw: unknown): ItemStack | null {
   if (!isRarity(raw.rarity)) return null;
   if (!isInt(raw.plus) || raw.plus < 0 || raw.plus > MAX_PLUS) return null;
   if (!isInt(raw.qty) || raw.qty < 1) return null;
-  return { itemId: raw.itemId, rarity: raw.rarity, plus: raw.plus, qty: raw.qty };
+  const st: ItemStack = { itemId: raw.itemId, rarity: raw.rarity, plus: raw.plus, qty: raw.qty };
+  const blues = sanitizeBlues(raw.blues); // Sistema 3: azuis saneados (só ids/levels válidos); ausente => sem azul
+  if (blues) st.blues = blues;
+  return st;
 }
 
 function sanitizeEquipment(raw: unknown): Record<EquipSlot, EquippedItem | null> {
@@ -189,5 +197,8 @@ function sanitizeEquipped(raw: unknown, slot: EquipSlot): EquippedItem | null {
   if (!isRarity(raw.rarity)) return null;
   if (!isInt(raw.plus) || raw.plus < 0 || raw.plus > MAX_PLUS) return null;
   const durability = isNum(raw.durability) ? clamp(raw.durability, 0, MAX_DURABILITY) : MAX_DURABILITY;
-  return { itemId: raw.itemId, rarity: raw.rarity, plus: raw.plus, durability };
+  const it: EquippedItem = { itemId: raw.itemId, rarity: raw.rarity, plus: raw.plus, durability };
+  const blues = sanitizeBlues(raw.blues); // Sistema 3: azuis saneados
+  if (blues) it.blues = blues;
+  return it;
 }
