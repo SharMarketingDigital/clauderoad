@@ -9,6 +9,7 @@ import { ServerWorld } from '../server/world';
 import type { Entity } from '../src/sim/types';
 import type { EntityView } from '../src/world_api';
 import { addToBag } from '../src/sim/inventory';
+import { BERSERK_MAX } from '../src/sim/content/berserk';
 
 type EntsInternal = { ents: Map<number, Entity> };
 const playerEntity = (sim: Sim): Entity =>
@@ -55,5 +56,19 @@ describe('K6 — caminho de dados da ficha (phyDef/magDef no seam)', () => {
 
     expect(w.selfState(id).phyDef).toBe(2); // selfState copia e.phyDef do EntityView
     expect(w.selfState(id).magDef).toBe(1);
+  });
+
+  it('online: Sistema 2 — ServerWorld.selfState expõe a barra de fúria como FRAÇÃO 0..1 (não redividida)', () => {
+    // Regressão: o selfState lê `e` de sim.entities() (EntityView), cujo berserkGauge JÁ é raw/BERSERK_MAX.
+    // Redividir por BERSERK_MAX (o bug) deixava a barra online travada em ~1% — nunca "pronta" (>=33%).
+    const w = new ServerWorld(1338);
+    const id = w.addPlayer('Fury');
+    expect(w.selfState(id).berserkGauge).toBe(0); // barra vazia
+    const sim = (w as unknown as { sim: Sim }).sim;
+    const pe = playerEntity(sim);
+    pe.berserkGauge = BERSERK_MAX; // enche a barra RAW (100)
+    pe.combatUntil = 999999; // "em combate" → o decay do regen não roda neste step
+    w.step(); // invalida o cache de views do sim (a barra fica 100: sem decair, sem mob por perto pra encher)
+    expect(w.selfState(id).berserkGauge).toBe(1); // fração 1.0 — a dupla-divisão dava 0.01
   });
 });

@@ -9,7 +9,11 @@ import type { AbilityDef } from '../src/sim/content/abilities';
 import type { Entity } from '../src/sim/types';
 import { Sim } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
-import { BERSERK_MAX, BERSERK_LEVELS, berserkLevel } from '../src/sim/content/berserk';
+import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_LEVELS, berserkLevel } from '../src/sim/content/berserk';
+import { addToBag } from '../src/sim/inventory';
+import { chebyshev } from '../src/sim/zones';
+
+const LEATHER5 = ['leather_cap', 'wolf_leather', 'leather_gloves', 'leather_pants', 'leather_boots']; // parry 15
 
 const entById = (sim: Sim, id: number): Entity =>
   [...(sim as unknown as Internal).ents.values()].find((e) => e.id === id)!;
@@ -38,11 +42,13 @@ describe('Berserk — damageMult no compute() (puro)', () => {
     expect(compute(ctx({ ability: def, damageMult: 2 })).amount).toBe(100); // 50 × 2
   });
 
-  it('aplica ANTES do crit (o burst e o crit compõem)', () => {
-    // critChance 1 => sempre crita; base já com berserk, depois × CRIT_MULT.
-    const hit = compute(ctx({ damageMult: 2, critChance: 1, rng: new Rng(1) }));
+  it('aplica ANTES do crit (o burst compõe com o crit; DISTINGUE a ordem)', () => {
+    // Multiplicador FRACIONÁRIO (1.5) pra a ordem importar: antes-do-crit round(round(25×1.5)×2)=76;
+    // depois-do-crit daria round(round(25×2)×1.5)=75. (Com ×2 inteiro, 100=100 — não distinguiria.)
+    const hit = compute(ctx({ damageMult: 1.5, critChance: 1, rng: new Rng(1) }));
     expect(hit.crit).toBe(true);
-    expect(hit.amount).toBe(Math.round(50 * CRIT_MULT)); // (25×2)=50, depois × 2.0 = 100
+    const burstBase = Math.round(25 * 1.5); // 38 — o base JÁ com o burst, ANTES do crit
+    expect(hit.amount).toBe(Math.round(burstBase * CRIT_MULT)); // 76 (antes); a ordem invertida daria 75
   });
 });
 
@@ -158,6 +164,52 @@ describe('Berserk — a barra (enche em combate, decai fora) — Fatia 2', () =>
     player(sim).effects.push({ kind: 'dot', expiresAt: 999999, magnitude: 5, period: 1, nextAt: sim.tick + 1, source: 0 });
     for (let i = 0; i < 40; i++) { player(sim).hp = player(sim).maxHp; sim.step(); } // refill: o DoT ticka mas não mata
     expect(player(sim).berserkGauge ?? 0).toBe(0); // DoT (dodgeable=false) não conta como golpe levado
+  });
+
+  it('DAR: um golpe do player ESQUIVADO pelo alvo (PvP) NÃO enche a barra do atacante (gate landed)', () => {
+    // Espelho do teste do DoT, mas no lado do DAR (o gate `landed` em hitTarget). Só ativável em PvP — mob
+    // nunca esquiva. B veste couro (parry 15) e NÃO revida (swingTicks 0), então a barra de A só pode encher
+    // pelo que A DÁ; num tick de esquiva PURA de A→B, a barra de A não pode crescer.
+    const sim = new Sim(3, /* spawnLocal */ false);
+    const a = sim.addPlayer('A');
+    const b = sim.addPlayer('B');
+    sim.sendCommandFor(a, { t: 'duel-challenge', name: 'B' }); sim.step();
+    sim.sendCommandFor(b, { t: 'duel-accept' }); sim.step();
+    entById(sim, b).swingTicks = 0; // B não ataca A → isola o DAR de A (a barra de A não enche por LEVAR)
+    for (const it of LEATHER5) {
+      addToBag(entById(sim, b).bag, it, 'normal', 0, 1);
+      sim.sendCommandFor(b, { t: 'equip', itemId: it, rarity: 'normal', plus: 0 });
+      sim.step();
+    }
+    expect(entById(sim, b).parry).toBe(15);
+    sim.sendCommandFor(b, { t: 'move', dx: 1, dz: 1 }); // B sai da cidade (fora da safe-zone A conecta/esquiva)
+    for (let i = 0; i < 600 && chebyshev(entById(sim, b).x, entById(sim, b).z) <= 35; i++) sim.step();
+    sim.sendCommandFor(b, { t: 'stop' }); sim.step();
+    entById(sim, a).berserkGauge = 0;
+    const seen = new Set<number>();
+    let landedOnB = 0;
+    let dodgedByB = 0;
+    for (let i = 0; i < 400; i++) {
+      // DESLIGA as mordidas de TODO mob → o único combate é A→B; assim as esquivas ('miss' em B) são só
+      // dos golpes de A (senão mobs mordendo B, que esquiva com parry 15, poluiriam a medição).
+      for (const e of ents(sim)) if (e.kind === 'enemy') e.swingTicks = 0;
+      const A = entById(sim, a), B = entById(sim, b);
+      A.x = B.x + 0.3; A.z = B.z; // cola A em B (contato → A desfere golpes em B)
+      sim.sendCommandFor(a, { t: 'set-target', id: b });
+      sim.step();
+      for (const ev of sim.recentEvents()) {
+        if (seen.has(ev.seq)) continue;
+        seen.add(ev.seq);
+        if (ev.targetId !== b) continue;
+        if (ev.kind === 'damage') landedOnB++;
+        else if (ev.kind === 'miss') dodgedByB++;
+      }
+    }
+    expect(dodgedByB).toBeGreaterThan(0); // B esquivou golpes de A (o gate landed foi exercido)
+    expect(landedOnB * BERSERK_PER_HIT).toBeLessThan(BERSERK_MAX); // barra abaixo do teto → a diferença aparece
+    // A barra de A = SÓ os golpes que CONECTARAM × PER_HIT. Se o gate landed cair, os esquivados também
+    // contariam ((landed+dodged)×PER_HIT) e a barra ficaria maior.
+    expect(entById(sim, a).berserkGauge ?? 0).toBe(landedOnB * BERSERK_PER_HIT);
   });
 
   it('a barra é DETERMINÍSTICA (mesma seed + mesmo combate → mesma barra) e persiste no save', () => {

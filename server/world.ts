@@ -9,7 +9,6 @@
 // and offline because it's literally the same simulation.
 import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
-import { BERSERK_MAX } from '../src/sim/content/berserk';
 import { EQUIP_SLOTS } from '../src/sim/inventory';
 import type { Command, PartyView, EntityView } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
@@ -506,7 +505,7 @@ export class ServerWorld {
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       parry: e.parry ?? 0, // Fase 3 (Hit × Parry): esquiva efetiva autoritativa
       blockRatio: e.blockRatio ?? 0, // Fase 3 (Block): chance de bloqueio autoritativa
-      berserkGauge: (e.berserkGauge ?? 0) / BERSERK_MAX, // Sistema 2 (Berserk): a barra como fração 0..1
+      berserkGauge: e.berserkGauge ?? 0, // Sistema 2 (Berserk): `e` é o EntityView — berserkGauge JÁ é a fração 0..1 (não redividir)
       botActive: this.sim.botActiveFor(id),
       autoPotHpPct: this.sim.autoPotHpPctFor(id), // Sistema 15 (QoL): HP auto-pot threshold for this player's HUD
       autoPotMpPct: this.sim.autoPotMpPctFor(id), // Sistema 15 (QoL, Fatia 2): MP auto-pot threshold
