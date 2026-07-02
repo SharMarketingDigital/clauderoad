@@ -9,6 +9,10 @@ import { BLOCK_DMG_MULT } from '../src/sim/combat';
 import type { Entity } from '../src/sim/types';
 import type { Rarity } from '../src/world_api';
 import { addToBag } from '../src/sim/inventory';
+import { SPECIES_BY_ID } from '../src/sim/content/enemies';
+
+// Os 5 slots defensivos de couro (parry 15) — usados p/ ativar parry E block ao mesmo tempo (ordem canônica).
+const LEATHER5 = ['leather_cap', 'wolf_leather', 'leather_gloves', 'leather_pants', 'leather_boots'];
 
 type Internal = { ents: Map<number, Entity> };
 const ents = (sim: Sim): Entity[] => [...(sim as unknown as Internal).ents.values()];
@@ -147,5 +151,95 @@ describe('Block — amortece (não anula) e mobs não bloqueiam', () => {
     for (let i = 0; i < 5; i++) sim.step();
     const enemy = ents(sim).find((e) => e.kind === 'enemy')!;
     expect(enemy.blockRatio ?? 0).toBe(0);
+  });
+});
+
+// Buracos que a revisão adversarial (worktree isolado) pegou: o núcleo block≠esquiva (on-hit ainda aplica),
+// o piso ≥1 num golpe bloqueado, e a ordem esquiva-antes-de-block.
+describe('Block — cobertura adversarial (block ≠ esquiva; piso; ordem)', () => {
+  it('um golpe BLOQUEADO ainda aplica on-hit status (amortece ≠ anula — o oposto da esquiva)', () => {
+    // O núcleo do slice: a esquiva ANULA (miss, sem on-hit); o block AMORTECE (conecta, on-hit AINDA aplica).
+    // Isso vive em hitPlayer retornar landed=true num golpe bloqueado (gateia applyEnemyOnHit). Mutação
+    // `return true`→`return !blocked` suprimiria o on-hit num bloqueio — este teste pega.
+    const rogue = SPECIES_BY_ID['skeleton_rogue'];
+    const originalChance = rogue.onHit!.chance;
+    rogue.onHit!.chance = 1; // toda mordida CONECTADA aplica o dot
+    try {
+      const sim = new Sim(7);
+      const pid = player(sim).id;
+      const seen = new Set<number>();
+      let blockedHits = 0;
+      let gotDot = false;
+      for (let i = 0; i < 600; i++) {
+        const p = player(sim);
+        p.hp = p.maxHp; // sobrevive tankando
+        p.blockRatio = 1; // bloqueia TODO golpe (parry 0 → nunca esquiva; logo todo golpe é bloqueado E conecta)
+        for (const e of ents(sim)) if (e.kind === 'enemy') e.species = 'skeleton_rogue';
+        const w = nearestWolf(sim);
+        if (w) sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+        for (const ev of sim.recentEvents()) {
+          if (seen.has(ev.seq)) continue;
+          seen.add(ev.seq);
+          if (ev.kind === 'damage' && ev.targetId === pid && ev.blocked) blockedHits++;
+        }
+        if (player(sim).effects.some((s) => s.kind === 'dot')) gotDot = true;
+      }
+      expect(blockedHits).toBeGreaterThan(0); // o player de fato BLOQUEOU golpes (não esquivou — parry 0)
+      expect(gotDot).toBe(true); // e um golpe BLOQUEADO ainda aplicou o on-hit (bleed) — amortece, não anula
+    } finally {
+      rogue.onHit!.chance = originalChance;
+    }
+  });
+
+  it('um golpe bloqueado que renderia <1 é floored em ≥1 (o piso Math.max(1,...) é load-bearing)', () => {
+    // Mordida crua = 1 → bloqueada round(1*0.25)=0 → sem o piso, um golpe que CONECTOU daria 0 dano
+    // (violando "amortece, não anula"). O piso mantém ≥1. Mutação Math.max(1)→Math.max(0) daria 0 aqui.
+    const sim = new Sim(7);
+    const pid = player(sim).id;
+    const seen = new Set<number>();
+    const blockedAmounts: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      const p = player(sim);
+      p.hp = p.maxHp;
+      p.blockRatio = 1; // bloqueia todo golpe
+      for (const e of ents(sim)) if (e.kind === 'enemy') { e.weaponDamage = 1; e.str = 0; } // mordida crua = 1
+      const w = nearestWolf(sim);
+      if (w) sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      sim.step();
+      for (const ev of sim.recentEvents()) {
+        if (seen.has(ev.seq)) continue;
+        seen.add(ev.seq);
+        if (ev.kind === 'damage' && ev.targetId === pid && ev.blocked) blockedAmounts.push(ev.amount);
+      }
+    }
+    expect(blockedAmounts.length).toBeGreaterThan(0); // bloqueou mordidas crus (round(1*0.25)=0 antes do piso)
+    expect(Math.min(...blockedAmounts)).toBe(1); // o piso segurou em ≥1 (mutação Math.max(0) daria 0)
+  });
+
+  it('ordem canônica esquiva→block: com parry E block ativos, o hash trava a ordem dos rolls', () => {
+    // Único cenário com AMBOS os gates ativos (couro=parry 15 + escudo=block 0.10). Reordenar o roll de block
+    // pra ANTES do de esquiva consome rng em ordem diferente → muda o stream → o hash pinado difere. (Um
+    // assert de evento não pega: o path de esquiva empurra seu próprio 'miss' sem flag blocked em qualquer ordem.)
+    const run = (seed: number): string => {
+      const sim = new Sim(seed);
+      for (const it of LEATHER5) equip(sim, it); // parry 15
+      equip(sim, 'wooden_shield'); // blockRatio 0.10 → AMBOS os gates ativos por mordida
+      expect(player(sim).parry).toBe(15);
+      expect(player(sim).blockRatio).toBeCloseTo(0.10, 10);
+      // SEM refill de hp: o dano de golpes esquivados/bloqueados precisa afetar o hp (que ENTRA no hash),
+      // senão o hash fica cego à ordem dos rolls. O player de couro+escudo sobrevive à janela (como armor.test).
+      for (let i = 0; i < 400; i++) {
+        const p = player(sim);
+        const w = nearestWolf(sim);
+        if (w) sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+        sim.step();
+      }
+      expect(player(sim).deadUntil).toBe(0); // sobreviveu → o hash reflete o hp acumulado (sensível à ordem)
+      return sim.hash();
+    };
+    const h = run(20);
+    expect(run(20)).toBe(h); // reproduzível
+    expect(h).toBe('af79bacd'); // ÂNCORA da ordem: reordenar block-antes-de-esquiva muda o stream → hash difere
   });
 });
