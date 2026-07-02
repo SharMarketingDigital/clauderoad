@@ -101,9 +101,11 @@ describe('Armor in real combat — vesting gear reduces the damage taken', () =>
     const geared = hpLostTanking(true);
     expect(bare.alive).toBe(true); // both survive the window, so the bite pattern is identical
     expect(geared.alive).toBe(true);
-    expect(bare.lost).toBeGreaterThan(0); // the wolf actually bit (both)
-    expect(geared.lost).toBeGreaterThan(0);
-    expect(geared.lost).toBeLessThan(bare.lost); // armor reduced the damage taken
+    expect(bare.lost).toBeGreaterThan(0); // the wolf actually bit the BARE player (net loss)
+    // Sistema 4: com o SET couro completo (4/4 -> +3 phyDef, +3 magDef, +20 maxHp) o geared fica tão tanky que
+    // a regen supera as mordidas mitigadas — pode fechar a janela com net POSITIVO (lost <= 0). Isso é evidência
+    // ainda MAIS forte de que a armadura reduz o dano; a alegação central segue exata:
+    expect(geared.lost).toBeLessThan(bare.lost); // armadura (peça + set) reduziu o dano líquido tomado
   });
 
   it('determinism: a geared-player combat run hashes identically run-to-run', () => {

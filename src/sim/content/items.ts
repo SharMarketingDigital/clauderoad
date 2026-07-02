@@ -51,6 +51,9 @@ export interface ItemDef {
   // exclusiva de ESCUDOS (SRO: Block Ratio %, cols 74–78 do escudo). Intrínseca ao item (como degree), FLAT:
   // NÃO escala por raridade/+N/durabilidade. Ausente/0 => sem block. O par do parry: leve esquiva, pesado bloqueia.
   blockRatio?: number;
+  // Sistema 4 (Set items): a que CONJUNTO esta peça pertence (id em content/sets.ts). Intrínseco à def (como
+  // degree) — não toca save/hash. N peças do mesmo setId equipadas -> o bônus de conjunto (2/3/4). Só armadura.
+  setId?: string;
 }
 
 export const ITEMS: Record<string, ItemDef> = {
@@ -60,15 +63,15 @@ export const ITEMS: Record<string, ItemDef> = {
   // MP regen. Same generic consume path (healMp), shared potion cooldown — no sim changes needed.
   mana_potion: { id: 'mana_potion', name: 'Poção de Mana', consumable: { healMp: 50 }, value: 10 },
   // crude leather "armor" — common drop, gives a little HP
-  wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'chest', stats: { maxHp: 20, phyDef: 2, magDef: 1 }, value: 8 },
+  wolf_leather: { id: 'wolf_leather', name: 'Couro de Lobo', slot: 'chest', stats: { maxHp: 20, phyDef: 2, magDef: 1 }, setId: 'leather', value: 8 },
   // K1 added the rest of the Silkroad armor set + shield + accessories (str/maxHp/maxMp).
   // K3 then added phyDef/magDef to the PROTECTIVE pieces (helmet/chest/hands/legs/feet/shield);
   // accessories & weapons carry no defense, à la Silkroad. Per-piece weight chest>legs>helmet>
   // hands~feet; the shield is balanced. Provisional integers on the wolf_leather scale — tune later.
-  leather_cap: { id: 'leather_cap', name: 'Gorro de Couro', slot: 'helmet', stats: { maxHp: 12, phyDef: 1, magDef: 1 }, value: 6 },
-  leather_gloves: { id: 'leather_gloves', name: 'Luvas de Couro', slot: 'hands', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, value: 5 },
-  leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14, phyDef: 2, magDef: 1 }, value: 7 },
-  leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, value: 5 },
+  leather_cap: { id: 'leather_cap', name: 'Gorro de Couro', slot: 'helmet', stats: { maxHp: 12, phyDef: 1, magDef: 1 }, setId: 'leather', value: 6 },
+  leather_gloves: { id: 'leather_gloves', name: 'Luvas de Couro', slot: 'hands', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, setId: 'leather', value: 5 },
+  leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14, phyDef: 2, magDef: 1 }, setId: 'leather', value: 7 },
+  leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, setId: 'leather', value: 5 },
   wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', blockRatio: 0.10, stats: { maxHp: 18, phyDef: 2, magDef: 2 }, value: 10 },
   copper_necklace: { id: 'copper_necklace', name: 'Colar de Cobre', slot: 'necklace', stats: { maxMp: 12 }, value: 12 },
   copper_earring: { id: 'copper_earring', name: 'Brinco de Cobre', slot: 'earring', stats: { str: 1 }, value: 12 },
@@ -105,20 +108,20 @@ export const ITEMS: Record<string, ItemDef> = {
   // sobem str 1→2→3 (não round(1×1.4)=1), senão o g2 sairia idêntico ao g1 mas com reqLevel maior = item
   // dominado. Armadura defensiva e colar seguem round(base×statMult) (ladderiam bem nos números maiores).
   // helmet (base leather_cap: maxHp 12 / phyDef 1 / magDef 1)
-  studded_cap:     { id: 'studded_cap',     name: 'Elmo Rebitado (2º Grau)',      slot: 'helmet',   degree: 2, reqLevel: 4, stats: { maxHp: 17, phyDef: 1, magDef: 1 }, value: 12 },
-  plate_helm:      { id: 'plate_helm',      name: 'Elmo de Placas (3º Grau)',     slot: 'helmet',   degree: 3, reqLevel: 8, stats: { maxHp: 22, phyDef: 2, magDef: 2 }, value: 21 },
+  studded_cap:     { id: 'studded_cap',     name: 'Elmo Rebitado (2º Grau)',      slot: 'helmet',   degree: 2, reqLevel: 4, stats: { maxHp: 17, phyDef: 1, magDef: 1 }, setId: 'chain', value: 12 },
+  plate_helm:      { id: 'plate_helm',      name: 'Elmo de Placas (3º Grau)',     slot: 'helmet',   degree: 3, reqLevel: 8, stats: { maxHp: 22, phyDef: 2, magDef: 2 }, setId: 'plate', value: 21 },
   // chest (base wolf_leather: maxHp 20 / phyDef 2 / magDef 1)
-  chain_vest:      { id: 'chain_vest',      name: 'Cota de Malha (2º Grau)',      slot: 'chest',    degree: 2, reqLevel: 4, stats: { maxHp: 28, phyDef: 3, magDef: 1 }, value: 16 },
-  plate_armor:     { id: 'plate_armor',     name: 'Armadura de Placas (3º Grau)', slot: 'chest',    degree: 3, reqLevel: 8, stats: { maxHp: 36, phyDef: 4, magDef: 2 }, value: 28 },
+  chain_vest:      { id: 'chain_vest',      name: 'Cota de Malha (2º Grau)',      slot: 'chest',    degree: 2, reqLevel: 4, stats: { maxHp: 28, phyDef: 3, magDef: 1 }, setId: 'chain', value: 16 },
+  plate_armor:     { id: 'plate_armor',     name: 'Armadura de Placas (3º Grau)', slot: 'chest',    degree: 3, reqLevel: 8, stats: { maxHp: 36, phyDef: 4, magDef: 2 }, setId: 'plate', value: 28 },
   // hands (base leather_gloves: maxHp 8 / phyDef 1 / magDef 1)
-  chain_gloves:    { id: 'chain_gloves',    name: 'Manoplas de Malha (2º Grau)',  slot: 'hands',    degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, value: 10 },
-  plate_gauntlets: { id: 'plate_gauntlets', name: 'Manoplas de Placas (3º Grau)', slot: 'hands',    degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, value: 18 },
+  chain_gloves:    { id: 'chain_gloves',    name: 'Manoplas de Malha (2º Grau)',  slot: 'hands',    degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, setId: 'chain', value: 10 },
+  plate_gauntlets: { id: 'plate_gauntlets', name: 'Manoplas de Placas (3º Grau)', slot: 'hands',    degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, setId: 'plate', value: 18 },
   // legs (base leather_pants: maxHp 14 / phyDef 2 / magDef 1)
-  chain_leggings:  { id: 'chain_leggings',  name: 'Grevas de Malha (2º Grau)',    slot: 'legs',     degree: 2, reqLevel: 4, stats: { maxHp: 20, phyDef: 3, magDef: 1 }, value: 14 },
-  plate_legs:      { id: 'plate_legs',      name: 'Grevas de Placas (3º Grau)',   slot: 'legs',     degree: 3, reqLevel: 8, stats: { maxHp: 25, phyDef: 4, magDef: 2 }, value: 25 },
+  chain_leggings:  { id: 'chain_leggings',  name: 'Grevas de Malha (2º Grau)',    slot: 'legs',     degree: 2, reqLevel: 4, stats: { maxHp: 20, phyDef: 3, magDef: 1 }, setId: 'chain', value: 14 },
+  plate_legs:      { id: 'plate_legs',      name: 'Grevas de Placas (3º Grau)',   slot: 'legs',     degree: 3, reqLevel: 8, stats: { maxHp: 25, phyDef: 4, magDef: 2 }, setId: 'plate', value: 25 },
   // feet (base leather_boots: maxHp 8 / phyDef 1 / magDef 1)
-  chain_boots:     { id: 'chain_boots',     name: 'Botas de Malha (2º Grau)',     slot: 'feet',     degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, value: 10 },
-  plate_boots:     { id: 'plate_boots',     name: 'Botas de Placas (3º Grau)',    slot: 'feet',     degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, value: 18 },
+  chain_boots:     { id: 'chain_boots',     name: 'Botas de Malha (2º Grau)',     slot: 'feet',     degree: 2, reqLevel: 4, stats: { maxHp: 11, phyDef: 1, magDef: 1 }, setId: 'chain', value: 10 },
+  plate_boots:     { id: 'plate_boots',     name: 'Botas de Placas (3º Grau)',    slot: 'feet',     degree: 3, reqLevel: 8, stats: { maxHp: 14, phyDef: 2, magDef: 2 }, setId: 'plate', value: 18 },
   // shield (base wooden_shield: maxHp 18 / phyDef 2 / magDef 2)
   iron_shield:     { id: 'iron_shield',     name: 'Escudo de Ferro (2º Grau)',    slot: 'shield',   degree: 2, reqLevel: 4, blockRatio: 0.15, stats: { maxHp: 25, phyDef: 3, magDef: 3 }, value: 20 },
   tower_shield:    { id: 'tower_shield',    name: 'Escudo Torre (3º Grau)',       slot: 'shield',   degree: 3, reqLevel: 8, blockRatio: 0.20, stats: { maxHp: 32, phyDef: 4, magDef: 4 }, value: 35 },

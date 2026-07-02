@@ -45,22 +45,24 @@ describe('K3 — defensive stats on equipment', () => {
 
   it('a full protective set sums defense across slots; accessories and weapons add none', () => {
     const sim = new Sim(2);
-    // helmet+chest+hands+legs+feet+shield = phyDef 1+2+1+2+1+2 = 9, magDef 1+1+1+1+1+2 = 7
+    // helmet+chest+hands+legs+feet+shield per-peça = phyDef 1+2+1+2+1+2 = 9, magDef 1+1+1+1+1+2 = 7.
+    // Sistema 4: as 5 peças de COURO formam o set completo (4/4 -> +3 phyDef, +3 magDef, +20 maxHp), então os
+    // totais efetivos ficam +3 cada. (O escudo não é peça de set, mas as 5 armaduras já batem o limiar de 4.)
     equip(sim, 'leather_cap'); // helmet
     equip(sim, 'wolf_leather'); // chest
     equip(sim, 'leather_gloves'); // hands
     equip(sim, 'leather_pants'); // legs
     equip(sim, 'leather_boots'); // feet
     equip(sim, 'wooden_shield'); // shield
-    expect(player(sim).phyDef).toBe(9);
-    expect(player(sim).magDef).toBe(7);
+    expect(player(sim).phyDef).toBe(12); // 9 per-peça + 3 do set couro (4/4)
+    expect(player(sim).magDef).toBe(10); // 7 per-peça + 3 do set couro (4/4)
 
-    // accessories (no defense) and a weapon (no defense) must not change the totals
+    // accessories (no defense, no set) and a weapon (no defense) must not change the totals
     equip(sim, 'copper_necklace');
     equip(sim, 'copper_ring');
     equip(sim, 'old_sword');
-    expect(player(sim).phyDef).toBe(9);
-    expect(player(sim).magDef).toBe(7);
+    expect(player(sim).phyDef).toBe(12);
+    expect(player(sim).magDef).toBe(10);
   });
 
   it('defense scales with rarity (rarer = strictly more), via the same rarityStat used by the other stats', () => {

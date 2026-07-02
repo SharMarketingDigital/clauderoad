@@ -241,6 +241,6 @@ describe('Block — cobertura adversarial (block ≠ esquiva; piso; ordem)', () 
     };
     const h = run(20);
     expect(run(20)).toBe(h); // reproduzível
-    expect(h).toBe('b97e1292'); // ÂNCORA da ordem: reordenar block-antes-de-esquiva muda o stream → hash difere (re-baselineada no Sistema 2)
+    expect(h).toBe('47136b28'); // ÂNCORA da ordem: reordenar block-antes-de-esquiva muda o stream → hash difere (re-baselineada no Sistema 4: LEATHER5 = set couro 4/4, +20hp/+3def muda a trajetória de hp)
   });
 });

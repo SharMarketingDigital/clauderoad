@@ -29,6 +29,7 @@ import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETUR
 import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE, PET_GRAB_RADIUS } from './loot';
 import { MASTERIES, DEFAULT_MASTERY, abilityUnlockLevel, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
+import { setBonusFor } from './content/sets';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
 import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
@@ -3145,6 +3146,22 @@ export class Sim implements IWorld {
           // critChance() a partir dos azuis da arma, junto do baseCrit/passiva/buff. Aqui ele cai fora (no-op).
         }
       }
+    }
+    // Sistema 4 (Set items): conta as peças equipadas de cada conjunto (por setId) e aplica o MAIOR limiar
+    // atingido (2/3/4), FLAT nos eixos defensivos (HP/def — MVP). Derivado do equipamento (já hasheado) e sem
+    // Rng -> determinístico; a ordem de iteração do Map não importa (soma comutativa). Set incompleto (<2) = 0.
+    const setCounts = new Map<string, number>();
+    for (const slot of EQUIP_SLOTS) {
+      const eq = p.equipment[slot];
+      const sid = eq ? ITEMS[eq.itemId]?.setId : undefined;
+      if (sid) setCounts.set(sid, (setCounts.get(sid) ?? 0) + 1);
+    }
+    for (const [sid, count] of setCounts) {
+      const bonus = setBonusFor(sid, count);
+      if (!bonus) continue;
+      bonusMaxHp += bonus.maxHp ?? 0;
+      bonusPhyDef += bonus.phyDef ?? 0;
+      bonusMagDef += bonus.magDef ?? 0;
     }
     // The active weapon mastery's passive is always on (e.g. Lança's +HP).
     const passive = this.activeMastery(p).passive;
