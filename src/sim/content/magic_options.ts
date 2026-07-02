@@ -103,7 +103,9 @@ export function sanitizeBlues(raw: unknown): BlueLine[] | undefined {
     if (!item || typeof item !== 'object') continue;
     const id = (item as { id?: unknown }).id;
     const level = (item as { level?: unknown }).level;
-    if (typeof id !== 'string' || !(id in BLUES)) continue;
+    // hasOwnProperty (NÃO `id in BLUES`): o `in` anda pela cadeia de protótipo, então 'constructor'/'toString'/
+    // '__proto__'/etc. passariam como id válido (→ BLUES[id].maxLevel undefined → level NaN → corrompe stacking/hash).
+    if (typeof id !== 'string' || !Object.prototype.hasOwnProperty.call(BLUES, id)) continue;
     if (typeof level !== 'number' || !Number.isInteger(level) || level < 1) continue;
     if (seen.has(id as BlueId)) continue;
     seen.add(id as BlueId);

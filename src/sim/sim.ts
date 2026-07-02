@@ -3757,7 +3757,7 @@ export class Sim implements IWorld {
     const held = p.bag.filter((s): s is ItemStack => s != null).map((s) => ({ ...s })); // snapshot before mutating p.bag
     for (const s of held) {
       if (this.dropRng.next() >= DEATH_DROP_CHANCE) continue; // kept it
-      if (!removeFromBag(p.bag, s.itemId, s.rarity, s.plus, s.qty)) continue; // safety: must still hold the stack
+      if (!removeFromBag(p.bag, s.itemId, s.rarity, s.plus, s.qty, s.blues)) continue; // safety: remove ESTA stack (azuis inclusos — senão dropa a identidade errada e duplica/destrói na morte)
       this.spawnGroundLoot(p.x, p.z, s);
     }
   }

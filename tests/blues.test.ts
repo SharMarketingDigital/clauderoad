@@ -202,3 +202,53 @@ describe('Blues — save/hash (persistência + determinismo)', () => {
     expect(sanitizeBlues([{ id: 'str', level: 999 }])![0].level).toBe(BLUES.str.maxLevel); // clampado ao teto
   });
 });
+
+// Buracos de CORRUPÇÃO que a revisão focada no stacking pegou (fix-forward).
+describe('Blues — corrupção pega pela revisão focada (fix-forward)', () => {
+  it('CRÍTICO: death-drop preserva a IDENTIDADE — não duplica o azul nem destrói o gêmeo sem-azul', () => {
+    // dropPhysicalLoot iterava snapshots com azuis mas removia por (itemId,rarity,plus) SEM os azuis → removia
+    // o gêmeo sem-azul e spawnava o snapshot azul: item azul DUPLICADO (bolsa+chão) + sem-azul DESTRUÍDO.
+    const sim = new Sim(1);
+    const p = player(sim);
+    p.bag = new Array(BAG_SLOTS).fill(null);
+    p.bag[0] = { itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1, blues: [{ id: 'str', level: 2 }] }; // AZUL primeiro
+    p.bag[1] = { itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1 }; // gêmeo SEM-AZUL, mesmo id/rarity/plus
+    // Força TODO item a dropar (dropRng sempre 0 < DEATH_DROP_CHANCE), e chama o mover direto.
+    (sim as unknown as { dropRng: { next: () => number } }).dropRng = { next: () => 0 };
+    (sim as unknown as { dropPhysicalLoot: (e: Entity) => void }).dropPhysicalLoot(p);
+    // Conservação por IDENTIDADE (chave de azul) somando bolsa + chão.
+    const countByKey = (key: string): number => {
+      let n = 0;
+      for (const s of p.bag) if (s && bluesKey(s.blues) === key) n += s.qty;
+      for (const e of [...(sim as unknown as Internal).ents.values()]) {
+        if (e.loot && bluesKey(e.loot.stack.blues) === key) n += e.loot.stack.qty;
+      }
+      return n;
+    };
+    expect(countByKey('str:2')).toBe(1); // o azul NÃO foi duplicado
+    expect(countByKey('')).toBe(1); // o sem-azul NÃO foi destruído
+  });
+
+  it('CRÍTICO: sanitizeBlues REJEITA ids de Object.prototype (constructor/toString/__proto__/hasOwnProperty)', () => {
+    // `id in BLUES` andava pela cadeia de protótipo → esses ids passavam (→ level NaN → corrompe stacking/hash).
+    for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf', 'isPrototypeOf']) {
+      expect(sanitizeBlues([{ id, level: 2 }])).toBeUndefined();
+    }
+    // um id de protótipo junto de um válido: só o válido sobra (identidade limpa)
+    expect(sanitizeBlues([{ id: 'str', level: 2 }, { id: 'constructor', level: 1 }])).toEqual([{ id: 'str', level: 2 }]);
+  });
+
+  it('os azuis entram no HASH também em STORAGE e PETBAG (não só na bolsa)', () => {
+    const hashWith = (where: 'storage' | 'petBag', blues?: BlueLine[]): string => {
+      const sim = new Sim(5);
+      const p = player(sim);
+      if (where === 'petBag') p.petBag = new Array(12).fill(null);
+      const arr = where === 'storage' ? p.storage : p.petBag!;
+      arr[0] = { itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1, ...(blues ? { blues } : {}) };
+      return sim.hash();
+    };
+    // um item azul no armazém/pet-bag hasheia DIFERENTE da contraparte sem-azul (senão dois hosts desyncam).
+    expect(hashWith('storage', [{ id: 'str', level: 2 }])).not.toBe(hashWith('storage', undefined));
+    expect(hashWith('petBag', [{ id: 'str', level: 2 }])).not.toBe(hashWith('petBag', undefined));
+  });
+});
