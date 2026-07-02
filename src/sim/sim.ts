@@ -1101,8 +1101,10 @@ export class Sim implements IWorld {
     if (!best) return null;
     const entries: StallEntryView[] = [];
     for (const l of this.stalls.get(best.id)!) {
+      // Conta SÓ a variante sem-azul (bluesKey ''): o stall só lista/transfere sem-azul (openStall + transferItem),
+      // então somar um gêmeo AZUL inflaria a qty e deixaria uma listing-fantasma que nunca esgota.
       let qty = 0;
-      for (const s of best.bag) if (s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus) qty += s.qty;
+      for (const s of best.bag) if (s != null && s.itemId === l.itemId && s.rarity === l.rarity && s.plus === l.plus && bluesKey(s.blues) === '') qty += s.qty;
       if (qty <= 0) continue; // hide a sold-out line
       entries.push({ itemId: l.itemId, name: ITEMS[l.itemId]?.name ?? l.itemId, rarity: l.rarity, plus: l.plus, price: l.price, qty });
     }
@@ -1168,7 +1170,7 @@ export class Sim implements IWorld {
     const dx = buyer.x - seller.x, dz = buyer.z - seller.z;
     if (dx * dx + dz * dz > STALL_INTERACT_RANGE * STALL_INTERACT_RANGE) return; // too far from the stall
     if (!this.transferItem(seller, buyer, itemId, rarity, plus, listing.price)) return; // atomic; clean abort on any failure
-    const stillHas = seller.bag.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
+    const stillHas = seller.bag.some((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus && bluesKey(s.blues) === ''); // só a variante vendável (sem-azul)
     if (!stillHas) {
       const i = listings.indexOf(listing);
       if (i >= 0) listings.splice(i, 1);
@@ -1285,8 +1287,9 @@ export class Sim implements IWorld {
     nextId: number;
   } {
     return {
-      listings: [...this.marketListings.entries()].map(([id, l]) => ({ id, sellerName: l.sellerName, item: { ...l.item }, price: l.price })),
-      mailbox: [...this.mailbox.entries()].map(([name, mb]) => ({ name, gold: mb.gold, items: mb.items.map((s) => ({ ...s })) })),
+      // Deep-copia os azuis (não aliasa o array interno do listing/mailbox no blob serializado — defense-in-depth).
+      listings: [...this.marketListings.entries()].map(([id, l]) => ({ id, sellerName: l.sellerName, item: makeStack(l.item.itemId, l.item.rarity, l.item.plus, l.item.qty, l.item.blues), price: l.price })),
+      mailbox: [...this.mailbox.entries()].map(([name, mb]) => ({ name, gold: mb.gold, items: mb.items.map((s) => makeStack(s.itemId, s.rarity, s.plus, s.qty, s.blues)) })),
       nextId: this.nextMarketId,
     };
   }
@@ -2236,10 +2239,10 @@ export class Sim implements IWorld {
         break;
       // Pets PET2 (GDD v0.5 §4): the transport pet's portable bag (no NPC; the pet must be summoned).
       case 'pet-deposit':
-        this.petDeposit(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.petDeposit(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       case 'pet-withdraw':
-        this.petWithdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.petWithdraw(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       // Stalls (GDD v0.5 §5): personal P2P shops. Economy-gated (after the downed/stunned check), like buy/sell.
       case 'stall-open':
@@ -2992,14 +2995,14 @@ export class Sim implements IWorld {
 
   // GDD v0.5 (Pets PET2): move a whole stack bag <-> the transport pet's portable bag. Gated on a pet
   // being SUMMONED (the bag travels with the pet) — NO NPC near-check. Lazily creates the petBag array.
-  private petDeposit(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private petDeposit(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     if (!this.petActiveFor(p.id)) return; // no pet out -> no portable bag
     const petBag = p.petBag ?? (p.petBag = []);
-    depositToPet(p.bag, petBag, itemId, rarity, plus);
+    depositToPet(p.bag, petBag, itemId, rarity, plus, blues); // Sistema 3: identidade cheia (o petBag pode conter azul via restore)
   }
-  private petWithdraw(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private petWithdraw(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     if (!this.petActiveFor(p.id) || !p.petBag) return;
-    withdrawFromPet(p.petBag, p.bag, itemId, rarity, plus);
+    withdrawFromPet(p.petBag, p.bag, itemId, rarity, plus, blues);
   }
 
   // Pay the vendor to restore an equipped item's durability to full (GDD B8). Requires
@@ -4022,12 +4025,13 @@ export class Sim implements IWorld {
       const l = this.marketListings.get(lid)!;
       mix(lid); mix(strHash(l.sellerName));
       mix(strHash(l.item.itemId)); mix(strHash(l.item.rarity)); mix(l.item.plus); mix(l.item.qty); mix(l.price);
+      mixBlues(l.item.blues); // Sistema 3 (azuis): o item ESCROWED é estado que dois hosts têm de concordar (a identidade inclui os azuis)
     }
     // Marketplace mailbox (proceeds + returned items), sorted by name. Empty => byte-identical.
     for (const key of [...this.mailbox.keys()].sort()) {
       const mb = this.mailbox.get(key)!;
       mix(strHash(key)); mix(mb.gold);
-      for (const s of mb.items) { mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty); }
+      for (const s of mb.items) { mix(strHash(s.itemId)); mix(strHash(s.rarity)); mix(s.plus); mix(s.qty); mixBlues(s.blues); } // azuis = identidade
       mix(-1); // item-list terminator
     }
     // The monotonic event counter fingerprints "how much combat has happened".

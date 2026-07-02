@@ -44,11 +44,11 @@ export class PetBagHud {
     }
     this.panel.append(section(`No pet (${pb.stacks.length}/${pb.capacity}) — clique pra tirar`));
     for (const st of pb.stacks) {
-      this.panel.append(itemRow(st, () => world.sendCommand({ t: 'pet-withdraw', itemId: st.itemId, rarity: st.rarity, plus: st.plus })));
+      this.panel.append(itemRow(st, () => world.sendCommand({ t: 'pet-withdraw', itemId: st.itemId, rarity: st.rarity, plus: st.plus, blues: st.blues?.map((b) => ({ id: b.id, level: b.level })) })));
     }
     this.panel.append(section('Na bolsa — clique pra guardar no pet'));
     for (const st of world.inventory().stacks) {
-      this.panel.append(itemRow(st, () => world.sendCommand({ t: 'pet-deposit', itemId: st.itemId, rarity: st.rarity, plus: st.plus })));
+      this.panel.append(itemRow(st, () => world.sendCommand({ t: 'pet-deposit', itemId: st.itemId, rarity: st.rarity, plus: st.plus, blues: st.blues?.map((b) => ({ id: b.id, level: b.level })) })));
     }
   }
 }

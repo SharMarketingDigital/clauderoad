@@ -189,12 +189,12 @@ export class ServerWorld {
       // Pets PET2 (GDD v0.5 §4): bag <-> transport pet's bag (the sim re-checks ownership + that a pet is out).
       case 'pet-deposit':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'pet-deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'pet-deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       case 'pet-withdraw':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'pet-withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'pet-withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       // --- Layer 4: auto-play (each player toggles ITS OWN bot) ---

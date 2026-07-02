@@ -16,6 +16,8 @@ type Internal = {
   ents: Map<number, Entity>;
   stalls: Map<number, unknown[]>;
   openStall: (p: Entity, req: ReadonlyArray<{ itemId: string; rarity: string; plus: number; price: number }>) => void;
+  marketListings: Map<number, { sellerName: string; item: ItemStack; price: number }>;
+  mailbox: Map<string, { gold: number; items: ItemStack[] }>;
 };
 const player = (sim: Sim): Entity => [...(sim as unknown as Internal).ents.values()].find((e) => e.kind === 'player')!;
 const bagStacks = (sim: Sim) => sim.inventory().stacks;
@@ -174,5 +176,76 @@ describe('Blues Fatia 2 — PARIDADE ONLINE (o server threada os azuis)', () => 
     const eqv = chestEq(w, a);
     expect(eqv.itemId).toBe('wolf_leather'); // equipou o sem-azul (garbage saneado, sem corromper)
     expect(eqv.blues).toBeUndefined();
+  });
+});
+
+// Buracos que a revisão adversarial focada (2 agentes) pegou na Fatia 2 — fix-forward.
+describe('Blues Fatia 2 — fix-forward da revisão adversarial', () => {
+  it('HIGH: o item ESCROWED entra no HASH (market listing + mailbox) — dois hosts não divergem em silêncio', () => {
+    // Todo container (bag/storage/petBag/equip/loot) folda os azuis no hash via mixBlues; os folds de market
+    // listings e mailbox NÃO — então um item azul escrowed hasheava igual ao sem-azul (divergência silenciosa).
+    const marketHash = (blues?: BlueLine[]): string => {
+      const sim = new Sim(5);
+      (sim as unknown as Internal).marketListings.set(1, {
+        sellerName: 'X', item: { itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1, ...(blues ? { blues } : {}) } as ItemStack, price: 100,
+      });
+      return sim.hash();
+    };
+    expect(marketHash([{ id: 'str', level: 2 }])).toBe(marketHash([{ id: 'str', level: 2 }])); // reproduzível
+    expect(marketHash([{ id: 'str', level: 2 }])).not.toBe(marketHash([{ id: 'hp', level: 1 }])); // azuis diferentes -> hash diferente
+    expect(marketHash([{ id: 'str', level: 2 }])).not.toBe(marketHash(undefined)); // com azul != sem azul
+
+    const mailHash = (blues?: BlueLine[]): string => {
+      const sim = new Sim(5);
+      (sim as unknown as Internal).mailbox.set('x', {
+        gold: 0, items: [{ itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1, ...(blues ? { blues } : {}) } as ItemStack],
+      });
+      return sim.hash();
+    };
+    expect(mailHash([{ id: 'str', level: 2 }])).not.toBe(mailHash(undefined)); // o item no mailbox também entra no hash
+  });
+
+  it('MED: a qty do stall conta só a variante sem-azul (sem listing-fantasma); comprar esgota a listing', () => {
+    const sim = new Sim(1);
+    const seller = player(sim);
+    const inner = sim as unknown as Internal;
+    const buyerId = sim.addPlayer('Comprador');
+    const buyer = inner.ents.get(buyerId)!;
+    seller.x = 10; seller.z = 6; buyer.x = 11; buyer.z = 6; // adjacentes, na cidade (longe de mobs)
+    buyer.gold = 1000;
+    seller.bag[0] = { itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1 } as ItemStack; // sem-azul (a variante vendável)
+    seller.bag[1] = { itemId: 'wolf_leather', rarity: 'sos', plus: 0, qty: 1, blues: [{ id: 'str', level: 2 }] } as ItemStack; // gêmeo azul
+
+    sim.sendCommand({ t: 'stall-open', listings: [{ itemId: 'wolf_leather', rarity: 'sos', plus: 0, price: 50 }] });
+    sim.step();
+    const view = sim.stallFor(buyerId)!;
+    expect(view.entries.length).toBe(1);
+    expect(view.entries[0].qty).toBe(1); // NÃO 2 — o gêmeo azul não infla a qty (sem fantasma)
+
+    sim.sendCommandFor(buyerId, { t: 'stall-buy', sellerId: seller.id, itemId: 'wolf_leather', rarity: 'sos', plus: 0 });
+    sim.step();
+    // o sem-azul foi vendido; stillHas ignora o gêmeo azul -> a listing esgota e some (não fica fantasma)
+    expect(sim.stallFor(buyerId)).toBeNull();
+    const sellerBlue = seller.bag.filter((s) => s != null && bluesKey(s.blues) === 'str:2');
+    expect(sellerBlue.length).toBe(1); // o item azul do vendedor ficou INTACTO (transferItem nunca o toca)
+  });
+
+  it('pet-bag: depositar e sacar um item azul faz roundtrip (identidade cheia nos comandos do pet)', () => {
+    const sim = new Sim(1);
+    const p = player(sim);
+    p.bag.push({ itemId: 'pet_grab', rarity: 'normal', plus: 0, qty: 1 } as ItemStack); // possui o pet
+    sim.sendCommand({ t: 'set-pet', on: true }); sim.step(); // invoca -> pet bag disponível
+    addToBag(p.bag, 'wolf_leather', 'sos', 0, 1, BAG_SLOTS, [{ id: 'str', level: 2 }]); // azul
+    addToBag(p.bag, 'wolf_leather', 'sos', 0, 1); // gêmeo sem-azul
+
+    sim.sendCommand({ t: 'pet-deposit', itemId: 'wolf_leather', rarity: 'sos', plus: 0, blues: [{ id: 'str', level: 2 }] });
+    sim.step();
+    expect(bluesKey(sim.petBag().stacks[0]?.blues)).toBe('str:2'); // a azul foi pro pet bag (o comando threadou os azuis)
+    expect(bagStacks(sim).some((s) => s.itemId === 'wolf_leather' && s.blues === undefined)).toBe(true); // o sem-azul ficou na bolsa
+
+    sim.sendCommand({ t: 'pet-withdraw', itemId: 'wolf_leather', rarity: 'sos', plus: 0, blues: [{ id: 'str', level: 2 }] });
+    sim.step();
+    const keys = new Set(bagStacks(sim).filter((s) => s.itemId === 'wolf_leather').map((s) => bluesKey(s.blues)));
+    expect(keys).toEqual(new Set(['str:2', ''])); // as duas de volta, separadas (sacou a AZUL do pet, não o gêmeo)
   });
 });

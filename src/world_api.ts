@@ -395,8 +395,8 @@ export type Command =
   | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // K5: take a whole stack back from the warehouse
   // --- Pets PET2 (GDD v0.5 §4): move whole stacks bag <-> the transport pet's portable bag (no NPC; the
   // pet must be summoned). The sim re-validates ownership + that a pet is out. ---
-  | { t: 'pet-deposit'; itemId: string; rarity: Rarity; plus: number } // bag -> pet bag
-  | { t: 'pet-withdraw'; itemId: string; rarity: Rarity; plus: number } // pet bag -> bag
+  | { t: 'pet-deposit'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // bag -> pet bag (blues = identidade)
+  | { t: 'pet-withdraw'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // pet bag -> bag
   | { t: 'set-bot'; on: boolean } // toggle auto-play (the sim drives the player; manual input ignored)
   // Sistema 15 (QoL): auto-potion — set the HP and/or MP auto-pot thresholds as a fraction of the max
   // (0 = off; each optional so a control can set one axis alone). While > 0 and the bot is off, the sim
