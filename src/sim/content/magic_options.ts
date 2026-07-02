@@ -36,6 +36,28 @@ export const BLUES: Record<BlueId, BlueDef> = {
 
 export const MAX_BLUES = 3; // teto de linhas azuis por item (dimensionado ao cap ~10)
 
+// Sistema 3 (magic stones / alquimia de atributo): a "Pedra Astral" — o material genérico que soca/sobe UMA
+// linha azul num item EQUIPADO (id escolhido no comando). Um drop/venda simples (docs/05 corte consciente:
+// sem mercado de stones nem grades de socket). 1 pedra por tentativa; falha gentil (não quebra).
+export const MAGIC_STONE_ID = 'magic_stone';
+
+// Curva de sucesso do enhanceBlue por OPT-LEVEL ALVO (o nível que se tenta atingir; index 1..6). Espelha a
+// forma do ENHANCE_SUCCESS do "+N": fácil nos baixos, apertado perto do teto. Provisório — tunar no rebalance.
+export const BLUE_ENHANCE_CHANCE = [0, 0.90, 0.75, 0.60, 0.45, 0.32, 0.22];
+
+// Chance de subir p/ `targetLevel` (1..maxLevel). Fora da faixa cai no extremo mais próximo (defensivo).
+export function blueEnhanceChance(targetLevel: number): number {
+  if (targetLevel <= 1) return BLUE_ENHANCE_CHANCE[1]!;
+  return BLUE_ENHANCE_CHANCE[Math.min(targetLevel, BLUE_ENHANCE_CHANCE.length - 1)]!;
+}
+
+// Teto de opt-level de um azul NESTE item: o menor entre o teto do próprio azul e o gate de PROGRESSÃO
+// (grau×2) — o análogo enxuto do `req min/max` do ref data. Compartilhado pelo drop (rollBlues) e pela
+// alquimia (enhanceBlue), pra o cap ser idêntico nos dois caminhos.
+export function blueLevelCap(def: BlueDef, degree: number): number {
+  return Math.min(def.maxLevel, Math.max(1, degree * 2));
+}
+
 // A ordem estável de iteração do catálogo (Object.keys em ordem de inserção; fixada aqui pra o drop ser
 // determinístico independentemente de mexidas futuras no literal acima).
 const BLUE_ORDER: readonly BlueId[] = ['str', 'hp', 'mp', 'phyDef', 'magDef'];
@@ -78,7 +100,7 @@ export function rollBlues(rng: Rng, slot: EquipSlot, rarity: Rarity, degree: num
     const idx = Math.floor(rng.next() * pool.length);
     const id = pool.splice(idx, 1)[0]!; // remove p/ garantir DISTINTO (sem dois 'str' na mesma peça)
     const def = BLUES[id];
-    const maxLvl = Math.min(def.maxLevel, Math.max(1, degree * 2));
+    const maxLvl = blueLevelCap(def, degree); // min(teto do azul, grau×2) — mesmo gate da alquimia
     const level = 1 + Math.floor(rng.next() * maxLvl); // 1..maxLvl
     out.push({ id, level });
   }

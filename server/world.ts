@@ -13,7 +13,7 @@ import { EQUIP_SLOTS } from '../src/sim/inventory';
 // Sistema 3 (azuis): a identidade do item inclui as linhas azuis. O server as SANEIA na wire (mesma função do
 // save layer — id conhecido, level em faixa, ruim -> undefined) e as forwarda, senão o comando online
 // referenciaria a variante SEM-AZUL (equipar/vender o item errado). É a paridade online da Fatia 2.
-import { sanitizeBlues } from '../src/sim/content/magic_options';
+import { sanitizeBlues, BLUES } from '../src/sim/content/magic_options';
 import type { Command, PartyView, EntityView } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
 import type { PlayerSave } from '../src/sim/save';
@@ -142,6 +142,11 @@ export class ServerWorld {
           this.sim.sendCommandFor(id, {
             t: 'enhance', slot: cmd.slot, useProtection: cmd.useProtection,
           });
+        }
+        return;
+      case 'enhance-blue': // Sistema 3 (magic stones): valida slot + blueId; o sim re-valida a posse da Pedra Astral + o gate de slot/grau
+        if (VALID_SLOTS.has(cmd.slot) && typeof cmd.blueId === 'string' && VALID_BLUE_IDS.has(cmd.blueId)) {
+          this.sim.sendCommandFor(id, { t: 'enhance-blue', slot: cmd.slot, blueId: cmd.blueId });
         }
         return;
       case 'repair':
@@ -665,6 +670,9 @@ export class ServerWorld {
 // that silently drops 9 of 10 slots online (K1: was {'weapon','armor'}).
 const VALID_SLOTS: ReadonlySet<string> = new Set(EQUIP_SLOTS);
 const VALID_RARITIES: ReadonlySet<string> = new Set(['normal', 'sos', 'som', 'sun']);
+// Sistema 3 (magic stones): os ids de azul que o catálogo conhece — derivado do BLUES (fonte única), pra o
+// enhance-blue na wire nunca aceitar um blueId inventado (o sim re-valida slot/grau/posse da pedra também).
+const VALID_BLUE_IDS: ReadonlySet<string> = new Set(Object.keys(BLUES));
 const PARTY_EXP: ReadonlySet<string> = new Set(['each-get', 'auto-share']);
 const PARTY_LOOT: ReadonlySet<string> = new Set(['distribution', 'auto-share']);
 

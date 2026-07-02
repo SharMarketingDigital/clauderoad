@@ -50,6 +50,7 @@ const ALCHEMIST_STOCK: VendorStockEntry[] = [
   { itemId: 'elixir_weapon', price: 40 },
   { itemId: 'elixir_armor', price: 40 },
   { itemId: 'protect_stone', price: 75 }, // alchemy safety net (prevents break / caps the drop)
+  { itemId: 'magic_stone', price: 60 }, // Sistema 3: Pedra Astral — soca/sobe uma linha azul (alquimia de atributo)
   { itemId: 'copper_necklace', price: 70 },
   { itemId: 'copper_earring', price: 70 },
   { itemId: 'copper_ring', price: 70 },

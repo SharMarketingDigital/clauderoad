@@ -186,6 +186,16 @@ export interface EquipView {
   // Sistema 3 (azuis): as linhas azuis do item EQUIPADO (tooltip do slot). Só display — unequip referencia
   // pelo SLOT (inequívoco), não pela identidade, então não precisa dos azuis no comando. Ausente => sem azul.
   readonly blues?: readonly BlueLine[];
+  // Sistema 3 (magic stones): o que a alquimia de atributo pode socar/subir NESTE item — uma linha por azul
+  // elegível ao slot, com o nível atual (0 = ainda não socado), o teto neste item (grau×2) e a chance da
+  // PRÓXIMA tentativa (0 se no teto ou sem espaço). A UI renderiza um botão por entrada (Pedra Astral).
+  readonly socketable?: ReadonlyArray<{
+    readonly id: BlueId;
+    readonly name: string;
+    readonly level: number;
+    readonly cap: number;
+    readonly chance: number; // 0..1 (a posse da pedra é checada pela UI, como o Elixir no "+N")
+  }>;
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -381,6 +391,7 @@ export type Command =
   | { t: 'unequip'; slot: EquipSlot; toBagSlot?: number } // move an equipped item back to the bag (optionally to a SPECIFIC bag slot index — drag placement)
   | { t: 'move-item'; from: number; to: number } // rearrange the bag: swap/move the stacks at two slot indices (positional inventory)
   | { t: 'enhance'; slot: EquipSlot; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
+  | { t: 'enhance-blue'; slot: EquipSlot; blueId: BlueId } // Sistema 3 (magic stones): soca/sobe a linha azul `blueId` no item EQUIPADO em `slot` (consome 1 Pedra Astral)
   | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
   | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence

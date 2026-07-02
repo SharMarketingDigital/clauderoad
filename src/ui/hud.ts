@@ -80,6 +80,9 @@ export class Hud {
   private refineBtns: HTMLButtonElement[] = [];
   private protectToggle: HTMLButtonElement;
   private matLine: HTMLDivElement;
+  // Sistema 3 (magic stones): a alquimia de atributo — lista plana de botões "socar/subir azul" (rebuild por update)
+  private socketRow: HTMLDivElement;
+  private socketLine: HTMLDivElement;
   private protectOn = false; // UI state (K4): whether to spend a Pedra de Proteção
   private alchemyEl: HTMLDivElement; // the standalone alchemy/refino panel
   private alchemyOpen = false;
@@ -183,6 +186,9 @@ export class Hud {
         <button class="protect-toggle">Proteção: OFF</button>
         <div class="refine-row"></div>
         <div class="mat-line"></div>
+        <div class="char-col-title">Alquimia de Atributo (Pedra Astral)</div>
+        <div class="socket-row"></div>
+        <div class="socket-line"></div>
       </div>
       <div class="shop" hidden>
         <div class="shop-title"></div>
@@ -255,6 +261,8 @@ export class Hud {
     this.alchemyEl = this.root.querySelector('.alchemy-panel') as HTMLDivElement;
     this.refineRow = this.root.querySelector('.refine-row') as HTMLDivElement;
     this.matLine = this.root.querySelector('.mat-line') as HTMLDivElement;
+    this.socketRow = this.root.querySelector('.socket-row') as HTMLDivElement;
+    this.socketLine = this.root.querySelector('.socket-line') as HTMLDivElement;
     this.protectToggle = this.root.querySelector('.protect-toggle') as HTMLButtonElement;
     this.protectToggle.addEventListener('click', () => {
       this.protectOn = !this.protectOn;
@@ -1023,6 +1031,30 @@ export class Hud {
     }
     this.matLine.textContent =
       `Elixir Arma ${count('elixir_weapon')} · Elixir Armadura ${count('elixir_armor')}`;
+
+    // Sistema 3 (magic stones): rebuild a lista plana de sockets — um botão por azul ACIONÁVEL (chance > 0)
+    // em cada peça equipada. Modo imediato (limpa + re-append), como os painéis de loja. Consome Pedra Astral.
+    this.socketRow.textContent = '';
+    const stones = count('magic_stone');
+    let anySocket = false;
+    for (const eq of inv.equipment) {
+      if (eq.itemId == null || !eq.socketable) continue;
+      const slotName = SLOT_LABELS[eq.slot];
+      for (const sk of eq.socketable) {
+        if (sk.chance <= 0) continue; // no teto / sem espaço -> não renderiza um botão morto
+        anySocket = true;
+        const btn = document.createElement('button');
+        btn.className = 'socket-btn';
+        const step = sk.level === 0 ? `+${sk.name}` : `${sk.name} ${sk.level}→${sk.level + 1}`;
+        btn.textContent = `${slotName}: ${step} (${Math.round(sk.chance * 100)}%)`;
+        btn.disabled = stones <= 0;
+        btn.addEventListener('click', () => this.world?.sendCommand({ t: 'enhance-blue', slot: eq.slot, blueId: sk.id }));
+        this.socketRow.appendChild(btn);
+      }
+    }
+    this.socketLine.textContent = anySocket
+      ? `Pedra Astral ${stones}`
+      : (stones > 0 ? 'Nada pra socar (equipe uma peça / teto atingido)' : 'Pedra Astral 0 — compre no Alquimista');
   }
 
   // Click "Refinar" -> attempt the "+N" upgrade on that slot (sim rolls it).

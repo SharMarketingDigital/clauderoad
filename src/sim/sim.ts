@@ -42,7 +42,7 @@ import {
 import { levelUpGold } from './content/gold';
 import { MOUNTS, type MountDef } from './content/mounts';
 import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_DECAY, BERSERK_LEVELS, berserkLevel } from './content/berserk';
-import { rollBlues, blueAmount, bluesKey, sanitizeBlues, type BlueLine } from './content/magic_options';
+import { rollBlues, blueAmount, bluesKey, sanitizeBlues, blueEnhanceChance, blueLevelCap, BLUES, MAX_BLUES, MAGIC_STONE_ID, type BlueLine, type BlueId } from './content/magic_options';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -823,6 +823,15 @@ export class Sim implements IWorld {
         repairCost: eq ? repairCost(eq.durability) : 0,
         // Sistema 3 (azuis): display das linhas azuis do item vestido (cópia rasa read-only). Sem azul -> undefined.
         blues: eq?.blues ? eq.blues.map((b) => ({ id: b.id, level: b.level })) : undefined,
+        // Sistema 3 (magic stones): o que a alquimia de atributo pode socar/subir NESTE item — mesmos gates do
+        // enhanceBlue (elegibilidade por slot, teto grau×2, espaço p/ linha nova). A UI mostra a chance + gate.
+        socketable: eq ? Object.values(BLUES).filter((def) => def.slots.includes(slot)).map((def) => {
+          const cur = eq.blues?.find((b) => b.id === def.id)?.level ?? 0;
+          const cap = blueLevelCap(def, ITEMS[eq.itemId]?.degree ?? 1);
+          const hasRoom = cur > 0 || (eq.blues?.length ?? 0) < MAX_BLUES; // subir não precisa de espaço; linha nova sim
+          const canAttempt = cur < cap && hasRoom;
+          return { id: def.id, name: def.name, level: cur, cap, chance: canAttempt ? blueEnhanceChance(cur + 1) : 0 };
+        }) : undefined,
       };
     });
     return { capacity: BAG_SLOTS, stacks, slots, equipment };
@@ -2189,6 +2198,9 @@ export class Sim implements IWorld {
       case 'enhance':
         this.enhance(p, cmd.slot, cmd.useProtection);
         break;
+      case 'enhance-blue': // Sistema 3 (magic stones): soca/sobe a linha azul no item equipado (consome Pedra Astral)
+        this.enhanceBlue(p, cmd.slot, cmd.blueId);
+        break;
       case 'repair':
         this.repair(p, cmd.slot);
         break;
@@ -2392,6 +2404,34 @@ export class Sim implements IWorld {
       x: p.x,
       z: p.z,
     });
+  }
+
+  // Sistema 3 (magic stones / alquimia de atributo): soca/sobe UMA linha azul num item EQUIPADO, consumindo
+  // uma Pedra Astral. Referência por SLOT (o equipado é único; subir os azuis de uma STACK da bolsa mudaria
+  // sua bluesKey e poderia fundir/colidir com outra stack — a corrupção que a Fatia 1 blindou). Rng-gated:
+  // 1 draw, SÓ depois de passar todos os gates E consumir a pedra -> um mundo que nunca soca é byte-idêntico.
+  // Falha GENTIL: a pedra é o custo, mas o item NUNCA quebra nem perde nível (ao contrário do "+N" arriscado).
+  private enhanceBlue(p: Entity, slot: EquipSlot, blueId: BlueId): void {
+    const eq = p.equipment[slot];
+    if (!eq) return; // nada equipado nesse slot
+    const def = BLUES[blueId];
+    if (!def) return; // azul desconhecido
+    if (!def.slots.includes(slot)) return; // esse azul não é válido nessa peça (ex.: crit só em arma)
+    const degree = ITEMS[eq.itemId]?.degree ?? 1;
+    const cap = blueLevelCap(def, degree); // teto do azul NESTE item (grau×2 — mesmo gate do drop)
+    const lines = eq.blues ?? [];
+    const existing = lines.find((l) => l.id === blueId);
+    if (!existing && lines.length >= MAX_BLUES) return; // sem espaço p/ uma linha nova
+    if (existing && existing.level >= cap) return; // já no teto deste item -> não desperdiça a pedra
+    if (!removeFromBag(p.bag, MAGIC_STONE_ID, 'normal', 0, 1)) return; // precisa da pedra (custo da tentativa)
+    const targetLevel = existing ? existing.level + 1 : 1;
+    // 1 draw — gated por ter passado tudo + a pedra ter saído (byte-idêntico p/ quem nunca soca).
+    if (this.rng.next() < blueEnhanceChance(targetLevel)) {
+      if (existing) existing.level = targetLevel; // sobe in-place (o item é dono das próprias linhas)
+      else eq.blues = [...lines, { id: blueId, level: 1 }]; // adiciona a linha nova (novo array — não aliasa)
+      this.recomputeStats(p); // re-folda os azuis do equipamento no derived
+    }
+    // falha: a pedra já foi o custo; o item fica intacto (sem quebra/queda — a alquimia de atributo é gentil)
   }
 
   // ---------- consumables ----------

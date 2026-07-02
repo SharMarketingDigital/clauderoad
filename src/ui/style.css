@@ -492,6 +492,17 @@ html, body {
 .refine-btn[data-risk="danger"] { background: #3a1c1c; border-color: #d14a4a; color: #f5b0b0; }
 .refine-btn[data-risk="protected"] { border-color: #4a9fd1; color: #b0e6f5; }
 .mat-line { font-size: 10px; color: #9fd0ff; text-align: center; }
+/* Sistema 3 (magic stones): a alquimia de atributo — botões de socar/subir azul (espelham o refino). */
+.socket-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.socket-btn {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-height: 34px; padding: 5px 6px; font-size: 11px;
+  color: var(--ink); background: #1c2533; border: 1px solid #4a9fd1; border-radius: 4px;
+  cursor: pointer; font-family: inherit;
+}
+.socket-btn:hover:not(:disabled) { background: #22384a; }
+.socket-btn:disabled { opacity: 0.45; cursor: default; border-color: #3a4757; }
+.socket-line { font-size: 10px; color: #9fd0ff; text-align: center; }
 
 /* Attribute spending row (inside the bag): points + the two "+" buttons. */
 .attrs { display: flex; gap: 6px; align-items: center; }

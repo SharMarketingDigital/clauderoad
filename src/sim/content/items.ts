@@ -138,6 +138,9 @@ export const ITEMS: Record<string, ItemDef> = {
   // caps the drop to the floor. A plain material (the flag drives it, not an item field), à
   // la the elixirs (no consumable effect).
   protect_stone: { id: 'protect_stone', name: 'Pedra de Proteção', value: 30 },
+  // Sistema 3 (magic stones): a Pedra Astral — soca/sobe UMA linha azul num item equipado (a alquimia de
+  // atributo). Material simples (o comando enhance-blue a consome), à la os elixires; sem efeito consumable.
+  magic_stone: { id: 'magic_stone', name: 'Pedra Astral', value: 30 },
   // Sistema 2 (respec): o pergaminho de reinício de perícias — consumível vendido pelo alquimista. Usar
   // devolve todo o SP investido e zera os ranks, pra re-alocar a build. Análogo fiel ao item de reset do
   // Silkroad (escopo 1828). Preço na loja (vendor.ts) é o "custo" do respec.
