@@ -133,6 +133,7 @@ export interface SelfSnap {
   magDef: number; // K6: defesa mágica efetiva (base+gear) do jogador local
   parry: number; // Fase 3 (Hit × Parry): esquiva efetiva (soma FLAT das armaduras) do jogador local
   blockRatio: number; // Fase 3 (Block): chance de bloqueio do escudo (0..1) do jogador local
+  berserkGauge: number; // Sistema 2 (Berserk): a barra de fúria como fração (0..1) do jogador local — HUD
   botActive: boolean; // whether this player's auto-play is on
   autoPotHpPct: number; // Sistema 15 (QoL): this player's auto-pot HP threshold (0..1; 0 = off)
   autoPotMpPct: number; // Sistema 15 (QoL, Fatia 2): this player's auto-pot MP threshold (0..1; 0 = off)

@@ -41,7 +41,7 @@ import {
 } from './content/skill_ranks';
 import { levelUpGold } from './content/gold';
 import { MOUNTS, type MountDef } from './content/mounts';
-import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_DECAY } from './content/berserk';
+import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_DECAY, BERSERK_LEVELS, berserkLevel } from './content/berserk';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -1585,6 +1585,7 @@ export class Sim implements IWorld {
         phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva (base+gear) p/ a ficha
         parry: e.parry ?? 0, // Fase 3 (Hit × Parry): esquiva efetiva (0 p/ mobs) — a ficha exibe, o combate rola contra ela
         blockRatio: e.blockRatio ?? 0, // Fase 3 (Block): chance de bloqueio do escudo (0 p/ mobs)
+        berserkGauge: (e.berserkGauge ?? 0) / BERSERK_MAX, // Sistema 2 (Berserk): a barra como fração 0..1 p/ o HUD
         boss: e.boss,
         tier: e.tier,
         species: e.species,
@@ -1762,7 +1763,9 @@ export class Sim implements IWorld {
       return;
     }
     if (this.tick < p.nextSwingAt) return; // swing still on cooldown
-    p.nextSwingAt = this.tick + Math.round(p.swingTicks / this.slowFactor(p)); // slow -> slower swings
+    // slow (<1) -> slower swings; haste (>1, o burst do Berserk) -> mais rápido. Clamp >=1 pra nunca gerar
+    // intervalo 0/negativo. Sem buffs ambos os fatores são 1 => byte-idêntico (Math.round(swingTicks) == antes).
+    p.nextSwingAt = this.tick + Math.max(1, Math.round(p.swingTicks / (this.slowFactor(p) * this.hasteFactor(p))));
     // Auto-attack: a basic physical weapon swing (no ability). compute() does the same crit
     // roll the old rollCrit did; combat.mitigate (inside hitEnemy) is passthrough today.
     this.hitTarget(t, combat.compute({
@@ -2170,6 +2173,9 @@ export class Sim implements IWorld {
         break;
       case 'redeem':
         this.redeem(p, cmd.recipe);
+        break;
+      case 'activate-berserk': // Sistema 2 (Berserk/Hwan): pop the burst (derives level from the gauge; no-op se < 33%)
+        this.activateBerserk(p);
         break;
       case 'select-class':
         this.selectClass(p, cmd.classId);
@@ -3601,6 +3607,30 @@ export class Sim implements IWorld {
   private gainBerserk(p: Entity): void {
     if (p.kind !== 'player') return;
     p.berserkGauge = Math.min(BERSERK_MAX, (p.berserkGauge ?? 0) + BERSERK_PER_HIT);
+  }
+  // Sistema 2 (Berserk/Hwan): ATTACK-SPEED multiplier from active 'haste' buffs — a factor >1 (the natural
+  // extension of 'slow', which is <1). Divides swingTicks in nextSwingAt. magnitude = the +fraction (0.10 =>
+  // ×1.10 faster); applyStatus doesn't stack a kind, so at most one. 1 when unbuffed => byte-identical swings.
+  private hasteFactor(e: Entity): number {
+    let f = 1;
+    for (const s of e.effects) if (s.kind === 'haste' && s.magnitude > 0) f += s.magnitude;
+    return f;
+  }
+  // Sistema 2 (Berserk/Hwan): ATIVAR o burst. Deriva o nível (1..3) do quão cheia está a barra; se < 33% não
+  // faz nada (recusa sem gastar). Senão aplica o buff MULTI-EIXO temporário — dano (attackFactor), crit
+  // (reusa a Fúria) e haste (hasteFactor) — via applyStatus (não empilha por kind, então reativar renova
+  // limpo), ZERA a barra e emite um evento pro HUD. Só players vivos; determinístico (sem RNG).
+  private activateBerserk(p: Entity): void {
+    if (p.kind !== 'player' || p.deadUntil !== 0) return;
+    const level = berserkLevel(p.berserkGauge ?? 0);
+    if (level === 0) return; // barra insuficiente (< 33%) — recusa sem gastar
+    const cfg = BERSERK_LEVELS[level - 1];
+    const dur = Math.round(cfg.durationSecs * TICK_RATE);
+    this.applyStatus(p, 'berserk', dur, cfg.damageMult); // eixo dano de saída
+    this.applyStatus(p, 'crit', dur, cfg.crit); // eixo crit (mesmo mecanismo da Fúria)
+    this.applyStatus(p, 'haste', dur, cfg.haste); // eixo velocidade de ataque
+    p.berserkGauge = 0; // gastou a barra
+    this.events.push({ seq: this.nextEventSeq++, tick: this.tick, kind: 'berserk', targetId: p.id, amount: level, x: p.x, z: p.z });
   }
   // Active crit chance (0..1): the active mastery's always-on baseCrit (Arco's
   // precision passive) plus any 'crit' buffs (Spear's Fúria), capped at 1.

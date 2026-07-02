@@ -52,7 +52,10 @@ export type EnemyTierId = 'normal' | 'champion' | 'elite';
 // berserk (Sistema 2 — Hwan): raises OUTGOING damage (the burst's damage axis; magnitude = the +fraction,
 // e.g. 0.20 => ×1.20). Read by the sim's attackFactor and passed as compute()'s damageMult. Mirror of the
 // 'defense' buff but on dealt damage; the piece the offense side was missing.
-export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense' | 'crit' | 'berserk';
+// haste (Sistema 2 — Hwan): raises ATTACK SPEED (the burst's speed axis; magnitude = the +fraction, e.g.
+// 0.10 => ×1.10 faster). Read by the sim's hasteFactor and divides swingTicks in nextSwingAt (a factor >1,
+// the natural extension of 'slow' which is <1). Applied together with 'berserk'/'crit' on a Hwan activation.
+export type StatusKind = 'stun' | 'slow' | 'root' | 'knockdown' | 'dot' | 'defense' | 'crit' | 'berserk' | 'haste';
 
 // GDD v0.5 (loot físico): the stack lying on the ground for a kind 'loot' entity, so render/UI can show
 // what it is and the pickup knows the contents. Present only on loot entities; null/absent otherwise.
@@ -100,6 +103,9 @@ export interface EntityView {
   // Block (Fase 3, Fatia 2): chance efetiva (0..1) de o ESCUDO bloquear (amortecer) um golpe que conectou.
   // 0 sem escudo / para mobs. Exposto pela ficha como % (o par do parry: leve esquiva, pesado bloqueia).
   readonly blockRatio: number;
+  // Sistema 2 (Berserk/Hwan): a barra de fúria como FRAÇÃO (0..1) — o HUD desenha o medidor e marca os
+  // limiares de nível (33/66/100%). 0 para mobs. O buff ativo aparece em `statuses` ('berserk'/'haste').
+  readonly berserkGauge: number;
   readonly boss: boolean; // a world boss — render draws it bigger / distinct
   readonly tier: EnemyTierId; // enemy strength tier ('normal' for the player/NPCs); render scales/tints by it
   readonly species: string; // enemy species id ('' for players/NPCs); the renderer picks the 3D model from it
@@ -411,6 +417,9 @@ export type Command =
   // Sistema 15 (QoL): mount/dismount the owned mount (on = mount, off = on foot). The sim validates the
   // player owns a mount token; mounting is refused in combat and auto-dismounts on entering it.
   | { t: 'set-mount'; on: boolean }
+  // Sistema 2 (Berserk/Hwan): ativa o burst. Deriva o nível (1..3) do quão cheia está a barra e aplica um
+  // buff multi-eixo temporário (dano/haste/crit), zerando a barra. Recusado (no-op) se a barra < 33%.
+  | { t: 'activate-berserk' }
   // --- Stalls (GDD v0.5 §5): personal P2P shops. open lists bag items at owner-set prices; buy moves the
   // item + gold ATOMICALLY (the sim validates ownership/gold/room/proximity + anti-duplication). ---
   | { t: 'stall-open'; listings: ReadonlyArray<{ itemId: string; rarity: Rarity; plus: number; price: number }> }
@@ -471,6 +480,9 @@ export type SimEvent = {
   readonly kind:
     | 'damage'
     | 'miss'
+    // 'berserk': the local player ATIVOU o Hwan (Sistema 2) — amount = the burst level (1..3); x/z over the
+    //   player for a "BERSERK N!" pop. No HP effect; the multi-axis buff is applied as statuses.
+    | 'berserk'
     | 'levelup'
     | 'enhance-success'
     | 'enhance-fail'

@@ -9,6 +9,7 @@
 // and offline because it's literally the same simulation.
 import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
+import { BERSERK_MAX } from '../src/sim/content/berserk';
 import { EQUIP_SLOTS } from '../src/sim/inventory';
 import type { Command, PartyView, EntityView } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
@@ -211,6 +212,11 @@ export class ServerWorld {
       // player owns a mount token + is out of combat before mounting.
       case 'set-mount':
         if (typeof cmd.on === 'boolean') this.sim.sendCommandFor(id, { t: 'set-mount', on: cmd.on });
+        return;
+      // Sistema 2 (Berserk/Hwan): pop the burst. Bare command (no fields); the sim derives the level from the
+      // gauge + refuses < 33%. Without this case the default branch silently drops it online (K1 whitelist).
+      case 'activate-berserk':
+        this.sim.sendCommandFor(id, { t: 'activate-berserk' });
         return;
       // Sistema 15 (QoL): the auto-pot HP threshold. Validate a FINITE number and forward; the sim clamps it
       // to [0,1] (so a tampered value can't force perpetual drinking or a negative threshold).
@@ -486,7 +492,7 @@ export class ServerWorld {
       return {
         targetId: null, hp: 0, maxHp: 0, mp: 0, maxMp: 0, level: 1, xp: 0, xpToNext: 1,
         attrPoints: 0, gold: 0, sp: 0, str: 0, int: 0, weaponDamage: 0, weaponPlus: 0,
-        phyDef: 0, magDef: 0, parry: 0, blockRatio: 0,
+        phyDef: 0, magDef: 0, parry: 0, blockRatio: 0, berserkGauge: 0,
         botActive: false, petActive: false, autoPotHpPct: 0, autoPotMpPct: 0, abilities, passives, inventory, shop, storage, petBag, stall, market, teleporter, party, invite,
         matching, partyRequests, myRequestPartyId, duel, duelInvite,
       };
@@ -500,6 +506,7 @@ export class ServerWorld {
       phyDef: e.phyDef, magDef: e.magDef, // K6: defesa efetiva do jogador (e é o EntityView)
       parry: e.parry ?? 0, // Fase 3 (Hit × Parry): esquiva efetiva autoritativa
       blockRatio: e.blockRatio ?? 0, // Fase 3 (Block): chance de bloqueio autoritativa
+      berserkGauge: (e.berserkGauge ?? 0) / BERSERK_MAX, // Sistema 2 (Berserk): a barra como fração 0..1
       botActive: this.sim.botActiveFor(id),
       autoPotHpPct: this.sim.autoPotHpPctFor(id), // Sistema 15 (QoL): HP auto-pot threshold for this player's HUD
       autoPotMpPct: this.sim.autoPotMpPctFor(id), // Sistema 15 (QoL, Fatia 2): MP auto-pot threshold
