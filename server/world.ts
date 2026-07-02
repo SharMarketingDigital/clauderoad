@@ -10,6 +10,10 @@
 import { Sim, DT } from '../src/sim/sim';
 import { MAX_PLUS } from '../src/sim/content/enhance';
 import { EQUIP_SLOTS } from '../src/sim/inventory';
+// Sistema 3 (azuis): a identidade do item inclui as linhas azuis. O server as SANEIA na wire (mesma função do
+// save layer — id conhecido, level em faixa, ruim -> undefined) e as forwarda, senão o comando online
+// referenciaria a variante SEM-AZUL (equipar/vender o item errado). É a paridade online da Fatia 2.
+import { sanitizeBlues } from '../src/sim/content/magic_options';
 import type { Command, PartyView, EntityView } from '../src/world_api';
 import type { EntitySnap, NetEvent, SelfSnap, MatchingEntryView, MatchingRequestView } from '../src/net/protocol';
 import type { PlayerSave } from '../src/sim/save';
@@ -114,7 +118,7 @@ export class ServerWorld {
       // --- Layer 3: inventory + economy (the sim re-validates ownership/gold/range/cap) ---
       case 'equip':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'equip', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'equip', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       case 'unequip':
@@ -145,7 +149,7 @@ export class ServerWorld {
         return;
       case 'use-item':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'use-item', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'use-item', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       case 'buy':
@@ -155,7 +159,7 @@ export class ServerWorld {
         return;
       case 'sell':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'sell', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       // Sistema 20 (trade-in): redeem a recycling recipe by index. Validate an integer; the sim re-checks
@@ -174,12 +178,12 @@ export class ServerWorld {
       // case here the default branch silently drops these online — the K1 whitelist lesson).
       case 'deposit':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'deposit', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       case 'withdraw':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus)) {
-          this.sim.sendCommandFor(id, { t: 'withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus });
+          this.sim.sendCommandFor(id, { t: 'withdraw', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       // Pets PET2 (GDD v0.5 §4): bag <-> transport pet's bag (the sim re-checks ownership + that a pet is out).
@@ -248,7 +252,7 @@ export class ServerWorld {
       // Global Marketplace: list/cancel/buy a global listing (the sim re-checks ownership/gold/price/anti-dup).
       case 'market-list':
         if (validItemRef(cmd.itemId, cmd.rarity, cmd.plus) && Number.isInteger(cmd.price) && cmd.price > 0) {
-          this.sim.sendCommandFor(id, { t: 'market-list', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, price: cmd.price });
+          this.sim.sendCommandFor(id, { t: 'market-list', itemId: cmd.itemId, rarity: cmd.rarity, plus: cmd.plus, price: cmd.price, blues: sanitizeBlues(cmd.blues) });
         }
         return;
       case 'market-cancel':

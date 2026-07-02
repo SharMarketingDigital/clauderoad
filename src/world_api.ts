@@ -44,6 +44,16 @@ export type DamageType = 'physical' | 'magical';
 // Defined at the seam so enemy content, the sim, and the renderer agree.
 export type EnemyTierId = 'normal' | 'champion' | 'elite';
 
+// Sistema 3 (Magic Options / "azuis"): uma linha azul que um item carrega — o id do bônus + seu opt-level.
+// Definida no SEAM porque faz parte da IDENTIDADE do item: o Command a carrega para referenciar a STACK certa
+// (dois itens com azuis diferentes são itens distintos) e o ItemStackView a expõe. O catálogo (magnitudes/
+// slots) e os helpers vivem em src/sim/content/magic_options.ts (que importa estes tipos daqui).
+export type BlueId = 'str' | 'hp' | 'mp' | 'phyDef' | 'magDef';
+export interface BlueLine {
+  id: BlueId;
+  level: number;
+}
+
 // Status effect kinds. Debuffs: stun/knockdown (can't act), root (can't move),
 // slow (moves/attacks slower), dot (damage over time). Buffs: defense (the caster
 // takes reduced incoming damage — Sword's Postura Defensiva), crit (raised crit
@@ -147,6 +157,9 @@ export interface ItemStackView {
   readonly degree?: number; // grau do item (>=1); ausente p/ itens sem grau / não-equipáveis
   readonly reqLevel?: number; // nível mínimo p/ equipar; ausente p/ não-equipáveis
   readonly canEquip?: boolean; // o dono cumpre o requisito? ausente => tratar como equipável (back-compat)
+  // Sistema 3 (azuis): as linhas azuis deste item. A UI as mostra (tooltip) E as devolve NO COMANDO (equip/
+  // sell/…) pra referenciar a STACK certa (a identidade inclui os azuis). Ausente/vazio => item sem azul.
+  readonly blues?: readonly BlueLine[];
 }
 
 // One equipment slot's current contents (null fields when empty). `plus` is the
@@ -170,6 +183,9 @@ export interface EquipView {
   // RISK_FLOOR, when empty, or at the cap), and how many "+" a non-breaking failure drops.
   readonly breakChance: number; // 0..1
   readonly dropOnFail: number; // levels lost on a failed (non-breaking) attempt; >= 1
+  // Sistema 3 (azuis): as linhas azuis do item EQUIPADO (tooltip do slot). Só display — unequip referencia
+  // pelo SLOT (inequívoco), não pela identidade, então não precisa dos azuis no comando. Ausente => sem azul.
+  readonly blues?: readonly BlueLine[];
 }
 
 // The player's bag + equipped slots, for the inventory window.
@@ -242,6 +258,8 @@ export interface MarketListingView {
   readonly price: number; // gold per unit
   readonly qty: number; // units still escrowed in the listing (self-removes at 0)
   readonly own: boolean; // true if the LOCAL player owns this listing (so the UI shows Cancel, not Buy)
+  // Sistema 3 (azuis): as linhas azuis do item listado (o comprador vê o que compra; o item é entregue COM elas).
+  readonly blues?: readonly BlueLine[];
 }
 
 // The global marketplace board — every active listing (same for everyone) + the VIEWER's own mailbox of
@@ -359,22 +377,22 @@ export type Command =
   | { t: 'cycle-target' } // Tab: select the nearest enemy in front, then cycle
   | { t: 'set-target'; id: number | null } // click a specific entity (null clears)
   | { t: 'use-ability'; slot: number } // press an action-bar slot (1-based)
-  | { t: 'equip'; itemId: string; rarity: Rarity; plus: number } // equip a specific bag stack
+  | { t: 'equip'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // equip a specific bag stack (blues = identidade)
   | { t: 'unequip'; slot: EquipSlot; toBagSlot?: number } // move an equipped item back to the bag (optionally to a SPECIFIC bag slot index — drag placement)
   | { t: 'move-item'; from: number; to: number } // rearrange the bag: swap/move the stacks at two slot indices (positional inventory)
   | { t: 'enhance'; slot: EquipSlot; useProtection?: boolean } // alchemy "+N" attempt (useProtection: spend a Pedra de Proteção to guard against break / multi-drop)
   | { t: 'repair'; slot: EquipSlot } // pay the vendor to restore an equipped item's durability (GDD B8)
-  | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number } // consume a bag stack (potion, etc.)
+  | { t: 'use-item'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // consume a bag stack (potion, etc.)
   | { t: 'spend-attr'; attr: 'str' | 'int' } // spend one attribute point on Strength or Intelligence
   | { t: 'rank-up'; slot: number } // spend SP to raise the rank of the ability in this action-bar slot
   | { t: 'buy'; itemId: string } // buy one of a vendor stock item (must be near the vendor)
-  | { t: 'sell'; itemId: string; rarity: Rarity; plus: number } // sell one bag stack to the vendor
+  | { t: 'sell'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // sell one bag stack to the vendor
   // Sistema 20 (trade-in): redeem a recycling recipe by index (RECIPES) — trades N input items for M output
   // items at the alchemist. The sim validates proximity to the alchemist + holding the inputs + bag room.
   | { t: 'redeem'; recipe: number }
   | { t: 'select-class'; classId: string } // pick a starter class on entry — equips its weapon/kit when unarmed (GDD G1)
-  | { t: 'deposit'; itemId: string; rarity: Rarity; plus: number } // K5: bank a whole bag stack (near the warehouse)
-  | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number } // K5: take a whole stack back from the warehouse
+  | { t: 'deposit'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // K5: bank a whole bag stack (near the warehouse)
+  | { t: 'withdraw'; itemId: string; rarity: Rarity; plus: number; blues?: BlueLine[] } // K5: take a whole stack back from the warehouse
   // --- Pets PET2 (GDD v0.5 §4): move whole stacks bag <-> the transport pet's portable bag (no NPC; the
   // pet must be summoned). The sim re-validates ownership + that a pet is out. ---
   | { t: 'pet-deposit'; itemId: string; rarity: Rarity; plus: number } // bag -> pet bag
@@ -427,7 +445,7 @@ export type Command =
   | { t: 'stall-buy'; sellerId: number; itemId: string; rarity: Rarity; plus: number } // buy ONE of a listed stack
   // --- Global Marketplace: list a bag item for sale GLOBALLY (buyable from anywhere), cancel a listing,
   // or buy one. The sim re-validates ownership/gold/room + moves item + gold atomically (anti-dup). ---
-  | { t: 'market-list'; itemId: string; rarity: Rarity; plus: number; price: number }
+  | { t: 'market-list'; itemId: string; rarity: Rarity; plus: number; price: number; blues?: BlueLine[] }
   | { t: 'market-cancel'; listingId: number }
   | { t: 'market-buy'; listingId: number } // buy ONE unit of a listing
   | { t: 'market-collect' }; // collect your mailbox: sale proceeds (gold) + unsold/returned items

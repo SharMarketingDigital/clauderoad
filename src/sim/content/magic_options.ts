@@ -5,18 +5,12 @@
 // level, direto (o opt-level JÁ é a magnitude, como no Silkroad). Cortes conscientes (ver docs/05): sem a
 // matriz de ~72 resistências (fica 1 azul 'resist' genérico numa fatia futura), sem sets/avatares/3-job/
 // mercado-de-stones; crit-azul + as magic stones (alquimia) vêm nas fatias seguintes.
-import type { EquipSlot, Rarity } from '../../world_api';
+import type { EquipSlot, Rarity, BlueId, BlueLine } from '../../world_api';
 import type { Rng } from '../rng';
 
-// As linhas azuis que um item pode carregar. Cada uma vira +stat FLAT via recomputeStats. (crit/luck/resist
-// entram em fatias futuras — a Fatia 1 é a fundação com os stats que já têm acumulador no recomputeStats.)
-export type BlueId = 'str' | 'hp' | 'mp' | 'phyDef' | 'magDef';
-
-// Uma linha azul rolada num item: qual azul + seu opt-level (1..maxLevel). Guardada no ItemStack/EquippedItem.
-export interface BlueLine {
-  id: BlueId;
-  level: number;
-}
+// BlueId/BlueLine vivem no SEAM (world_api) porque o Command/View os carregam. Re-exportados aqui p/ os
+// importers do sim que já os pegavam deste módulo (o catálogo BLUES abaixo é keyed por BlueId).
+export type { BlueId, BlueLine };
 
 export interface BlueDef {
   id: BlueId;

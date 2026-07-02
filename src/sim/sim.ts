@@ -42,7 +42,7 @@ import {
 import { levelUpGold } from './content/gold';
 import { MOUNTS, type MountDef } from './content/mounts';
 import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_DECAY, BERSERK_LEVELS, berserkLevel } from './content/berserk';
-import { rollBlues, blueAmount, bluesKey, type BlueLine } from './content/magic_options';
+import { rollBlues, blueAmount, bluesKey, sanitizeBlues, type BlueLine } from './content/magic_options';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -54,7 +54,7 @@ export { STR_TO_DAMAGE, meleeDamage, CRIT_MULT, abilityDamage } from './combat';
 import {
   MAX_DURABILITY, DEATH_DURABILITY_LOSS, DURABILITY_WORN_AT, durabilityFactor, repairCost,
 } from './content/durability';
-import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS, addToBag, removeFromBag, freeBagSlots, moveBagSlot } from './inventory';
+import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS, addToBag, removeFromBag, freeBagSlots, moveBagSlot, makeStack } from './inventory';
 import {
   WAREHOUSE_NAME, WAREHOUSE_SPAWN_X, WAREHOUSE_SPAWN_Z, WAREHOUSE_INTERACT_RANGE, WAREHOUSE_ENTITY_ID,
   depositStack, withdrawStack, canAccept, depositToPet, withdrawFromPet,
@@ -795,6 +795,10 @@ export class Sim implements IWorld {
         degree: def?.degree,
         reqLevel: def && def.slot != null ? equipLevelReq(def) : undefined,
         canEquip: def && def.slot != null ? meetsLevelReq(def, p ? p.level : 1) : undefined,
+        // Sistema 3 (azuis): a UI reflete a identidade CHEIA de volta nos comandos (equip/sell/...), então o
+        // view carrega os azuis. Cópia rasa (a view é read-only; nunca aliasa o array interno do sim). Sem
+        // azul -> undefined (byte-idêntico à view pré-azuis; toEqual ignora prop undefined).
+        blues: s.blues ? s.blues.map((b) => ({ id: b.id, level: b.level })) : undefined,
       };
     };
     // POSITIONAL view: one entry per grid cell (null = empty hole), ALWAYS length === capacity (the
@@ -817,6 +821,8 @@ export class Sim implements IWorld {
         durability: eq?.durability ?? 0,
         maxDurability: eq ? MAX_DURABILITY : 0,
         repairCost: eq ? repairCost(eq.durability) : 0,
+        // Sistema 3 (azuis): display das linhas azuis do item vestido (cópia rasa read-only). Sem azul -> undefined.
+        blues: eq?.blues ? eq.blues.map((b) => ({ id: b.id, level: b.level })) : undefined,
       };
     });
     return { capacity: BAG_SLOTS, stacks, slots, equipment };
@@ -872,6 +878,8 @@ export class Sim implements IWorld {
             equipSlot: def?.slot,
             consumable: def?.consumable != null,
             sellValue: rarityStat(def?.value ?? 0, s.rarity),
+            // Sistema 3 (azuis): o armazém carrega a identidade cheia p/ a UI referenciar a stack certa no withdraw.
+            blues: s.blues ? s.blues.map((b) => ({ id: b.id, level: b.level })) : undefined,
           };
         })
       : [];
@@ -899,6 +907,8 @@ export class Sim implements IWorld {
             equipSlot: def?.slot,
             consumable: def?.consumable != null,
             sellValue: rarityStat(def?.value ?? 0, s.rarity),
+            // Sistema 3 (azuis): a mochila do pet carrega a identidade cheia (paridade com o armazém/bolsa).
+            blues: s.blues ? s.blues.map((b) => ({ id: b.id, level: b.level })) : undefined,
           };
         })
       : [];
@@ -1106,9 +1116,12 @@ export class Sim implements IWorld {
   // Single-threaded tick = no races: two buyers of one stack serialize, the second aborts (stack gone).
   private transferItem(seller: Entity, buyer: Entity, itemId: string, rarity: Rarity, plus: number, price: number): boolean {
     if (seller.id === buyer.id) return false; // no self-trade
+    // Sistema 3 (azuis): conta SÓ a variante sem-azul (bluesKey ''), casando com o removeFromBag/addToBag abaixo
+    // (que passam blues=undefined). Sem isso, `have` contaria um item AZUL (identidade parcial) mas o remove por
+    // chave cheia não o tiraria -> entrega + cobra sem remover = DUP. O trade de itens AZUIS no stall é fatia futura.
     let have = 0;
-    for (const s of seller.bag) if (s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus) have += s.qty;
-    if (have < 1) return false; // seller no longer holds it
+    for (const s of seller.bag) if (s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus && bluesKey(s.blues) === '') have += s.qty;
+    if (have < 1) return false; // seller no longer holds it (sem-azul)
     if (buyer.gold < price) return false; // buyer can't afford it
     if (!canAccept(buyer.bag, itemId, rarity, plus, BAG_SLOTS)) return false; // buyer has no room -> abort (addToBag would fail)
     // all checks passed -> the four mutations below are infallible
@@ -1127,8 +1140,10 @@ export class Sim implements IWorld {
     for (const r of requested) {
       if (listings.length >= STALL_MAX_LISTINGS) break;
       if (!r || !Number.isInteger(r.price) || r.price <= 0) continue; // free/garbage price rejected
-      const holds = p.bag.some((s) => s != null && s.itemId === r.itemId && s.rarity === r.rarity && s.plus === r.plus);
-      if (!holds) continue; // can only list what you carry
+      // Só lista a variante SEM-AZUL (bluesKey ''): a listing do stall não carrega azuis ainda, e o transferItem
+      // opera sobre a stack sem-azul — listar um item azul aqui só mostraria um "fantasma" comum. Trade azul: fatia futura.
+      const holds = p.bag.some((s) => s != null && s.itemId === r.itemId && s.rarity === r.rarity && s.plus === r.plus && bluesKey(s.blues) === '');
+      if (!holds) continue; // can only list what you carry (sem-azul)
       if (listings.some((l) => l.itemId === r.itemId && l.rarity === r.rarity && l.plus === r.plus)) continue; // dedupe
       listings.push({ itemId: r.itemId, rarity: r.rarity, plus: r.plus, price: r.price });
     }
@@ -1179,6 +1194,7 @@ export class Sim implements IWorld {
         itemId: l.item.itemId, name: ITEMS[l.item.itemId]?.name ?? l.item.itemId,
         rarity: l.item.rarity, plus: l.item.plus, price: l.price, qty: l.item.qty,
         own: l.sellerName.toLowerCase() === vkey,
+        blues: l.item.blues ? l.item.blues.map((b) => ({ id: b.id, level: b.level })) : undefined,
       });
     }
     const mb = this.mailbox.get(vkey);
@@ -1188,16 +1204,18 @@ export class Sim implements IWorld {
 
   // List a bag stack for sale globally: ESCROW the whole stack OUT of the bag into the listing, so it can
   // sell while you're offline. Validates a positive-int price, ownership, and the per-seller cap.
-  private marketList(p: Entity, itemId: string, rarity: Rarity, plus: number, price: number): void {
+  private marketList(p: Entity, itemId: string, rarity: Rarity, plus: number, price: number, blues?: readonly BlueLine[]): void {
     if (!Number.isInteger(price) || price <= 0) return;
+    // Soma só a stack com ESSES azuis (bluesKey): um gêmeo sem-azul / de outros azuis é item distinto e não
+    // pode ser co-escrowed (senão o listing juntaria stacks diferentes e corromperia a identidade na venda).
     let qty = 0;
-    for (const s of p.bag) if (s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus) qty += s.qty;
+    for (const s of p.bag) if (s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus && bluesKey(s.blues) === bluesKey(blues)) qty += s.qty;
     if (qty <= 0) return; // must hold it
     let mine = 0;
     for (const l of this.marketListings.values()) if (l.sellerName.toLowerCase() === p.name.toLowerCase()) mine++;
     if (mine >= MARKET_MAX_PER_SELLER) return; // anti-spam cap
-    if (!removeFromBag(p.bag, itemId, rarity, plus, qty)) return; // escrow: take it out of the bag
-    this.marketListings.set(this.nextMarketId++, { sellerName: p.name, item: { itemId, rarity, plus, qty }, price });
+    if (!removeFromBag(p.bag, itemId, rarity, plus, qty, blues)) return; // escrow: take it out of the bag (azuis inclusos)
+    this.marketListings.set(this.nextMarketId++, { sellerName: p.name, item: makeStack(itemId, rarity, plus, qty, blues), price });
   }
 
   // Cancel YOUR listing: return the escrowed item to your bag (overflow -> your mailbox), drop the listing.
@@ -1205,8 +1223,8 @@ export class Sim implements IWorld {
     const l = this.marketListings.get(listingId);
     if (!l || l.sellerName.toLowerCase() !== p.name.toLowerCase()) return; // only the owner cancels
     this.marketListings.delete(listingId);
-    if (!addToBag(p.bag, l.item.itemId, l.item.rarity, l.item.plus, l.item.qty, BAG_SLOTS)) {
-      this.mailboxAddItem(p.name, l.item); // bag full -> hold the returned stack in the mailbox
+    if (!addToBag(p.bag, l.item.itemId, l.item.rarity, l.item.plus, l.item.qty, BAG_SLOTS, l.item.blues)) {
+      this.mailboxAddItem(p.name, l.item); // bag full -> hold the returned stack in the mailbox (azuis inclusos)
     }
   }
 
@@ -1217,9 +1235,9 @@ export class Sim implements IWorld {
     if (!l) return;
     if (l.sellerName.toLowerCase() === buyer.name.toLowerCase()) return; // can't buy your own (cancel instead)
     if (buyer.gold < l.price) return; // can't afford it
-    if (!canAccept(buyer.bag, l.item.itemId, l.item.rarity, l.item.plus, BAG_SLOTS)) return; // no room -> abort
+    if (!canAccept(buyer.bag, l.item.itemId, l.item.rarity, l.item.plus, BAG_SLOTS, l.item.blues)) return; // no room -> abort
     // all checks passed -> the mutations are infallible (no dup: the escrow qty decrements atomically)
-    addToBag(buyer.bag, l.item.itemId, l.item.rarity, l.item.plus, 1, BAG_SLOTS);
+    addToBag(buyer.bag, l.item.itemId, l.item.rarity, l.item.plus, 1, BAG_SLOTS, l.item.blues); // buyer gets the item WITH its azuis
     buyer.gold -= l.price;
     this.creditMailboxGold(l.sellerName, l.price);
     l.item.qty -= 1;
@@ -1236,7 +1254,7 @@ export class Sim implements IWorld {
     mb.gold = 0;
     const remaining: ItemStack[] = [];
     for (const s of mb.items) {
-      if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty, BAG_SLOTS)) remaining.push(s); // bag full -> keep for later
+      if (!addToBag(p.bag, s.itemId, s.rarity, s.plus, s.qty, BAG_SLOTS, s.blues)) remaining.push(s); // bag full -> keep for later (azuis inclusos)
     }
     mb.items = remaining;
     if (mb.gold === 0 && mb.items.length === 0) this.mailbox.delete(key);
@@ -1252,9 +1270,11 @@ export class Sim implements IWorld {
   private mailboxAddItem(name: string, item: ItemStack): void {
     const key = name.toLowerCase();
     const mb = this.mailbox.get(key) ?? { gold: 0, items: [] as ItemStack[] };
-    const existing = mb.items.find((s) => s.itemId === item.itemId && s.rarity === item.rarity && s.plus === item.plus);
+    // Merge só no gêmeo com os MESMOS azuis (bluesKey); senão empurra stack nova — um azul distinto nunca funde
+    // num item de outros azuis no mailbox (o mesmo stacking-identity da bolsa). makeStack deep-copia as linhas.
+    const existing = mb.items.find((s) => s.itemId === item.itemId && s.rarity === item.rarity && s.plus === item.plus && bluesKey(s.blues) === bluesKey(item.blues));
     if (existing) existing.qty += item.qty;
-    else mb.items.push({ ...item });
+    else mb.items.push(makeStack(item.itemId, item.rarity, item.plus, item.qty, item.blues));
     this.mailbox.set(key, mb);
   }
 
@@ -1286,7 +1306,10 @@ export class Sim implements IWorld {
       if (s.rarity !== 'normal' && s.rarity !== 'sos' && s.rarity !== 'som' && s.rarity !== 'sun') return null;
       if (!Number.isInteger(s.plus) || (s.plus as number) < 0) return null;
       if (!Number.isInteger(s.qty) || (s.qty as number) < 1) return null;
-      return { itemId: s.itemId, rarity: s.rarity, plus: s.plus as number, qty: s.qty as number };
+      const st: ItemStack = { itemId: s.itemId, rarity: s.rarity, plus: s.plus as number, qty: s.qty as number };
+      const blues = sanitizeBlues(s.blues); // azuis do blob (server) saneados: id conhecido, level em faixa; ruim -> item sem azul
+      if (blues) st.blues = blues;
+      return st;
     };
     let maxId = 0;
     if (Array.isArray(r.listings)) {
@@ -2152,7 +2175,7 @@ export class Sim implements IWorld {
         this.useAbility(p, cmd.slot);
         break;
       case 'equip':
-        this.equip(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.equip(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       case 'unequip':
         this.unequip(p, cmd.slot, cmd.toBagSlot);
@@ -2167,7 +2190,7 @@ export class Sim implements IWorld {
         this.repair(p, cmd.slot);
         break;
       case 'use-item':
-        this.useItem(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.useItem(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       case 'spend-attr':
         this.spendAttr(p, cmd.attr);
@@ -2179,7 +2202,7 @@ export class Sim implements IWorld {
         this.buy(p, cmd.itemId);
         break;
       case 'sell':
-        this.sell(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.sell(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       case 'redeem':
         this.redeem(p, cmd.recipe);
@@ -2206,10 +2229,10 @@ export class Sim implements IWorld {
         this.pickupNearby(p);
         break;
       case 'deposit':
-        this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.deposit(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       case 'withdraw':
-        this.withdraw(p, cmd.itemId, cmd.rarity, cmd.plus);
+        this.withdraw(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.blues);
         break;
       // Pets PET2 (GDD v0.5 §4): the transport pet's portable bag (no NPC; the pet must be summoned).
       case 'pet-deposit':
@@ -2230,7 +2253,7 @@ export class Sim implements IWorld {
         break;
       // Global Marketplace: list/cancel/buy a global listing (economy-gated like buy/sell; no proximity).
       case 'market-list':
-        this.marketList(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.price);
+        this.marketList(p, cmd.itemId, cmd.rarity, cmd.plus, cmd.price, cmd.blues);
         break;
       case 'market-cancel':
         this.marketCancel(p, cmd.listingId);
@@ -2267,24 +2290,28 @@ export class Sim implements IWorld {
   // ---------- equipment ----------
   // Equip an item the player holds in the bag. Swaps out whatever occupies the
   // target slot (back to the bag) and folds the new gear's stats into combat.
-  private equip(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private equip(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     const def = ITEMS[itemId];
     if (!def || !def.slot) return; // unknown or not equippable
     if (!meetsLevelReq(def, p.level)) return; // K2: gate de nível (degrees) — recusa silenciosa. (1 linha no topo de equip(); avisar K1/Gabriel.)
     // Remember WHERE this stack sat so the displaced item can take the vacated slot (a clean
-    // positional swap), instead of being auto-organized into the first free hole.
-    const srcIdx = p.bag.findIndex((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus);
-    if (srcIdx < 0) return; // must hold that exact stack
-    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return;
+    // positional swap), instead of being auto-organized into the first free hole. Sistema 3: a identidade
+    // inclui os AZUIS — casa por bluesKey pra pegar a STACK certa (não um gêmeo sem-azul / de outros azuis).
+    const srcIdx = p.bag.findIndex((s) => s != null && s.itemId === itemId && s.rarity === rarity && s.plus === plus && bluesKey(s.blues) === bluesKey(blues));
+    if (srcIdx < 0) return; // must hold that exact stack (blues inclusos)
+    const srcBlues = p.bag[srcIdx]!.blues; // a identidade REAL do item que vai equipar
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1, blues)) return;
     const prev = p.equipment[def.slot];
-    p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY }; // a freshly equipped item is in full repair
+    // O item equipado carrega seus AZUIS (deep-copy — não aliasa a bag); durability cheia num item novo.
+    const equippedBlues = srcBlues && srcBlues.length > 0 ? srcBlues.map((b) => ({ id: b.id, level: b.level })) : undefined;
+    p.equipment[def.slot] = { itemId, rarity, plus, durability: MAX_DURABILITY, ...(equippedBlues ? { blues: equippedBlues } : {}) };
     if (prev) {
-      // Land the displaced item in the slot just vacated (qty-1 case); if the source stack still
-      // holds items (equipped one of a qty>1 stack), fall back to the first free hole.
+      // Land the displaced item (COM seus azuis) in the slot just vacated (qty-1 case); if the source stack
+      // still holds items (equipped one of a qty>1 stack), fall back to the first free hole.
       if (p.bag[srcIdx] == null) {
-        p.bag[srcIdx] = { itemId: prev.itemId, rarity: prev.rarity, plus: prev.plus, qty: 1 };
+        p.bag[srcIdx] = makeStack(prev.itemId, prev.rarity, prev.plus, 1, prev.blues);
       } else {
-        addToBag(p.bag, prev.itemId, prev.rarity, prev.plus, 1); // bag full -> acceptable loss, like loot-on-full
+        addToBag(p.bag, prev.itemId, prev.rarity, prev.plus, 1, BAG_SLOTS, prev.blues); // bag full -> acceptable loss, like loot-on-full
       }
     }
     this.recomputeStats(p);
@@ -2296,8 +2323,8 @@ export class Sim implements IWorld {
     // Drag placement: if a specific EMPTY bag slot is named, put the item exactly there; otherwise
     // (click/keyboard, or an occupied/invalid target) fall back to the first free hole in F-order.
     if (toBagSlot != null && Number.isInteger(toBagSlot) && toBagSlot >= 0 && toBagSlot < BAG_SLOTS && p.bag[toBagSlot] == null) {
-      p.bag[toBagSlot] = { itemId: eq.itemId, rarity: eq.rarity, plus: eq.plus, qty: 1 };
-    } else if (!addToBag(p.bag, eq.itemId, eq.rarity, eq.plus, 1)) {
+      p.bag[toBagSlot] = makeStack(eq.itemId, eq.rarity, eq.plus, 1, eq.blues); // volta à bolsa COM os azuis
+    } else if (!addToBag(p.bag, eq.itemId, eq.rarity, eq.plus, 1, BAG_SLOTS, eq.blues)) {
       return; // bag full: keep it equipped
     }
     p.equipment[slot] = null;
@@ -2371,9 +2398,11 @@ export class Sim implements IWorld {
   // no consume and no cooldown — when still on cooldown or when the effect would
   // do nothing (e.g. drinking at full HP), so a potion is never wasted.
   // Deterministic: no Rng, purely tick-driven.
-  private useItem(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private useItem(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     const effect = ITEMS[itemId]?.consumable;
     if (!effect) return; // not a consumable
+    // `blues` só existe pra casar a identidade cheia com os outros comandos de item: um consumível NÃO tem slot,
+    // então rollBlues nunca lhe dá azul — na prática blues chega vazio e o removeFromBag casa a stack comum ("").
     // Sistema 2 (respec): a skill-reset scroll refunds ALL SP spent above rank 1 and zeros every rank, to
     // re-allocate the build. Faithful to Silkroad's reset item (escopo 1828). Not gated by the potion
     // cooldown; refuses (no consume, no change) when nothing was invested, so it's never wasted. Pure
@@ -2381,7 +2410,7 @@ export class Sim implements IWorld {
     if (effect.resetSkills) {
       const refunded = Object.values(p.skillRanks).reduce((sp, rank) => sp + skillSpInvested(rank), 0);
       if (refunded <= 0) return; // nada investido -> não queima o pergaminho
-      if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
+      if (!removeFromBag(p.bag, itemId, rarity, plus, 1, blues)) return; // must actually hold it
       p.sp += refunded;
       p.skillRanks = {};
       this.recomputeStats(p); // passives fold by rank -> zerar os ranks derruba-os ao baseline (rank 1)
@@ -2406,7 +2435,7 @@ export class Sim implements IWorld {
         tx = p.lastFieldPos.x;
         tz = p.lastFieldPos.z;
       }
-      if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
+      if (!removeFromBag(p.bag, itemId, rarity, plus, 1, blues)) return; // must actually hold it
       if (effect.recall === 'registered') p.lastFieldPos = { x: p.x, z: p.z }; // grava o spot antes de ir pra cidade
       this.warpTo(p, tx, tz);
       return;
@@ -2416,7 +2445,7 @@ export class Sim implements IWorld {
     const healHp = effect.healHp ? Math.min(effect.healHp, p.maxHp - p.hp) : 0;
     const healMp = effect.healMp ? Math.min(effect.healMp, p.maxMp - p.mp) : 0;
     if (healHp <= 0 && healMp <= 0) return; // nothing to do — don't burn the item
-    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must actually hold it
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1, blues)) return; // must actually hold it
     p.hp += healHp;
     p.mp += healMp;
     p.potionReadyAt = this.tick + POTION_COOLDOWN_TICKS;
@@ -2922,11 +2951,11 @@ export class Sim implements IWorld {
 
   // Sell one of a bag stack to the nearest shop NPC for its (rarity-scaled) value. Requires being near a
   // shop NPC and actually holding that exact stack.
-  private sell(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private sell(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     if (!this.nearestShop(p)) return;
     const value = rarityStat(ITEMS[itemId]?.value ?? 0, rarity);
     if (value <= 0) return; // worthless here -> don't let the player give it away for nothing
-    if (!removeFromBag(p.bag, itemId, rarity, plus, 1)) return; // must hold that exact stack
+    if (!removeFromBag(p.bag, itemId, rarity, plus, 1, blues)) return; // must hold that exact stack (azuis inclusos)
     p.gold += value;
   }
 
@@ -2950,15 +2979,15 @@ export class Sim implements IWorld {
 
   // K5: bank a whole bag stack into the player's own warehouse. Requires being near the
   // warehouse NPC; the pure helper handles capacity + the non-destructive put-back on a full bank.
-  private deposit(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private deposit(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     if (!this.nearWarehouse(p)) return;
-    depositStack(p.bag, p.storage, itemId, rarity, plus);
+    depositStack(p.bag, p.storage, itemId, rarity, plus, blues);
   }
 
   // K5: take a whole stack back from the warehouse to the bag (near the warehouse).
-  private withdraw(p: Entity, itemId: string, rarity: Rarity, plus: number): void {
+  private withdraw(p: Entity, itemId: string, rarity: Rarity, plus: number, blues?: readonly BlueLine[]): void {
     if (!this.nearWarehouse(p)) return;
-    withdrawStack(p.storage, p.bag, itemId, rarity, plus);
+    withdrawStack(p.storage, p.bag, itemId, rarity, plus, blues);
   }
 
   // GDD v0.5 (Pets PET2): move a whole stack bag <-> the transport pet's portable bag. Gated on a pet

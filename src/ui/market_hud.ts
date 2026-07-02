@@ -79,7 +79,7 @@ export class MarketHud {
           hint: 'Preço por unidade (gold)',
           confirmLabel: 'Listar',
           onSubmit: (price) => {
-            if (price > 0) world.sendCommand({ t: 'market-list', itemId: st.itemId, rarity: st.rarity, plus: st.plus, price });
+            if (price > 0) world.sendCommand({ t: 'market-list', itemId: st.itemId, rarity: st.rarity, plus: st.plus, price, blues: st.blues?.map((b) => ({ id: b.id, level: b.level })) });
           },
         });
       }));

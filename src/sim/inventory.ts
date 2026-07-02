@@ -27,8 +27,9 @@ const sameStack = (
   s.itemId === itemId && s.rarity === rarity && s.plus === plus && bluesKey(s.blues) === bluesKey(blues);
 
 // Fresh ItemStack, deep-copiando os azuis (o stack é dono das próprias linhas — nunca aliasa a fonte). Só
-// grava `blues` quando há linhas: um item comum fica `{itemId,rarity,plus,qty}` idêntico ao de antes.
-const makeStack = (itemId: string, rarity: Rarity, plus: number, qty: number, blues?: readonly BlueLine[]): ItemStack => {
+// grava `blues` quando há linhas: um item comum fica `{itemId,rarity,plus,qty}` idêntico ao de antes. Exportado
+// p/ os sites que colocam item direto numa slot (equip/unequip posicional) construírem a stack com os azuis.
+export const makeStack = (itemId: string, rarity: Rarity, plus: number, qty: number, blues?: readonly BlueLine[]): ItemStack => {
   const st: ItemStack = { itemId, rarity, plus, qty };
   if (blues && blues.length > 0) st.blues = blues.map((b) => ({ id: b.id, level: b.level }));
   return st;

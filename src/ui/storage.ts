@@ -129,14 +129,14 @@ export class StoragePanel {
   private onBagClick(i: number): void {
     const st = this.lastInv?.stacks[i];
     if (st && this.world && this.lastStore?.inRange) {
-      this.world.sendCommand({ t: 'deposit', itemId: st.itemId, rarity: st.rarity, plus: st.plus });
+      this.world.sendCommand({ t: 'deposit', itemId: st.itemId, rarity: st.rarity, plus: st.plus, blues: st.blues?.map((b) => ({ id: b.id, level: b.level })) });
     }
   }
 
   private onStoreClick(i: number): void {
     const st = this.lastStore?.stacks[i];
     if (st && this.world && this.lastStore?.inRange) {
-      this.world.sendCommand({ t: 'withdraw', itemId: st.itemId, rarity: st.rarity, plus: st.plus });
+      this.world.sendCommand({ t: 'withdraw', itemId: st.itemId, rarity: st.rarity, plus: st.plus, blues: st.blues?.map((b) => ({ id: b.id, level: b.level })) });
     }
   }
 }

@@ -623,7 +623,7 @@ export class Hud {
   private onShopSellClick(i: number): void {
     const st = this.lastInv?.stacks[i];
     if (st && st.sellValue > 0 && this.world) {
-      this.world.sendCommand({ t: 'sell', itemId: st.itemId, rarity: st.rarity, plus: st.plus });
+      this.world.sendCommand({ t: 'sell', itemId: st.itemId, rarity: st.rarity, plus: st.plus, blues: st.blues?.map((b) => ({ id: b.id, level: b.level })) });
     }
   }
   // Sistema 20 (trade-in): redeem the recipe at this index. The sim re-validates proximity/inputs/room.
@@ -722,6 +722,7 @@ export class Hud {
         itemId: stack.itemId,
         rarity: stack.rarity,
         plus: stack.plus,
+        blues: stack.blues?.map((b) => ({ id: b.id, level: b.level })), // Sistema 3: identidade cheia -> equipa a stack certa
       });
     } else if (stack.consumable) {
       this.world.sendCommand({
@@ -729,6 +730,7 @@ export class Hud {
         itemId: stack.itemId,
         rarity: stack.rarity,
         plus: stack.plus,
+        blues: stack.blues?.map((b) => ({ id: b.id, level: b.level })),
       });
     }
   }
@@ -900,7 +902,7 @@ export class Hud {
       if (sq) {
         const slot = sq.dataset.slot as EquipSlot | undefined;
         if (slot && slot === info.targetSlot && cur.equipSlot === slot && cur.canEquip !== false) {
-          this.world.sendCommand({ t: 'equip', itemId: cur.itemId, rarity: cur.rarity, plus: cur.plus });
+          this.world.sendCommand({ t: 'equip', itemId: cur.itemId, rarity: cur.rarity, plus: cur.plus, blues: cur.blues?.map((b) => ({ id: b.id, level: b.level })) });
           this.announceDnd(`Equipado: ${cur.name}`);
         } else {
           this.announceDnd('Esse item não vai nesse espaço');
