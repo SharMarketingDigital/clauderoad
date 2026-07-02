@@ -10,6 +10,7 @@
 import type { Entity, ItemStack, EquippedItem } from './types';
 import type { EquipSlot, Rarity } from '../world_api';
 import { ITEMS } from './content/items';
+import { BERSERK_MAX } from './content/berserk';
 import { BAG_SLOTS, EQUIP_SLOTS, STORAGE_SLOTS, PETBAG_SLOTS } from './inventory';
 import { MAX_PLUS } from './content/enhance';
 import { SKILL_MAX_RANK } from './content/skill_ranks';
@@ -37,6 +38,7 @@ export interface PlayerSave {
   autoPotHpPct?: number; // Sistema 15 (QoL): saved auto-pot HP threshold (0..1). Absent/old saves => off.
   autoPotMpPct?: number; // Sistema 15 (QoL, Fatia 2): saved auto-pot MP threshold (0..1). Absent => off.
   lastFieldPos?: { x: number; z: number }; // Sistema 15 (reverse scroll): recorded grind spot. Absent => none.
+  berserkGauge?: number; // Sistema 2 (Berserk): saved fury gauge (0..BERSERK_MAX). Absent/old saves => 0.
 }
 
 // Read the persistent progression off a player entity into a fresh, JSON-safe object
@@ -71,6 +73,7 @@ export function toSave(e: Entity): PlayerSave {
     autoPotMpPct: e.autoPotMpPct, // Sistema 15 (QoL, Fatia 2): persist the MP auto-pot preference
     // Sistema 15 (reverse scroll): persist the recorded grind spot (deep-copied; undefined = none, omitted by JSON).
     lastFieldPos: e.lastFieldPos ? { x: e.lastFieldPos.x, z: e.lastFieldPos.z } : undefined,
+    berserkGauge: e.berserkGauge, // Sistema 2 (Berserk): persist the fury gauge (undefined = 0, omitted by JSON)
   };
 }
 
@@ -111,6 +114,11 @@ export function applySave(e: Entity, raw: unknown): void {
   // numbers; otherwise leave it unset. Back-compat: old saves with no field simply have no reverse target.
   if (isObj(raw.lastFieldPos) && isNum(raw.lastFieldPos.x) && isNum(raw.lastFieldPos.z)) {
     e.lastFieldPos = { x: raw.lastFieldPos.x, z: raw.lastFieldPos.z };
+  }
+  // Sistema 2 (Berserk): restore the fury gauge only if it's a finite number >= 0, CLAMPED to BERSERK_MAX
+  // (a corrupt/huge value can't grant an over-full bar). Back-compat: old saves with no field stay at 0.
+  if (isNum(raw.berserkGauge) && raw.berserkGauge >= 0) {
+    e.berserkGauge = Math.min(BERSERK_MAX, raw.berserkGauge);
   }
 }
 

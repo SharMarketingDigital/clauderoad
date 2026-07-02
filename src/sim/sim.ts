@@ -41,6 +41,7 @@ import {
 } from './content/skill_ranks';
 import { levelUpGold } from './content/gold';
 import { MOUNTS, type MountDef } from './content/mounts';
+import { BERSERK_MAX, BERSERK_PER_HIT, BERSERK_DECAY } from './content/berserk';
 // Combat (generation + mitigation) lives in ONE module — it's 100% Gabriel's in v0.3,
 // so the old offense/defense split has no purpose. The sim only composes the two halves:
 // final = combat.mitigate({ hit: combat.compute(...), target }). See combat.ts.
@@ -1731,9 +1732,12 @@ export class Sim implements IWorld {
   // Returns whether the hit LANDED, so a caster can gate an on-hit debuff on it (a dodged PvP cast
   // grants no stun/slow/bleed — same rule as a dodged mob bite). PvE always connects: mobs carry parry 0.
   private hitTarget(t: Entity, hit: Damage, attacker: Entity): boolean {
-    if (t.kind === 'player') return this.hitPlayer(t, hit, attacker);
-    this.hitEnemy(t, hit, attacker);
-    return true; // PvE: hitEnemy has no dodge path (mobs never parry), so a hit always connects
+    let landed: boolean;
+    if (t.kind === 'player') landed = this.hitPlayer(t, hit, attacker);
+    else { this.hitEnemy(t, hit, attacker); landed = true; } // PvE: hitEnemy has no dodge path (mobs never parry)
+    // Sistema 2 (Berserk): DAR um golpe que conectou enche a barra do atacante (só players; esquiva não conta).
+    if (landed && attacker.kind === 'player') this.gainBerserk(attacker);
+    return landed;
   }
 
   // swing every `swingTicks`. The timer is preserved while out of range, so a
@@ -3290,6 +3294,9 @@ export class Sim implements IWorld {
     if (p.deadUntil !== 0) return; // a downed spirit doesn't regen
     if (this.tick % REGEN_PERIOD_TICKS !== 0) return; // once per second
     if (this.tick < p.combatUntil) return; // still in / freshly out of combat — no regen yet
+    // Sistema 2 (Berserk): fora de combate a barra DECAI (o burst não se acumula parado), 1×/segundo como o
+    // HP/MP. ANTES do early-return de "topado" — senão um player com HP/MP cheios nunca decairia a barra.
+    if (p.berserkGauge) p.berserkGauge = Math.max(0, p.berserkGauge - BERSERK_DECAY);
     if (p.hp >= p.maxHp && p.mp >= p.maxMp) return; // already topped up
     p.hp = Math.min(p.maxHp, p.hp + Math.max(1, Math.ceil(p.maxHp * REGEN_HP_FRAC)));
     p.mp = Math.min(p.maxMp, p.mp + Math.max(1, Math.ceil(p.maxMp * REGEN_MP_FRAC)));
@@ -3498,6 +3505,7 @@ export class Sim implements IWorld {
     const incoming = combat.mitigate({ hit: working, target: p });
     const taken = Math.max(1, Math.round(incoming * this.defenseFactor(p)));
     p.hp = Math.max(0, p.hp - taken);
+    if (dodgeable) this.gainBerserk(p); // Sistema 2 (Berserk): LEVAR um golpe real (não um tick de DoT) enche a barra
     p.combatUntil = this.tick + REGEN_LINGER_TICKS; // taking damage holds off regen
     if (attacker?.kind === 'player') attacker.combatUntil = p.combatUntil; // and so does landing a PvP blow
     this.events.push({
@@ -3586,6 +3594,13 @@ export class Sim implements IWorld {
     let f = 1;
     for (const s of e.effects) if (s.kind === 'berserk' && s.magnitude > 0) f += s.magnitude;
     return f;
+  }
+  // Sistema 2 (Berserk/Hwan): a barra enche por PARTICIPAÇÃO em combate — cada golpe DADO ou LEVADO que
+  // conecta. Só players têm barra; capada em BERSERK_MAX. Chamada em hitTarget (o atacante, ao dar) e
+  // hitPlayer (o alvo, ao levar um golpe real). Determinística (sem RNG).
+  private gainBerserk(p: Entity): void {
+    if (p.kind !== 'player') return;
+    p.berserkGauge = Math.min(BERSERK_MAX, (p.berserkGauge ?? 0) + BERSERK_PER_HIT);
   }
   // Active crit chance (0..1): the active mastery's always-on baseCrit (Arco's
   // precision passive) plus any 'crit' buffs (Spear's Fúria), capped at 1.
@@ -3815,6 +3830,7 @@ export class Sim implements IWorld {
       mix(e.pkActive ? 1 : 0); // PK livre (GDD v0.5): PvP-eligibility flag — gameplay state, so two hosts must agree
       mix(Math.round((e.autoPotHpPct ?? 0) * 100)); // Sistema 15 (QoL): HP auto-pot threshold — drives auto-drinking, so two hosts must agree
       mix(Math.round((e.autoPotMpPct ?? 0) * 100)); // Sistema 15 (QoL): MP auto-pot threshold (same reason)
+      mix(e.berserkGauge ?? 0); // Sistema 2 (Berserk): a barra de fúria — estado de gameplay (ativa o burst), dois hosts têm de concordar
       mix(e.lastFieldPos ? Math.round(e.lastFieldPos.x) : 0); // Sistema 15 (reverse): recorded grind spot —
       mix(e.lastFieldPos ? Math.round(e.lastFieldPos.z) : 0); // a reverse scroll reads it, so two hosts must agree
       mix(e.mounted ? Object.keys(MOUNTS).indexOf(e.mounted) + 1 : 0); // Sistema 15 (mounts): mounted state drives speed -> position, so two hosts must agree

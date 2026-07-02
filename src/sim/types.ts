@@ -159,6 +159,11 @@ export interface Entity {
   // state (like targetId): folded into the hash, but NOT persisted (resets to off on reload). Undefined
   // = off, so no existing spawn literal changes. Non-players never set it.
   pkActive?: boolean;
+  // Sistema 2 (Berserk/Hwan): a barra de fúria (0..BERSERK_MAX). Enche por participação em combate (cada
+  // golpe DADO ou LEVADO — gainBerserk) e DECAI fora de combate (no regen). Ativar (Fatia 3) deriva o nível
+  // do quão cheia está e a zera. Opcional (undefined=0, molde autoPotHpPct): só players; foldada no hash
+  // (estado de gameplay — dois hosts têm de concordar) E persistida (sobrevive ao reload). Não-players 0.
+  berserkGauge?: number;
   // Sistema 15 (QoL — auto-potion): the player's auto-pot HP threshold as a FRACTION of maxHp (0..1). When
   // > 0 and the bot is OFF, the sim drinks a held Health Potion each tick that hp/maxHp falls below it,
   // sharing the same potion cooldown. Undefined = off, so no existing spawn literal changes. Folded into

@@ -9,6 +9,7 @@ import type { AbilityDef } from '../src/sim/content/abilities';
 import type { Entity } from '../src/sim/types';
 import { Sim } from '../src/sim/sim';
 import { Rng } from '../src/sim/rng';
+import { BERSERK_MAX } from '../src/sim/content/berserk';
 
 // compute() só lê attacker.str / weaponDamage / baseInt — um stub minúsculo basta (como o target() do armor.test).
 const attacker = (str: number, weaponDamage: number): Entity =>
@@ -55,6 +56,20 @@ const nearestWolf = (sim: Sim): Entity | undefined => {
   }
   return best;
 };
+// Combate contínuo e confiável (sem depender de pathing): cola o player NO mob (contato → o auto-attack
+// dispara sem checar facing) com o mob de HP inflado e revidando — ambos os eixos da barra enchem rápido.
+const pinAndFight = (sim: Sim, mobId: number, ticks: number): void => {
+  for (let i = 0; i < ticks; i++) {
+    const w = ents(sim).find((e) => e.id === mobId);
+    if (w) {
+      w.maxHp = 100000; w.hp = 100000;
+      const p = player(sim);
+      p.x = w.x + 0.3; p.z = w.z; // contato: dentro do alcance de melee, dispara golpes todo swing
+      sim.sendCommand({ t: 'set-target', id: mobId });
+    }
+    sim.step();
+  }
+};
 
 describe('Berserk — damageMult em combate real (fiação attackFactor→compute)', () => {
   it('um buff berserk faz o player causar MAIS dano ao alvo (o eixo chega ao golpe)', () => {
@@ -89,5 +104,82 @@ describe('Berserk — damageMult em combate real (fiação attackFactor→comput
     const bersered = dealtTo(true);
     expect(baseline).toBeGreaterThan(0); // o player de fato bateu no mob
     expect(bersered).toBeGreaterThan(baseline); // berserk (×2) causou mais — o damageMult chegou ao compute
+  });
+});
+
+describe('Berserk — a barra (enche em combate, decai fora) — Fatia 2', () => {
+  it('DAR um golpe enche a barra (isolado: o mob não revida)', () => {
+    const sim = new Sim(3);
+    const mobId = nearestWolf(sim)!.id;
+    expect(player(sim).berserkGauge ?? 0).toBe(0);
+    for (let i = 0; i < 300; i++) {
+      const p = player(sim);
+      const w = ents(sim).find((e) => e.id === mobId);
+      if (w) {
+        w.maxHp = 100000; w.hp = 100000; w.swingTicks = 0; // HP inflado + NÃO revida (swingTicks 0)
+        sim.sendCommand({ t: 'set-target', id: mobId });
+        sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z });
+      }
+      sim.step();
+    }
+    expect(player(sim).berserkGauge ?? 0).toBeGreaterThan(0); // só DEU golpes → a barra encheu
+  });
+
+  it('LEVAR um golpe enche a barra (isolado: o player não revida)', () => {
+    const sim = new Sim(3);
+    for (let i = 0; i < 400; i++) {
+      const p = player(sim);
+      const w = nearestWolf(sim);
+      if (w) sim.sendCommand({ t: 'move', dx: w.x - p.x, dz: w.z - p.z }); // sem set-target → não ataca, só tanka
+      sim.step();
+    }
+    expect(player(sim).berserkGauge ?? 0).toBeGreaterThan(0); // só LEVOU mordidas → a barra encheu
+  });
+
+  it('a barra CAPA em BERSERK_MAX (combate sustentado não passa do teto)', () => {
+    const sim = new Sim(3);
+    const mobId = nearestWolf(sim)!.id;
+    pinAndFight(sim, mobId, 800); // combate contínuo prolongado
+    expect(player(sim).berserkGauge).toBe(BERSERK_MAX); // enche até o teto e trava lá
+  });
+
+  it('fora de combate a barra DECAI até 0', () => {
+    const sim = new Sim(3);
+    player(sim).berserkGauge = BERSERK_MAX; // barra cheia
+    for (let i = 0; i < 200; i++) sim.step(); // ~10 s parado em segurança (town) → fora de combate → decai
+    expect(player(sim).berserkGauge).toBe(0); // esvaziou (mutação "decay não faz nada" ficaria em BERSERK_MAX)
+  });
+
+  it('um tick de DoT NÃO enche a barra (só golpes reais, não passivos)', () => {
+    const sim = new Sim(3);
+    player(sim).effects.push({ kind: 'dot', expiresAt: 999999, magnitude: 5, period: 1, nextAt: sim.tick + 1, source: 0 });
+    for (let i = 0; i < 40; i++) { player(sim).hp = player(sim).maxHp; sim.step(); } // refill: o DoT ticka mas não mata
+    expect(player(sim).berserkGauge ?? 0).toBe(0); // DoT (dodgeable=false) não conta como golpe levado
+  });
+
+  it('a barra é DETERMINÍSTICA (mesma seed + mesmo combate → mesma barra) e persiste no save', () => {
+    const gaugeAfter = (): number => {
+      const sim = new Sim(3);
+      const mobId = nearestWolf(sim)!.id;
+      pinAndFight(sim, mobId, 120);
+      return player(sim).berserkGauge ?? 0;
+    };
+    const g = gaugeAfter();
+    expect(g).toBeGreaterThan(0);
+    expect(gaugeAfter()).toBe(g); // determinístico
+
+    const a = new Sim(3);
+    player(a).berserkGauge = 48;
+    const save = a.serializePlayer(player(a).id)!;
+    const b = new Sim(4);
+    b.restorePlayer(player(b).id, JSON.parse(JSON.stringify(save)));
+    expect(player(b).berserkGauge).toBe(48); // roundtrip de save preserva a barra
+  });
+
+  it('mobs não têm barra de berserk (só players enchem)', () => {
+    const sim = new Sim(8);
+    for (let i = 0; i < 30; i++) sim.step();
+    const enemy = ents(sim).find((e) => e.kind === 'enemy')!;
+    expect(enemy.berserkGauge ?? 0).toBe(0);
   });
 });

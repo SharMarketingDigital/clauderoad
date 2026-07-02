@@ -103,9 +103,10 @@ function combatRun(seed: number, equipIds: string[], ticks: number): string {
 
 describe('Block — determinismo gated (mundo sem escudo byte-idêntico ao pré-block)', () => {
   it('ÂNCORA: um mundo SEM escudo hasheia o valor pré-block (o gate não saca rng) — pega a remoção do gate', () => {
-    // 76afeb09 = hash do mesmo cenário BARE capturado antes de existir código de block. Se este assert
-    // falhar, ou o gate `blockRatio>0` sacou rng num mundo pelado, ou outra mudança perturbou o stream bare.
-    expect(combatRun(12345, [], 800)).toBe('76afeb09');
+    // Âncora do stream do mundo BARE (re-baselineada quando o berserkGauge entrou no hash — Sistema 2). Se
+    // este assert falhar, ou o gate `blockRatio>0` sacou rng num mundo pelado, ou outra mudança perturbou o
+    // stream bare. (Valor original pré-block: 76afeb09; muda a cada campo novo hasheado — atualizar então.)
+    expect(combatRun(12345, [], 800)).toBe('ffebc3d5');
   });
 
   it('um mundo COM escudo é reproduzível (mesma seed → mesmo hash) e DIFERE do pelado (block vivo)', () => {
@@ -240,6 +241,6 @@ describe('Block — cobertura adversarial (block ≠ esquiva; piso; ordem)', () 
     };
     const h = run(20);
     expect(run(20)).toBe(h); // reproduzível
-    expect(h).toBe('af79bacd'); // ÂNCORA da ordem: reordenar block-antes-de-esquiva muda o stream → hash difere
+    expect(h).toBe('b97e1292'); // ÂNCORA da ordem: reordenar block-antes-de-esquiva muda o stream → hash difere (re-baselineada no Sistema 2)
   });
 });
