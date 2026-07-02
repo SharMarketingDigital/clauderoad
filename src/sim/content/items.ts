@@ -73,9 +73,9 @@ export const ITEMS: Record<string, ItemDef> = {
   leather_pants: { id: 'leather_pants', name: 'Calças de Couro', slot: 'legs', stats: { maxHp: 14, phyDef: 2, magDef: 1 }, setId: 'leather', value: 7 },
   leather_boots: { id: 'leather_boots', name: 'Botas de Couro', slot: 'feet', stats: { maxHp: 8, phyDef: 1, magDef: 1 }, setId: 'leather', value: 5 },
   wooden_shield: { id: 'wooden_shield', name: 'Escudo de Madeira', slot: 'shield', blockRatio: 0.10, stats: { maxHp: 18, phyDef: 2, magDef: 2 }, value: 10 },
-  copper_necklace: { id: 'copper_necklace', name: 'Colar de Cobre', slot: 'necklace', stats: { maxMp: 12 }, value: 12 },
-  copper_earring: { id: 'copper_earring', name: 'Brinco de Cobre', slot: 'earring', stats: { str: 1 }, value: 12 },
-  copper_ring: { id: 'copper_ring', name: 'Anel de Cobre', slot: 'ring', stats: { str: 1 }, value: 12 },
+  copper_necklace: { id: 'copper_necklace', name: 'Colar de Cobre', slot: 'necklace', stats: { maxMp: 12 }, setId: 'copper', value: 12 },
+  copper_earring: { id: 'copper_earring', name: 'Brinco de Cobre', slot: 'earring', stats: { str: 1 }, setId: 'copper', value: 12 },
+  copper_ring: { id: 'copper_ring', name: 'Anel de Cobre', slot: 'ring', stats: { str: 1 }, setId: 'copper', value: 12 },
   // the starter weapon upgrade: a big chunk of weapon damage over bare fists
   old_sword: { id: 'old_sword', name: 'Espada Velha', slot: 'weapon', mastery: 'sword', stats: { weaponDamage: 10 }, value: 30 },
   // a reach weapon: switches the character to the Lança mastery (area + crit kit)
@@ -126,14 +126,14 @@ export const ITEMS: Record<string, ItemDef> = {
   iron_shield:     { id: 'iron_shield',     name: 'Escudo de Ferro (2º Grau)',    slot: 'shield',   degree: 2, reqLevel: 4, blockRatio: 0.15, stats: { maxHp: 25, phyDef: 3, magDef: 3 }, value: 20 },
   tower_shield:    { id: 'tower_shield',    name: 'Escudo Torre (3º Grau)',       slot: 'shield',   degree: 3, reqLevel: 8, blockRatio: 0.20, stats: { maxHp: 32, phyDef: 4, magDef: 4 }, value: 35 },
   // necklace (base copper_necklace: maxMp 12)
-  silver_necklace: { id: 'silver_necklace', name: 'Colar de Prata (2º Grau)',     slot: 'necklace', degree: 2, reqLevel: 4, stats: { maxMp: 17 }, value: 24 },
-  gold_necklace:   { id: 'gold_necklace',   name: 'Colar de Ouro (3º Grau)',      slot: 'necklace', degree: 3, reqLevel: 8, stats: { maxMp: 22 }, value: 42 },
+  silver_necklace: { id: 'silver_necklace', name: 'Colar de Prata (2º Grau)',     slot: 'necklace', degree: 2, reqLevel: 4, stats: { maxMp: 17 }, setId: 'silver', value: 24 },
+  gold_necklace:   { id: 'gold_necklace',   name: 'Colar de Ouro (3º Grau)',      slot: 'necklace', degree: 3, reqLevel: 8, stats: { maxMp: 22 }, setId: 'gold', value: 42 },
   // earring (base copper_earring: str 1) — str 1→2→3 (ver nota acima)
-  silver_earring:  { id: 'silver_earring',  name: 'Brinco de Prata (2º Grau)',    slot: 'earring',  degree: 2, reqLevel: 4, stats: { str: 2 }, value: 24 },
-  gold_earring:    { id: 'gold_earring',    name: 'Brinco de Ouro (3º Grau)',     slot: 'earring',  degree: 3, reqLevel: 8, stats: { str: 3 }, value: 42 },
+  silver_earring:  { id: 'silver_earring',  name: 'Brinco de Prata (2º Grau)',    slot: 'earring',  degree: 2, reqLevel: 4, stats: { str: 2 }, setId: 'silver', value: 24 },
+  gold_earring:    { id: 'gold_earring',    name: 'Brinco de Ouro (3º Grau)',     slot: 'earring',  degree: 3, reqLevel: 8, stats: { str: 3 }, setId: 'gold', value: 42 },
   // ring (base copper_ring: str 1) — str 1→2→3
-  silver_ring:     { id: 'silver_ring',     name: 'Anel de Prata (2º Grau)',      slot: 'ring',     degree: 2, reqLevel: 4, stats: { str: 2 }, value: 24 },
-  gold_ring:       { id: 'gold_ring',       name: 'Anel de Ouro (3º Grau)',       slot: 'ring',     degree: 3, reqLevel: 8, stats: { str: 3 }, value: 42 },
+  silver_ring:     { id: 'silver_ring',     name: 'Anel de Prata (2º Grau)',      slot: 'ring',     degree: 2, reqLevel: 4, stats: { str: 2 }, setId: 'silver', value: 24 },
+  gold_ring:       { id: 'gold_ring',       name: 'Anel de Ouro (3º Grau)',       slot: 'ring',     degree: 3, reqLevel: 8, stats: { str: 3 }, setId: 'gold', value: 42 },
   // alchemy materials (no rarity; consumed to attempt a "+N" upgrade)
   elixir_weapon: { id: 'elixir_weapon', name: 'Elixir de Arma', value: 15 },
   elixir_armor: { id: 'elixir_armor', name: 'Elixir de Armadura', value: 15 },

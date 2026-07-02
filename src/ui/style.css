@@ -446,6 +446,14 @@ html, body {
   margin-bottom: 10px;
   text-align: center;
 }
+/* Sistema 4 (Sets): a linha de conjuntos ATIVOS (some quando vazia). Verde-azulado p/ destacar do stat base. */
+.set-line {
+  font-size: 10px;
+  color: #7fe3b0;
+  margin: -6px 0 10px;
+  text-align: center;
+  min-height: 12px;
+}
 
 /* Alchemy ("+N") — STANDALONE panel (tecla L), mirror of the inventory: vertically centered and
    anchored to the RIGHT edge (the inventory sits on the left). No collapse; always its full content. */

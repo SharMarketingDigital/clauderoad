@@ -64,6 +64,7 @@ export class Hud {
   private hoverCell: HTMLElement | null = null; // bag cell currently under the drag (live placement cue)
   private dragInfo: DragInfo | null = null; // the active drag's info (kind/target), for the hover cue
   private bagStats: HTMLDivElement;
+  private setLine: HTMLDivElement; // Sistema 4 (Sets): readout dos conjuntos ativos ("4/5 — Couro · +20 HP")
   // attribute spending (inside the bag window)
   private attrPointsEl: HTMLSpanElement;
   private attrStrBtn: HTMLButtonElement;
@@ -172,6 +173,7 @@ export class Hud {
               <div class="equip-col equip-col-right"></div>
             </div>
             <div class="bag-stats"></div>
+            <div class="set-line"></div>
             <div class="attrs">
               <span class="attr-points"></span>
               <button class="attr-btn attr-str">+ Força</button>
@@ -234,6 +236,7 @@ export class Hud {
     // Require ~6px of movement before a drag starts, so a plain click still equips/uses.
     (interact as unknown as { pointerMoveTolerance(n: number): void }).pointerMoveTolerance(6);
     this.bagStats = this.root.querySelector('.bag-stats') as HTMLDivElement;
+    this.setLine = this.root.querySelector('.set-line') as HTMLDivElement;
     this.attrPointsEl = this.root.querySelector('.attr-points') as HTMLSpanElement;
     this.attrStrBtn = this.root.querySelector('.attr-str') as HTMLButtonElement;
     this.attrIntBtn = this.root.querySelector('.attr-int') as HTMLButtonElement;
@@ -662,6 +665,15 @@ export class Hud {
     // Tiny "ficha": the effective stats Strength/Intelligence + gear drive.
     this.bagStats.textContent =
       `Força ${p.str} · Int ${p.int} · Dano ${p.weaponDamage} · MP ${Math.round(p.mp)}/${p.maxMp}`;
+
+    // Sistema 4 (Sets): os conjuntos ATIVOS (>=2 peças) + o bônus vigente. Sem set ativo -> linha vazia.
+    this.setLine.textContent = inv.activeSets.map((s) => {
+      const parts: string[] = [];
+      if (s.bonus.maxHp) parts.push(`+${s.bonus.maxHp} HP`);
+      if (s.bonus.phyDef) parts.push(`+${s.bonus.phyDef} DefF`);
+      if (s.bonus.magDef) parts.push(`+${s.bonus.magDef} DefM`);
+      return `${s.name} ${s.pieces}/${s.total} · ${parts.join(' ')}`;
+    }).join('   ');
 
     // Attribute spending: show available points and gate the "+" buttons on them.
     this.attrPointsEl.textContent = `Pontos: ${p.attrPoints}`;

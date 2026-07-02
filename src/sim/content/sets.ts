@@ -7,6 +7,8 @@
 // recomputeStats conta os slots equipados por setId e aplica o MAIOR limiar atingido (2/3/4), somando o
 // bônus FLAT nos acumuladores de HP/def. Derivado do equipamento (já hasheado) e sem Rng -> determinístico.
 
+import { ITEMS } from './items';
+
 // O bônus de set — SÓ os eixos defensivos do MVP. NÃO escala por raridade/+N (é um bloco fixo do conjunto).
 export interface SetStats {
   maxHp?: number;
@@ -55,6 +57,30 @@ export const SETS: Record<string, SetDef> = {
       { pieces: 4, stats: { maxHp: 45, phyDef: 6, magDef: 6 } },
     ],
   },
+  // Conjuntos de ACESSÓRIO (colar/brinco/anel) — 3 slots, então bônus em 2/3 peças (fiel ao SR_ACCESSORY:
+  // menos slots -> menos degraus). Bônus DEFENSIVO (maxHp + magDef) e menor que o de armadura (o acessório é
+  // secundário) — o MVP mantém tudo defensivo (nada de str/crit de set, que seria ofensivo). Escala por grau.
+  copper: {
+    id: 'copper', name: 'Cobre', // g1 (copper_necklace/copper_earring/copper_ring)
+    bonuses: [
+      { pieces: 2, stats: { maxHp: 15 } },
+      { pieces: 3, stats: { maxHp: 15, magDef: 2 } },
+    ],
+  },
+  silver: {
+    id: 'silver', name: 'Prata', // g2 (silver_necklace/silver_earring/silver_ring)
+    bonuses: [
+      { pieces: 2, stats: { maxHp: 22 } },
+      { pieces: 3, stats: { maxHp: 22, magDef: 3 } },
+    ],
+  },
+  gold: {
+    id: 'gold', name: 'Ouro', // g3 (gold_necklace/gold_earring/gold_ring)
+    bonuses: [
+      { pieces: 2, stats: { maxHp: 33 } },
+      { pieces: 3, stats: { maxHp: 33, magDef: 4 } },
+    ],
+  },
 };
 
 // O bônus aplicável a `count` peças equipadas de `setId`: o MAIOR degrau cujo limiar `pieces <= count`, ou
@@ -69,3 +95,14 @@ export function setBonusFor(setId: string, count: number): SetStats | null {
   }
   return best;
 }
+
+// O total de peças de cada conjunto (o denominador do "N/total" na HUD), derivado do catálogo ITEMS — a fonte
+// única da associação peça->set. Computado uma vez no load (ITEMS já está pronto: items.ts não importa este
+// módulo, sem ciclo). Um teste confere que bate com os SETS (5 armadura / 3 acessório).
+export const SET_SIZE: Record<string, number> = (() => {
+  const sizes: Record<string, number> = {};
+  for (const def of Object.values(ITEMS)) {
+    if (def.setId) sizes[def.setId] = (sizes[def.setId] ?? 0) + 1;
+  }
+  return sizes;
+})();

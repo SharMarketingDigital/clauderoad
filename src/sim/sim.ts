@@ -17,7 +17,7 @@ import type { Entity, ItemStack, EquippedItem } from './types';
 import type {
   IWorld, EntityView, Command, SimEvent, AbilityView, InventoryView, ItemStackView, ShopView, StorageView, PetBagView, TeleporterView, TeleporterCityView, EquipSlot, Rarity, StallView, StallEntryView, MarketView, MarketListingView,
   StatusKind, DamageType, PartyView, PartyInviteView, DuelView, DuelInviteView, PartyExpMode, PartyLootMode,
-  RecipeView,
+  RecipeView, ActiveSetView,
 } from '../world_api';
 import { CLASSES, PLAYER_CLASS_BY_ID } from './content/classes';
 import {
@@ -29,7 +29,7 @@ import { cityNear, cityById, cityIndex, teleporterEntityId, TELEPORT_COST, RETUR
 import { LOOT_DESPAWN_SECS, DEATH_DROP_CHANCE, LOOT_PICKUP_RANGE, PET_GRAB_RADIUS } from './loot';
 import { MASTERIES, DEFAULT_MASTERY, abilityUnlockLevel, type AbilityDef, type MasteryDef } from './content/abilities';
 import { ITEMS, POTION_COOLDOWN_SECS } from './content/items';
-import { setBonusFor } from './content/sets';
+import { setBonusFor, SETS, SET_SIZE } from './content/sets';
 import { meetsLevelReq, equipLevelReq } from './content/degrees';
 import { RARITIES, type RarityDef } from './content/rarity';
 import { BOSS_DEFS, BOSS_DEF_BY_ID, type BossDef } from './content/bosses';
@@ -835,7 +835,21 @@ export class Sim implements IWorld {
         }) : undefined,
       };
     });
-    return { capacity: BAG_SLOTS, stacks, slots, equipment };
+    // Sistema 4 (Set items): os conjuntos ATIVOS (>=2 peças equipadas) + o bônus vigente, pra a HUD. Reconta os
+    // slots por setId (o mesmo que o recomputeStats faz p/ o stat) e expõe pieces/total/bonus. Sem player -> [].
+    const setCounts = new Map<string, number>();
+    if (p) for (const slot of EQUIP_SLOTS) {
+      const eq = p.equipment[slot];
+      const sid = eq ? ITEMS[eq.itemId]?.setId : undefined;
+      if (sid) setCounts.set(sid, (setCounts.get(sid) ?? 0) + 1);
+    }
+    const activeSets: ActiveSetView[] = [];
+    for (const [sid, pieces] of setCounts) {
+      const bonus = setBonusFor(sid, pieces); // null se < o menor limiar (2)
+      if (!bonus) continue;
+      activeSets.push({ id: sid, name: SETS[sid]?.name ?? sid, pieces, total: SET_SIZE[sid] ?? pieces, bonus: { ...bonus } });
+    }
+    return { capacity: BAG_SLOTS, stacks, slots, equipment, activeSets };
   }
 
   shop(): ShopView {

@@ -3,7 +3,8 @@
 // sem dar bônus a set incompleto/misturado, e byte-idêntico p/ quem não usa set. MVP: só HP/def FLAT.
 import { describe, it, expect } from 'vitest';
 import { Sim } from '../src/sim/sim';
-import { setBonusFor, SETS } from '../src/sim/content/sets';
+import { ServerWorld } from '../server/world';
+import { setBonusFor, SETS, SET_SIZE } from '../src/sim/content/sets';
 import { ITEMS } from '../src/sim/content/items';
 import type { Entity, EquippedItem } from '../src/sim/types';
 import type { Rarity } from '../src/world_api';
@@ -106,5 +107,66 @@ describe('Sets — FLAT (o bônus de set não escala por raridade/+N) + determin
       return sim.hash();
     };
     expect(run()).toBe(run());
+  });
+});
+
+// Fatia 2: sets de ACESSÓRIO (3 slots -> 2/3 peças) + o readout activeSets (snapshot/HUD) + paridade online.
+describe('Sets Fatia 2 — acessórios (cobre/prata/ouro, 2/3) + SET_SIZE', () => {
+  it('2 acessórios de cobre: +15 maxHp (set 2pc); 3: +15 maxHp +2 magDef', () => {
+    // acessórios não dão HP/def per-peça (colar=MP, brinco/anel=str), então o delta de HP/def é SÓ o set
+    expect(gearDelta(['copper_necklace', 'copper_earring'])).toEqual({ maxHp: 15, phyDef: 0, magDef: 0 });
+    expect(gearDelta(['copper_necklace', 'copper_earring', 'copper_ring'])).toEqual({ maxHp: 15, phyDef: 0, magDef: 2 });
+  });
+  it('o set de OURO (g3) escala maior: 3pc = +33 maxHp, +4 magDef', () => {
+    expect(gearDelta(['gold_necklace', 'gold_earring', 'gold_ring'])).toEqual({ maxHp: 33, phyDef: 0, magDef: 4 });
+  });
+  it('SET_SIZE bate com o catálogo: 5 por armadura, 3 por acessório', () => {
+    expect(SET_SIZE.leather).toBe(5); expect(SET_SIZE.chain).toBe(5); expect(SET_SIZE.plate).toBe(5);
+    expect(SET_SIZE.copper).toBe(3); expect(SET_SIZE.silver).toBe(3); expect(SET_SIZE.gold).toBe(3);
+    // e todo setId do catálogo SETS tem tamanho (nenhum set sem peças / typo)
+    for (const id of Object.keys(SETS)) expect(SET_SIZE[id]).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('Sets Fatia 2 — activeSets no snapshot (HUD) + paridade online', () => {
+  const equipOn = (p: Entity, ids: string[], rarity: Rarity = 'normal', plus = 0): void => {
+    for (const id of ids) p.equipment[ITEMS[id].slot!] = { itemId: id, rarity, plus, durability: MAX_DURABILITY } as EquippedItem;
+  };
+  it('activeSets lista só conjuntos com >=2 peças, com pieces/total/bonus corretos', () => {
+    const sim = new Sim(1);
+    equipOn(player(sim), ['leather_cap', 'wolf_leather', 'leather_gloves', 'leather_pants', 'leather_boots']); // 5 couro
+    const sets = sim.inventory().activeSets;
+    expect(sets.length).toBe(1);
+    expect(sets[0]).toEqual({ id: 'leather', name: 'Couro', pieces: 5, total: 5, bonus: { maxHp: 20, phyDef: 3, magDef: 3 } });
+  });
+  it('1 peça só NÃO aparece em activeSets (limiar mínimo é 2)', () => {
+    const sim = new Sim(1);
+    equipOn(player(sim), ['leather_cap']);
+    expect(sim.inventory().activeSets).toEqual([]);
+  });
+  it('dois sets ativos ao mesmo tempo (couro 2 + cobre 2) aparecem ambos', () => {
+    const sim = new Sim(1);
+    equipOn(player(sim), ['leather_cap', 'wolf_leather', 'copper_necklace', 'copper_earring']);
+    const ids = sim.inventory().activeSets.map((s) => s.id).sort();
+    expect(ids).toEqual(['copper', 'leather']);
+    const copper = sim.inventory().activeSets.find((s) => s.id === 'copper')!;
+    expect(copper).toEqual({ id: 'copper', name: 'Cobre', pieces: 2, total: 3, bonus: { maxHp: 15 } });
+  });
+  it('paridade online: o server carrega activeSets no self-snapshot', () => {
+    const w = new ServerWorld(7);
+    const a = w.addPlayer('A');
+    w.restorePlayer(a, {
+      bag: [],
+      equipment: {
+        helmet: { itemId: 'plate_helm', rarity: 'normal', plus: 0, durability: MAX_DURABILITY },
+        chest: { itemId: 'plate_armor', rarity: 'normal', plus: 0, durability: MAX_DURABILITY },
+        hands: { itemId: 'plate_gauntlets', rarity: 'normal', plus: 0, durability: MAX_DURABILITY },
+        legs: { itemId: 'plate_legs', rarity: 'normal', plus: 0, durability: MAX_DURABILITY },
+      },
+    });
+    const plate = w.selfState(a).inventory.activeSets.find((s) => s.id === 'plate');
+    expect(plate).toBeTruthy();
+    expect(plate!.pieces).toBe(4);
+    expect(plate!.bonus).toEqual({ maxHp: 45, phyDef: 6, magDef: 6 }); // 4pc
   });
 });

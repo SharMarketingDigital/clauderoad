@@ -208,6 +208,19 @@ export interface InventoryView {
   // is exactly what sits in grid cell `i`, so the inventory panel renders/drag-drops by position.
   readonly slots: ReadonlyArray<ItemStackView | null>;
   readonly equipment: ReadonlyArray<EquipView>;
+  // Sistema 4 (Set items): os conjuntos ATIVOS (>=2 peças equipadas do mesmo set) + o bônus vigente, pra a
+  // HUD mostrar "4/5 — Couro · +20 HP". Vazio quando nenhum set está ativo (byte-idêntico à view pré-set).
+  readonly activeSets: ReadonlyArray<ActiveSetView>;
+}
+
+// Um conjunto ATIVO no snapshot: quantas peças equipadas (`pieces`) de quantas (`total`), + o bônus vigente
+// (o maior limiar atingido). Só eixos defensivos (MVP). A HUD renderiza uma linha por entrada.
+export interface ActiveSetView {
+  readonly id: string;
+  readonly name: string;
+  readonly pieces: number; // peças equipadas deste set (>=2)
+  readonly total: number; // total de peças do conjunto (denominador: 5 armadura / 3 acessório)
+  readonly bonus: { readonly maxHp?: number; readonly phyDef?: number; readonly magDef?: number };
 }
 
 // Sistema 20 (trade-in): one recycling recipe as the HUD sees it — N input items -> M output items, with
